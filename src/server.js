@@ -1,0 +1,740 @@
+import crypto from "node:crypto"
+import fs from "node:fs/promises"
+import path from "node:path"
+import { spawn } from "node:child_process"
+import net from "node:net"
+import os from "node:os"
+import { pathToFileURL, fileURLToPath } from "node:url"
+import express from "express"
+import YAML from "yaml"
+import cfg from "../../../lib/config/config.js"
+
+const ROOT = process.cwd()
+const PLUGINS = path.join(ROOT, "plugins")
+const PANEL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const PANEL_CONFIG = path.join(PANEL_DIR, "config.yaml")
+const DATA_DIR = path.join(ROOT, "data", "elia-admin-panel")
+const PASSWORD_FILE = path.join(DATA_DIR, "access-password.txt")
+const STATIC_DIR = path.join(PANEL_DIR, "out")
+const MAX_TEXT_BYTES = 1_500_000
+const ALLOWED_TEXT_EXTENSIONS = new Set([
+  ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
+  ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
+  ".sh", ".bat", ".ps1", ".properties", ".env", ".gitignore", ".editorconfig",
+])
+const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
+
+const sessions = new Map()
+const loginAttempts = new Map()
+const codeRequestAttempts = new Map()
+const codeCheckAttempts = new Map()
+const quickLoginAttempts = new Map()
+const quickLogins = new Map()
+const supportCache = new Map()
+const PLUGIN_SUPPORT_ENTRIES = [
+  { fileName: "elia.support.js", factoryName: "supportPanel" },
+  { fileName: "guoba.support.js", factoryName: "supportGuoba" },
+]
+let expressServer
+let generatedPassword = ""
+let loginCode
+let activeSettings
+let warnedInvalidPublicUrl = false
+
+const safeLogger = (level, message) => {
+  try {
+    if (global.logger?.[level]) global.logger[level](message)
+    else console.log(message)
+  } catch {
+    console.log(message)
+  }
+}
+
+function isInside(parent, target) {
+  const relative = path.relative(parent, target)
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+}
+
+function resolveWorkspacePath(relativePath = ".") {
+  if (typeof relativePath !== "string" || relativePath.includes("\0")) {
+    throw Object.assign(new Error("文件路径无效"), { status: 400 })
+  }
+  const absolute = path.resolve(ROOT, relativePath || ".")
+  if (!isInside(ROOT, absolute)) throw Object.assign(new Error("不能访问工作区以外的路径"), { status: 403 })
+  const segments = path.relative(ROOT, absolute).split(path.sep).filter(Boolean)
+  if (segments.some(segment => BLOCKED_SEGMENTS.has(segment.toLowerCase()))) {
+    throw Object.assign(new Error("该目录由面板保护，不能通过文件管理器访问"), { status: 403 })
+  }
+  return absolute
+}
+
+async function rejectSymlinkPath(absolute) {
+  const relative = path.relative(ROOT, absolute)
+  let current = ROOT
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment)
+    try {
+      const stat = await fs.lstat(current)
+      if (stat.isSymbolicLink()) throw Object.assign(new Error("面板不跟随符号链接"), { status: 403 })
+    } catch (error) {
+      if (error.code === "ENOENT") break
+      throw error
+    }
+  }
+}
+
+async function readPanelSettings() {
+  try {
+    const parsed = YAML.parse(await fs.readFile(PANEL_CONFIG, "utf8")) || {}
+    const port = Number(parsed.port || 50882)
+    return {
+      host: String(parsed.host || "127.0.0.1").trim(),
+      port: Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 50882,
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") safeLogger("error", `[AdminPanel] 读取面板配置失败：${error.message}`)
+    return { host: "127.0.0.1", port: 50882 }
+  }
+}
+
+async function getPassword() {
+  if (process.env.YUNZAI_PANEL_PASSWORD?.length) return process.env.YUNZAI_PANEL_PASSWORD
+  try {
+    return (await fs.readFile(PASSWORD_FILE, "utf8")).trim()
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error
+  }
+  await fs.mkdir(DATA_DIR, { recursive: true })
+  generatedPassword = crypto.randomBytes(24).toString("base64url")
+  await fs.writeFile(PASSWORD_FILE, `${generatedPassword}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+  safeLogger("mark", `[AdminPanel] 已生成首次登录密码并保存至 ${path.relative(ROOT, PASSWORD_FILE)}`)
+  return generatedPassword
+}
+
+function hashSecret(value) {
+  return crypto.createHash("sha256").update(String(value)).digest()
+}
+
+function parseCookies(header = "") {
+  const cookies = new Map()
+  for (const part of header.split(";")) {
+    const index = part.indexOf("=")
+    if (index > 0) cookies.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()))
+  }
+  return cookies
+}
+
+function checkOrigin(req, res, next) {
+  const origin = req.get("origin")
+  if (origin) {
+    try {
+      if (new URL(origin).host !== req.get("host")) return res.status(403).json({ error: "跨站请求已拒绝" })
+    } catch {
+      return res.status(403).json({ error: "来源地址无效" })
+    }
+  }
+  next()
+}
+
+function requireAuth(req, res, next) {
+  const token = parseCookies(req.headers.cookie).get("elia_panel_session")
+  const expiresAt = token && sessions.get(token)
+  if (!expiresAt || expiresAt < Date.now()) {
+    if (token) sessions.delete(token)
+    return res.status(401).json({ error: "登录已失效，请重新登录" })
+  }
+  sessions.set(token, Date.now() + 12 * 60 * 60 * 1000)
+  next()
+}
+
+function issueSession(req, res) {
+  const token = crypto.randomBytes(32).toString("base64url")
+  sessions.set(token, Date.now() + 12 * 60 * 60 * 1000)
+  res.setHeader("Set-Cookie", `elia_panel_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${req.secure ? "; Secure" : ""}`)
+}
+
+function allowAttempt(bucket, key, limit, windowMs) {
+  const now = Date.now()
+  const attempt = bucket.get(key)
+  if (attempt && attempt.resetAt > now && attempt.count >= limit) return false
+  const next = !attempt || attempt.resetAt <= now ? { count: 1, resetAt: now + windowMs } : { ...attempt, count: attempt.count + 1 }
+  bucket.set(key, next)
+  return true
+}
+
+function panelAddresses() {
+  const envAddresses = String(process.env.YUNZAI_PANEL_PUBLIC_URL || "").split(",").map(value => {
+    try {
+      const url = new URL(value.trim())
+      if (!["http:", "https:"].includes(url.protocol) || url.pathname !== "/" || url.search || url.hash) return ""
+      return url.origin
+    } catch {
+      return ""
+    }
+  }).filter(Boolean)
+  if (envAddresses.length) return [...new Set(envAddresses)]
+  if (process.env.YUNZAI_PANEL_PUBLIC_URL && !warnedInvalidPublicUrl) {
+    warnedInvalidPublicUrl = true
+    safeLogger("warn", "[AdminPanel] YUNZAI_PANEL_PUBLIC_URL 仅接受 http(s) 站点根地址，子路径无效；将使用监听地址生成快捷登录链接")
+  }
+  const { host, port } = activeSettings || { host: "127.0.0.1", port: 50882 }
+  const hosts = []
+  if (host === "127.0.0.1" || host === "localhost" || host === "::1") {
+    hosts.push(host === "::1" ? "[::1]" : "127.0.0.1")
+  } else if (host === "0.0.0.0" || host === "::") {
+    for (const interfaces of Object.values(os.networkInterfaces())) {
+      for (const item of interfaces || []) {
+        if (item.internal) continue
+        const address = item.address
+        if (item.family === "IPv4" && !address.startsWith("169.254.")) hosts.push(address)
+      }
+    }
+    hosts.push("127.0.0.1")
+  } else {
+    hosts.push(host)
+  }
+  return [...new Set(hosts)].map(value => `http://${net.isIP(value) === 6 && !value.startsWith("[") ? `[${value}]` : value}:${port}`)
+}
+
+function formatPluginEntry(name, title, directory, support = null) {
+  const info = support?.pluginInfo || {}
+  const configInfo = support?.configInfo || {}
+  return {
+    id: name,
+    name: info.name || name,
+    title: info.title || title,
+    description: info.description || "",
+    author: info.author || "",
+    link: info.link || "",
+    icon: info.icon || "",
+    directory,
+    hasConfig: typeof configInfo.getConfigData === "function" && Array.isArray(configInfo.schemas),
+    schemas: Array.isArray(configInfo.schemas) ? JSON.parse(JSON.stringify(configInfo.schemas)) : [],
+    actions: Object.entries(configInfo.actions || {}).map(([key, action]) => ({ key, available: typeof action === "function" })),
+    loadedBy: directory,
+  }
+}
+
+async function loadPluginSupport(pluginDirectory) {
+  // Elia 专属入口优先；没有时读取标准 Guoba 入口。
+  let selected
+  for (const candidate of PLUGIN_SUPPORT_ENTRIES) {
+    const supportPath = path.join(pluginDirectory, candidate.fileName)
+    try {
+      const stat = await fs.stat(supportPath)
+      if (stat.isFile()) {
+        selected = { ...candidate, path: supportPath, stat }
+        break
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error
+    }
+  }
+  if (!selected) return null
+
+  const { path: supportPath, factoryName, stat } = selected
+  const key = supportPath
+  const cached = supportCache.get(key)
+  if (cached?.mtimeMs === stat.mtimeMs) return cached.support
+  const url = `${pathToFileURL(supportPath).href}?panel=${stat.mtimeMs}`
+  const module = await import(url)
+  if (typeof module[factoryName] !== "function") {
+    throw new Error(`${path.basename(supportPath)} 必须导出 ${factoryName}()`)
+  }
+  const support = await module[factoryName]()
+  supportCache.set(key, { mtimeMs: stat.mtimeMs, support })
+  return support
+}
+
+async function listPlugins() {
+  const result = []
+  const entries = await fs.readdir(PLUGINS, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue
+    const directory = path.join(PLUGINS, entry.name)
+    let children
+    try {
+      children = await fs.readdir(directory, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    const isFolderPlugin = children.some(child => child.isFile() && child.name === "index.js")
+      || children.some(child => child.isFile() && PLUGIN_SUPPORT_ENTRIES.some(supportEntry => supportEntry.fileName === child.name))
+      || children.some(child => child.isDirectory() && child.name === ".git")
+    if (isFolderPlugin) {
+      let support = null
+      try {
+        support = await loadPluginSupport(directory)
+      } catch (error) {
+        safeLogger("warn", `[AdminPanel] ${entry.name} support 加载失败：${error.message}`)
+      }
+      const title = entry.name.replace(/[-_]/g, " ")
+      result.push(formatPluginEntry(entry.name, title, entry.name, support))
+      continue
+    }
+    for (const child of children) {
+      if (child.isFile() && child.name.endsWith(".js")) {
+        const id = `${entry.name}/${child.name}`
+        result.push(formatPluginEntry(id, path.basename(child.name, ".js"), id))
+      }
+    }
+  }
+  return result.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"))
+}
+
+async function findPluginSupport(id) {
+  if (typeof id !== "string" || id.includes("..") || id.includes("\\") || id.includes("/")) {
+    throw Object.assign(new Error("插件标识无效"), { status: 400 })
+  }
+  const directory = path.join(PLUGINS, id)
+  if (!isInside(PLUGINS, directory)) throw Object.assign(new Error("插件路径无效"), { status: 400 })
+  const support = await loadPluginSupport(directory)
+  if (!support) {
+    const entryNames = PLUGIN_SUPPORT_ENTRIES.map(entry => entry.fileName).join("、")
+    throw Object.assign(new Error(`该插件没有受支持的配置入口（${entryNames}）`), { status: 404 })
+  }
+  return support
+}
+
+async function writeBackupAndFile(absolute, contents) {
+  const relative = path.relative(ROOT, absolute)
+  try {
+    const stat = await fs.stat(absolute)
+    if (stat.size <= MAX_TEXT_BYTES) {
+      const backupPath = path.join(DATA_DIR, "backups", `${Date.now()}-${relative.replace(/[\\/:]/g, "__")}.bak`)
+      await fs.mkdir(path.dirname(backupPath), { recursive: true })
+      await fs.copyFile(absolute, backupPath)
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error
+  }
+  await fs.mkdir(path.dirname(absolute), { recursive: true })
+  const temporary = `${absolute}.${crypto.randomBytes(6).toString("hex")}.tmp`
+  await fs.writeFile(temporary, contents, "utf8")
+  try {
+    await fs.rename(temporary, absolute)
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+function getAccountSummary() {
+  const bot = global.Bot
+  if (!bot) return []
+  const ids = Object.keys(bot).filter(key => /^\d+$/.test(key))
+  return ids.map(id => {
+    const account = bot[id]
+    return {
+      id,
+      online: account?.isOnline !== false && account?.status !== "offline",
+      status: account?.isOnline === false || account?.status === "offline" ? "离线" : "在线",
+      nickname: account?.nickname || "",
+    }
+  })
+}
+
+async function readLogTail(filePath, maxLines = 600) {
+  try {
+    const stat = await fs.stat(filePath)
+    const length = Math.min(stat.size, 512 * 1024)
+    const file = await fs.open(filePath, "r")
+    try {
+      const buffer = Buffer.alloc(length)
+      await file.read(buffer, 0, length, stat.size - length)
+      const content = buffer.toString("utf8")
+      return content.split(/\r?\n/).slice(-maxLines).join("\n")
+    } finally {
+      await file.close()
+    }
+  } catch (error) {
+    if (error.code === "ENOENT") return ""
+    throw error
+  }
+}
+
+async function restartBot() {
+  const token = process.env.KSR_RESTART_TOKEN
+  const port = Number(cfg.bot?.restart_port || 27881)
+  if (token) {
+    const challengeResponse = await fetch(`http://127.0.0.1:${port}/challenge`, { signal: AbortSignal.timeout(2500) })
+    if (!challengeResponse.ok) throw new Error(`重启服务返回 HTTP ${challengeResponse.status}`)
+    const nonce = (await challengeResponse.text()).trim()
+    const sign = crypto.createHmac("sha256", token).update(nonce).digest("hex")
+    const response = await fetch(`http://127.0.0.1:${port}/restart?nonce=${encodeURIComponent(nonce)}&sign=${sign}`, { signal: AbortSignal.timeout(2500) })
+    if (!response.ok) throw new Error(`重启请求返回 HTTP ${response.status}`)
+    return "已向 ksr 重启服务发送请求"
+  }
+  if (process.env.pm_id !== undefined) {
+    const pm2Script = path.join(ROOT, "node_modules", "pm2", "bin", "pm2")
+    await fs.access(pm2Script)
+    const child = spawn(process.execPath, [pm2Script, "restart", "./config/pm2/pm2.json"], { cwd: ROOT, detached: true, stdio: "ignore", windowsHide: true })
+    child.unref()
+    return "已向 PM2 发送重启请求"
+  }
+  throw Object.assign(new Error("当前没有可识别的守护进程，面板未强制结束 Bot。请通过外部进程管理器重启。"), { status: 409 })
+}
+
+function runProcess(command, args, timeoutMs = 120_000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
+    let output = ""
+    let timedOut = false
+    const collect = chunk => { if (output.length < 160_000) output += chunk.toString() }
+    child.stdout.on("data", collect)
+    child.stderr.on("data", collect)
+    const timeout = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
+    child.once("error", error => { clearTimeout(timeout); reject(error) })
+    child.once("close", code => {
+      clearTimeout(timeout)
+      if (timedOut) return reject(new Error("Git 操作超过 2 分钟，已停止"))
+      if (code !== 0) return reject(new Error(output.trim() || `命令退出码 ${code}`))
+      resolve(output.trim())
+    })
+  })
+}
+
+function validateRemoteRepository(input) {
+  let url
+  try { url = new URL(input) } catch { throw Object.assign(new Error("请输入有效的 HTTPS 仓库地址"), { status: 400 }) }
+  if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname || net.isIP(url.hostname) || url.hostname === "localhost" || url.hostname.endsWith(".local")) {
+    throw Object.assign(new Error("插件仓库只接受不含凭据的公开 HTTPS 域名地址"), { status: 400 })
+  }
+  const name = path.posix.basename(url.pathname.replace(/\/$/, "")).replace(/\.git$/i, "")
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name) || name === "." || name === "..") {
+    throw Object.assign(new Error("无法从仓库地址生成安全的插件目录名"), { status: 400 })
+  }
+  url.search = ""
+  url.hash = ""
+  return { url: url.toString().replace(/\/$/, ""), name }
+}
+
+function makeResult() {
+  return class Result {
+    static ok(result = {}, message = "ok") { return { code: 0, result, message, isOk: true } }
+    static error(...args) {
+      const message = typeof args[0] === "string" ? args[0] : String(args[1] || "error")
+      return { code: -1, result: {}, message, isOk: false }
+    }
+  }
+}
+
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
+}
+
+export async function startAdminPanel() {
+  if (expressServer) return
+  const settings = await readPanelSettings()
+  activeSettings = settings
+  await fs.mkdir(DATA_DIR, { recursive: true })
+  const password = await getPassword()
+  const app = express()
+  app.disable("x-powered-by")
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff")
+    res.setHeader("Referrer-Policy", "same-origin")
+    res.setHeader("X-Frame-Options", "DENY")
+    res.setHeader("Cache-Control", "no-store")
+    next()
+  })
+  app.use(express.json({ limit: "3mb" }))
+
+  app.get("/api/auth/status", (req, res) => {
+    const token = parseCookies(req.headers.cookie).get("elia_panel_session")
+    const expiresAt = token && sessions.get(token)
+    res.json({ authenticated: Boolean(expiresAt && expiresAt > Date.now()) })
+  })
+  app.post("/api/auth/login", checkOrigin, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown"
+    const attempt = loginAttempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 }
+    if (attempt.resetAt < Date.now()) {
+      attempt.count = 0
+      attempt.resetAt = Date.now() + 15 * 60 * 1000
+    }
+    if (attempt.count >= 10) return res.status(429).json({ error: "登录尝试次数过多，请 15 分钟后重试" })
+    const submitted = String(req.body?.password || "")
+    if (crypto.timingSafeEqual(hashSecret(submitted), hashSecret(password))) {
+      loginAttempts.delete(ip)
+      issueSession(req, res)
+      return res.json({ authenticated: true })
+    }
+    attempt.count += 1
+    loginAttempts.set(ip, attempt)
+    res.status(401).json({ error: "密码不正确" })
+  })
+  app.post("/api/auth/code/request", checkOrigin, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown"
+    if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请查看 Bot 控制台日志" })
+    if (!allowAttempt(codeRequestAttempts, ip, 3, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码请求过于频繁，请 15 分钟后再试" })
+    const code = crypto.randomBytes(12).toString("base64url")
+    loginCode = { value: code, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }
+    safeLogger("warn", `[AdminPanel] 验证码登录请求：验证码 ${code}，5 分钟内有效且只能使用一次。若非本人操作请忽略。`)
+    res.json({ ok: true, expiresIn: 300, message: "验证码已输出到 Bot 控制台日志，有效期 5 分钟" })
+  })
+  app.post("/api/auth/code/check", checkOrigin, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown"
+    if (!allowAttempt(codeCheckAttempts, ip, 12, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码尝试次数过多，请稍后再试" })
+    const submitted = String(req.body?.code || "").trim()
+    if (loginCode && loginCode.expiresAt > Date.now() && crypto.timingSafeEqual(hashSecret(submitted), hashSecret(loginCode.value))) {
+      loginCode = null
+      issueSession(req, res)
+      safeLogger("mark", "[AdminPanel] 验证码登录成功")
+      return res.json({ authenticated: true })
+    }
+    if (loginCode && ++loginCode.attempts >= 10) loginCode = null
+    res.status(401).json({ error: "验证码错误或已过期" })
+  })
+  app.post("/api/auth/quick", checkOrigin, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown"
+    if (!allowAttempt(quickLoginAttempts, ip, 20, 15 * 60 * 1000)) return res.status(429).json({ error: "快捷登录尝试过于频繁，请稍后再试" })
+    const code = String(req.body?.code || "")
+    const expiresAt = quickLogins.get(code)
+    if (!expiresAt || expiresAt <= Date.now()) {
+      if (code) quickLogins.delete(code)
+      return res.status(401).json({ error: "主人快捷地址已使用或超过 3 分钟，请重新向 Bot 获取" })
+    }
+    quickLogins.delete(code)
+    issueSession(req, res)
+    safeLogger("mark", "[AdminPanel] 主人快捷地址登录成功")
+    res.json({ authenticated: true })
+  })
+  app.post("/api/auth/logout", checkOrigin, requireAuth, (req, res) => {
+    const token = parseCookies(req.headers.cookie).get("elia_panel_session")
+    sessions.delete(token)
+    res.setHeader("Set-Cookie", "elia_panel_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+    res.json({ ok: true })
+  })
+
+  app.use("/api", requireAuth)
+  app.use("/api", checkOrigin)
+
+  app.get("/api/status", (req, res) => {
+    const accounts = getAccountSummary()
+    let groupCount = 0
+    try { groupCount = global.Bot?.gl?.size || 0 } catch {}
+    const memory = process.memoryUsage()
+    res.json({
+      name: "Yunzai",
+      version: cfg.package?.version || "未知",
+      pid: process.pid,
+      uptime: process.uptime(),
+      startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      host: process.env.HOSTNAME || process.env.COMPUTERNAME || "本机",
+      platform: `${process.platform} ${process.arch}`,
+      memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal },
+      accounts,
+      groupCount,
+      restartAvailable: Boolean(process.env.KSR_RESTART_TOKEN || process.env.pm_id !== undefined),
+      panel: settings,
+    })
+  })
+
+  app.get("/api/config", asyncRoute(async (req, res) => {
+    const directory = path.join(ROOT, "config", "config")
+    const files = (await fs.readdir(directory, { withFileTypes: true }))
+      .filter(file => file.isFile() && file.name.endsWith(".yaml"))
+      .map(file => file.name)
+      .sort()
+    res.json({ files })
+  }))
+  app.get("/api/config/:name", asyncRoute(async (req, res) => {
+    if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
+    const filePath = path.join(ROOT, "config", "config", req.params.name)
+    const content = await fs.readFile(filePath, "utf8")
+    const name = req.params.name.replace(/\.yaml$/i, "")
+    let defaults = null
+    try { defaults = YAML.parse(await fs.readFile(path.join(ROOT, "config", "default_config", req.params.name), "utf8")) } catch {}
+    res.json({ name: req.params.name, content, data: YAML.parse(content), defaults })
+  }))
+  app.put("/api/config/:name", asyncRoute(async (req, res) => {
+    if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
+    const filePath = path.join(ROOT, "config", "config", req.params.name)
+    const content = typeof req.body?.content === "string" ? req.body.content : YAML.stringify(req.body?.data)
+    const parsed = YAML.parse(content)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return res.status(400).json({ error: "配置必须是 YAML 对象" })
+    await writeBackupAndFile(filePath, content.endsWith("\n") ? content : `${content}\n`)
+    const name = req.params.name.replace(/\.yaml$/i, "")
+    if (cfg.config) cfg.config[`config.${name}`] = parsed
+    res.json({ ok: true, message: "已保存配置并刷新运行时缓存" })
+  }))
+
+  app.get("/api/plugins", asyncRoute(async (req, res) => res.json({ plugins: await listPlugins() })))
+  app.get("/api/plugins/:id/config", asyncRoute(async (req, res) => {
+    const support = await findPluginSupport(req.params.id)
+    if (typeof support.configInfo?.getConfigData !== "function") return res.status(404).json({ error: "插件未提供 getConfigData()" })
+    res.json({ data: await support.configInfo.getConfigData() })
+  }))
+  app.put("/api/plugins/:id/config", asyncRoute(async (req, res) => {
+    const support = await findPluginSupport(req.params.id)
+    if (typeof support.configInfo?.setConfigData !== "function") return res.status(404).json({ error: "插件未提供 setConfigData()" })
+    const result = await support.configInfo.setConfigData(req.body || {}, { Result: makeResult() })
+    res.json(result && typeof result === "object" ? result : { ok: true, result, message: "保存成功" })
+  }))
+  app.post("/api/plugins/:id/action", asyncRoute(async (req, res) => {
+    const support = await findPluginSupport(req.params.id)
+    const action = support.configInfo?.actions?.[req.body?.action]
+    if (typeof action !== "function") return res.status(404).json({ error: "没有找到该插件操作" })
+    const result = await action(req.body?.args, { Result: makeResult() })
+    res.json(result && typeof result === "object" ? result : { ok: true, result, message: "操作完成" })
+  }))
+  app.post("/api/plugins/install", asyncRoute(async (req, res) => {
+    const { url, name: inferredName } = validateRemoteRepository(String(req.body?.url || ""))
+    const name = String(req.body?.name || inferredName)
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name) || name === "..") return res.status(400).json({ error: "插件目录名无效" })
+    const target = path.join(PLUGINS, name)
+    try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在` }) } catch (error) { if (error.code !== "ENOENT") throw error }
+    try {
+      await runProcess("git", ["clone", "--depth", "1", "--single-branch", url, target])
+      const entries = await fs.readdir(target)
+      if (!entries.includes("index.js") && !entries.some(entry => entry.endsWith(".js"))) throw new Error("仓库克隆成功，但未找到 Yunzai 插件入口文件")
+      let hasPackage = false
+      try { await fs.access(path.join(target, "package.json")); hasPackage = true } catch {}
+      res.json({ ok: true, name, hasPackage, message: `已下载到 plugins/${name}${hasPackage ? "。请在项目终端安装插件依赖" : ""}，重启 Bot 后加载。` })
+    } catch (error) {
+      await fs.rm(target, { recursive: true, force: true }).catch(() => {})
+      throw error
+    }
+  }))
+  app.get("/api/plugins/archives", asyncRoute(async (req, res) => {
+    const archiveRoot = path.join(DATA_DIR, "archived-plugins")
+    await fs.mkdir(archiveRoot, { recursive: true })
+    const archives = (await fs.readdir(archiveRoot, { withFileTypes: true }))
+      .filter(entry => entry.isDirectory() && /^[A-Za-z0-9][A-Za-z0-9._-]*--\d+$/.test(entry.name))
+      .map(entry => ({ id: entry.name, name: entry.name.replace(/--\d+$/, "") }))
+      .sort((a, b) => b.id.localeCompare(a.id))
+    res.json({ archives })
+  }))
+  app.post("/api/plugins/:id/archive", asyncRoute(async (req, res) => {
+    const id = req.params.id
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id) || id.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "此插件不能归档" })
+    const source = path.join(PLUGINS, id)
+    const stat = await fs.lstat(source)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return res.status(400).json({ error: "目标不是普通插件目录" })
+    const archiveRoot = path.join(DATA_DIR, "archived-plugins")
+    await fs.mkdir(archiveRoot, { recursive: true })
+    const archiveId = `${id}--${Date.now()}`
+    await fs.rename(source, path.join(archiveRoot, archiveId))
+    res.json({ ok: true, archiveId, message: `插件 ${id} 已移入可恢复归档；重启 Bot 后卸载生效` })
+  }))
+  app.post("/api/plugins/archives/:archiveId/restore", asyncRoute(async (req, res) => {
+    const archiveId = req.params.archiveId
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*--\d+$/.test(archiveId)) return res.status(400).json({ error: "归档编号无效" })
+    const name = archiveId.replace(/--\d+$/, "")
+    if (name.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "不能恢复到面板自身目录" })
+    const archivePath = path.join(DATA_DIR, "archived-plugins", archiveId)
+    const target = path.join(PLUGINS, name)
+    try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在，无法覆盖` }) } catch (error) { if (error.code !== "ENOENT") throw error }
+    await fs.rename(archivePath, target)
+    res.json({ ok: true, message: `已恢复到 plugins/${name}；重启 Bot 后加载` })
+  }))
+
+  app.get("/api/files", asyncRoute(async (req, res) => {
+    const requested = String(req.query.path || ".")
+    const absolute = resolveWorkspacePath(requested)
+    await rejectSymlinkPath(absolute)
+    const stat = await fs.stat(absolute)
+    if (!stat.isDirectory()) return res.status(400).json({ error: "目标不是目录" })
+    const entries = await fs.readdir(absolute, { withFileTypes: true })
+    const files = []
+    for (const entry of entries) {
+      if (BLOCKED_SEGMENTS.has(entry.name.toLowerCase()) || entry.isSymbolicLink()) continue
+      const childPath = path.join(absolute, entry.name)
+      if (entry.isDirectory()) {
+        files.push({ name: entry.name, path: path.relative(ROOT, childPath).split(path.sep).join("/"), type: "directory" })
+      } else if (entry.isFile()) {
+        const extension = path.extname(entry.name).toLowerCase() || (entry.name.startsWith(".") ? entry.name.toLowerCase() : "")
+        const childStat = await fs.stat(childPath)
+        if (childStat.size > MAX_TEXT_BYTES || !ALLOWED_TEXT_EXTENSIONS.has(extension)) continue
+        files.push({ name: entry.name, path: path.relative(ROOT, childPath).split(path.sep).join("/"), type: "file", size: childStat.size })
+      }
+    }
+    files.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1)
+    res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/") || ".", parent: path.relative(ROOT, path.dirname(absolute)).split(path.sep).join("/") || ".", entries: files })
+  }))
+  app.get("/api/files/read", asyncRoute(async (req, res) => {
+    const relative = String(req.query.path || "")
+    const absolute = resolveWorkspacePath(relative)
+    await rejectSymlinkPath(absolute)
+    const stat = await fs.stat(absolute)
+    if (!stat.isFile() || stat.size > MAX_TEXT_BYTES) return res.status(400).json({ error: "文件不存在或超过 1.5 MB 编辑上限" })
+    const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
+    const content = await fs.readFile(absolute, "utf8")
+    if (content.includes("\0")) return res.status(415).json({ error: "二进制文件不能在面板中编辑" })
+    res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/"), content, size: stat.size, modifiedAt: stat.mtime.toISOString() })
+  }))
+  app.put("/api/files/write", asyncRoute(async (req, res) => {
+    const relative = String(req.body?.path || "")
+    const content = req.body?.content
+    if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) return res.status(400).json({ error: "文件内容无效或超过 1.5 MB" })
+    const absolute = resolveWorkspacePath(relative)
+    await rejectSymlinkPath(absolute)
+    const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
+    await writeBackupAndFile(absolute, content)
+    res.json({ ok: true, message: "文件已保存；自动备份保存在 data/elia-admin-panel/backups" })
+  }))
+
+  app.get("/api/logs", asyncRoute(async (req, res) => {
+    const files = []
+    try {
+      for (const entry of await fs.readdir(path.join(ROOT, "logs"), { withFileTypes: true })) {
+        if (entry.isFile() && /^(error|command)(\.\d{4}-\d{2}-\d{2})?\.log$/.test(entry.name)) files.push(entry.name)
+      }
+    } catch {}
+    files.sort((left, right) => {
+      const leftDate = left.match(/\.(\d{4}-\d{2}-\d{2})\.log$/)?.[1] || ""
+      const rightDate = right.match(/\.(\d{4}-\d{2}-\d{2})\.log$/)?.[1] || ""
+      return rightDate.localeCompare(leftDate) || left.localeCompare(right)
+    })
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+    const todayCommandLog = `command.${today}.log`
+    const latestCommandLog = files.find(file => /^command\.\d{4}-\d{2}-\d{2}\.log$/.test(file))
+    const defaultFile = files.includes(todayCommandLog) ? todayCommandLog : latestCommandLog || files[0] || ""
+    const selected = String(req.query.file || defaultFile)
+    if (!files.includes(selected)) return res.status(400).json({ error: "日志文件无效", files })
+    const content = await readLogTail(path.join(ROOT, "logs", selected))
+    res.json({ files, selected, content })
+  }))
+  app.post("/api/runtime/restart", asyncRoute(async (req, res) => {
+    const message = await restartBot()
+    res.json({ ok: true, message })
+  }))
+
+  app.use("/api", (req, res) => res.status(404).json({ error: "API 不存在" }))
+  app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
+  app.use((req, res, next) => {
+    fs.access(path.join(STATIC_DIR, "index.html"))
+      .then(() => res.sendFile(path.join(STATIC_DIR, "index.html")))
+      .catch(() => res.status(503).send("Web UI 尚未构建。请在 plugins/EliaAdminPanel 中运行 pnpm install 和 pnpm run build。"))
+  })
+  app.use((error, req, res, next) => {
+    const status = Number(error.status) || 500
+    if (status >= 500) safeLogger("error", `[AdminPanel] ${req.method} ${req.path}: ${error.stack || error.message}`)
+    res.status(status).json({ error: status >= 500 ? "面板处理请求失败，请查看 Bot 日志" : error.message })
+  })
+
+  expressServer = await new Promise((resolve, reject) => {
+    const server = app.listen(settings.port, settings.host)
+    server.once("listening", () => resolve(server))
+    server.once("error", reject)
+  })
+  const address = expressServer.address()
+  const shownHost = settings.host === "0.0.0.0" || settings.host === "::" ? "127.0.0.1" : settings.host
+  safeLogger("mark", `[EliaAdminPanel] Web 管理面板已启动：http://${shownHost}:${address.port}`)
+  if (generatedPassword) {
+    safeLogger("mark", `[AdminPanel] 首次登录密码保存在 ${path.relative(ROOT, PASSWORD_FILE)}；请登录后配置 YUNZAI_PANEL_PASSWORD 环境变量`)
+  }
+}
+
+export async function createQuickLoginLinks() {
+  if (!expressServer) throw new Error("面板服务尚未启动")
+  const now = Date.now()
+  for (const [code, expiresAt] of quickLogins) if (expiresAt <= now) quickLogins.delete(code)
+  const code = crypto.randomBytes(12).toString("base64url")
+  quickLogins.set(code, now + 3 * 60 * 1000)
+  const links = panelAddresses().map(address => `${address.replace(/\/$/, "")}/#/ml/${code}`)
+  return { links, expiresIn: 180 }
+}

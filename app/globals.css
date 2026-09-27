@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+:root {
+  --background: #f5f6fa;
+  --foreground: #1c2031;
+  --card: #ffffff;
+  --card-foreground: #1c2031;
+  --primary: #626bd1;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0fb;
+  --secondary-foreground: #444b9b;
+  --muted: #f1f2f7;
+  --muted-foreground: #7b8094;
+  --accent: #eeeffa;
+  --accent-foreground: #414888;
+  --destructive: #d9475e;
+  --border: #e7e8f0;
+  --input: #e1e3ec;
+  --ring: #9098ea;
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, "Microsoft YaHei", sans-serif; }
+button, input, textarea { font: inherit; }
+::selection { background: #dfe2ff; }
+
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #d4d6e2 transparent; }
+.scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d6e2; border-radius: 999px; }
