@@ -45,14 +45,25 @@ function SecretInput({ className, ...props }: SecretInputProps) {
   </div>
 }
 
-type Section = "overview" | "config" | "plugins" | "files" | "logs" | "debug"
+type Section = "overview" | "accounts" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string; exiting: boolean } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
 type FriendOption = { id: string; name: string; avatar: string }
 type GroupOption = { id: string; name: string; avatar: string }
+type AccountProfileField = "nickname" | "avatar" | "signature" | "sex" | "age"
+type ManagedAccount = {
+  id: string
+  online: boolean
+  status: string
+  nickname: string
+  avatar: string
+  profile: { nickname: string; avatar: string; signature: string; signatureReadStatus: "available" | "unavailable" | "unsupported"; sex: string; age: number | null; area: string }
+  capabilities: Record<AccountProfileField, boolean>
+}
 
 const navigation: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "运行概览", icon: LayoutDashboard },
+  { id: "accounts", label: "账号管理", icon: UserRound },
   { id: "config", label: "配置中心", icon: Settings2 },
   { id: "plugins", label: "插件控制", icon: Plug },
   { id: "files", label: "文件管理", icon: FileCode2 },
@@ -530,6 +541,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
         <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
+          {section === "accounts" && <AccountManager api={api} notify={notify} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}
           {section === "files" && <FileManager api={api} notify={notify} initialPath={fileManagerPath} />}
@@ -763,6 +775,168 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
         <Card className="border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-white"><CardHeader><div className="flex items-center gap-2"><div className="grid size-8 place-items-center rounded-xl bg-indigo-100 text-indigo-600"><Sparkles className="size-4" /></div><CardTitle>进程操作</CardTitle></div><CardDescription>通过当前进程守护程序执行 Bot 重启</CardDescription></CardHeader><CardContent><Button variant="outline" className="w-full border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50" disabled={!status?.restartAvailable || restarting} onClick={restart}>{restarting ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重启 Bot {status?.restartAvailable ? "" : "（未检测到守护程序）"}</Button>{!status?.restartAvailable && <p className="mt-2.5 text-[10px] leading-4 text-muted-foreground">仅在使用 ksr 或 PM2 托管时启用，避免意外结束未托管的进程。</p>}</CardContent></Card>
       </div>
     </div>
+  </>
+}
+
+function AccountManager({ api, notify }: { api: Api; notify: any }) {
+  const [accounts, setAccounts] = useState<ManagedAccount[]>([])
+  const [selectedId, setSelectedId] = useState("")
+  const [drafts, setDrafts] = useState({ nickname: "", signature: "", sex: "unknown", age: "" })
+  const [avatarDraft, setAvatarDraft] = useState("")
+  const [avatarPreview, setAvatarPreview] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [draftAccountId, setDraftAccountId] = useState("")
+  const [error, setError] = useState("")
+  const avatarInput = useRef<HTMLInputElement>(null)
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true)
+    setDraftAccountId("")
+    try {
+      const result = await api("/api/accounts")
+      const nextAccounts: ManagedAccount[] = Array.isArray(result.accounts) ? result.accounts : []
+      setAccounts(nextAccounts)
+      setSelectedId(current => nextAccounts.some(account => account.id === current) ? current : nextAccounts[0]?.id || "")
+      setError("")
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [api])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const activeAccount = accounts.find(account => account.id === selectedId)
+  useEffect(() => {
+    if (!activeAccount) return
+    const { profile } = activeAccount
+    setDrafts({
+      nickname: profile.nickname || "",
+      signature: profile.signature || "",
+      sex: ["male", "female", "unknown"].includes(profile.sex) ? profile.sex : "unknown",
+      age: profile.age == null ? "" : String(profile.age),
+    })
+    setDraftAccountId(activeAccount.id)
+  }, [activeAccount?.id, activeAccount?.profile])
+  useEffect(() => {
+    setAvatarDraft("")
+    setAvatarPreview("")
+  }, [activeAccount?.id])
+
+  const pendingUpdates: { field: AccountProfileField; value: string }[] = []
+  if (activeAccount && draftAccountId === activeAccount.id) {
+    const { profile, capabilities } = activeAccount
+    if (capabilities.nickname && drafts.nickname !== profile.nickname) pendingUpdates.push({ field: "nickname", value: drafts.nickname })
+    if (capabilities.signature && drafts.signature !== profile.signature) pendingUpdates.push({ field: "signature", value: drafts.signature })
+    if (capabilities.sex && drafts.sex !== profile.sex) pendingUpdates.push({ field: "sex", value: drafts.sex })
+    if (capabilities.age && drafts.age !== (profile.age == null ? "" : String(profile.age))) pendingUpdates.push({ field: "age", value: drafts.age })
+    if (capabilities.avatar && avatarDraft) pendingUpdates.push({ field: "avatar", value: avatarDraft })
+  }
+  const fieldLabels: Record<AccountProfileField, string> = { nickname: "昵称", avatar: "头像", signature: "个性签名", sex: "性别", age: "年龄" }
+  const invalidPendingUpdate = pendingUpdates.some(({ field, value }) => {
+    if (field === "nickname") return !value.trim() || value.length > 60
+    if (field === "age") return !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 120
+    if (field === "signature") return value.length > 255
+    return false
+  })
+
+  async function saveAll() {
+    if (!activeAccount || saving || !pendingUpdates.length || invalidPendingUpdate) return
+    const updates = [...pendingUpdates]
+    setSaving(true)
+    let savedCount = 0
+    try {
+      for (const update of updates) {
+        await api(`/api/accounts/${encodeURIComponent(activeAccount.id)}/profile`, {
+          method: "PATCH",
+          body: JSON.stringify(update),
+        })
+        savedCount += 1
+      }
+      setAvatarDraft("")
+      setAvatarPreview("")
+      await refresh()
+      notify("success", `${savedCount} 项资料已保存`)
+    } catch (reason) {
+      const failedField = updates[savedCount]?.field
+      const savedMessage = savedCount ? `已保存 ${savedCount} 项，` : ""
+      notify("error", `${savedMessage}${fieldLabels[failedField || "nickname"]}保存失败：${(reason as Error).message}。草稿已保留，可再次保存。`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function chooseAvatar(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ""
+    if (!file) return
+    if (!file.type.startsWith("image/")) return notify("error", "请选择图片文件")
+    if (file.size > 1_500_000) return notify("error", "头像图片不能超过 1.5 MB")
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "")
+      const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1)
+      if (!encoded) return notify("error", "无法读取所选图片")
+      setAvatarPreview(dataUrl)
+      setAvatarDraft(`base64://${encoded}`)
+    }
+    reader.onerror = () => notify("error", "无法读取所选图片")
+    reader.readAsDataURL(file)
+  }
+
+  const canEdit = (field: AccountProfileField) => Boolean(activeAccount?.capabilities[field]) && !saving
+  return <>
+    {activeAccount && <PageIntro actions={[{ label: "保存更改", render: iconOnly => <Button type="button" size={iconOnly ? "icon" : "default"} aria-label="保存更改" title={pendingUpdates.length ? `保存 ${pendingUpdates.length} 项更改` : " 没有待保存的更改"} disabled={!pendingUpdates.length || invalidPendingUpdate || saving} onClick={() => void saveAll()}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && (saving ? "保存中" : "保存更改")}</Button> }]} />}
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div><h1 className="text-xl font-semibold">账号管理</h1><p className="mt-1 text-sm text-muted-foreground">机器人 QQ 个人资料</p></div>
+      <Button type="button" variant="outline" onClick={() => { if (!pendingUpdates.length || window.confirm("刷新会丢弃尚未保存的修改，继续吗？")) void refresh() }} disabled={refreshing || saving} aria-label="刷新账号资料" title="刷新账号资料"><RefreshCw className={refreshing ? "animate-spin" : ""} />刷新</Button>
+    </div>
+    {error && <div className="mb-5"><ErrorState message={error} /></div>}
+    {loading && !accounts.length ? <div className="grid min-h-56 place-items-center text-muted-foreground"><LoaderCircle className="size-6 animate-spin" /></div>
+      : !accounts.length ? <div className="rounded-xl border border-dashed border-border px-5 py-12 text-center text-sm text-muted-foreground">当前没有可管理的机器人账号</div>
+        : <div className="grid gap-6 lg:grid-cols-[250px_minmax(0,1fr)]">
+          <aside className="min-w-0">
+            <h2 className="mb-3 text-sm font-semibold">机器人账号</h2>
+            <div className="space-y-1">
+              {accounts.map(account => <button key={account.id} type="button" disabled={saving || refreshing} onClick={() => { if (selectedId === account.id || saving || refreshing) return; if (pendingUpdates.length && !window.confirm("切 换账号会丢弃尚未保存的修改，继续吗？")) return; setDraftAccountId(""); setSelectedId(account.id) }} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${selectedId === account.id ? "border-sky-300 bg-sky-50/70" : "border-transparent hover:border-border hover:bg-white"}`}>
+                <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500"><Bot className="size-5" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-xs text-muted-foreground">QQ {account.id}</span></span>
+                <span aria-label={account.status} title={account.status} className={`size-2 shrink-0 rounded-full ${account.online ? "bg-emerald-500" : "bg-slate-300"}`} />
+              </button>)}
+            </div>
+          </aside>
+          {activeAccount && <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-white">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4 sm:px-6">
+              <div><h2 className="text-base font-semibold">个人资料</h2><p className="mt-1 text-xs text-muted-foreground">QQ {activeAccount.id}</p></div>
+              <Badge className={activeAccount.online ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}>{activeAccount.status}</Badge>
+            </div>
+            <div className="divide-y divide-border px-5 sm:px-6">
+              <div className="flex flex-wrap items-center gap-4 py-5">
+                <span className="relative grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500"><UserRound className="size-7" /><img key={activeAccount.profile.avatar} src={avatarPreview || activeAccount.profile.avatar} alt="账号头像" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span>
+                <div className="min-w-0 flex-1"><Label className="text-sm font-medium">头像</Label><p className="mt-1 text-xs text-muted-foreground">JPG、PNG、WebP，最大 1.5 MB</p></div>
+                <input ref={avatarInput} type="file" accept="image/*" aria-label="选择账号头像" className="sr-only" disabled={!canEdit("avatar")} onChange={chooseAvatar} />
+                <div className="flex w-full gap-2 sm:w-auto">
+                  <Button type="button" variant="outline" className="flex-1 sm:flex-none" disabled={!canEdit("avatar")} title={canEdit("avatar") ? "选择新头像" : "当前适配器不支持修改此资料"} onClick={() => avatarInput.current?.click()}><Upload />选择图片</Button>
+                </div>
+              </div>
+              <div className="py-5">
+                <div className="space-y-2"><Label htmlFor="account-nickname">昵称</Label><Input id="account-nickname" maxLength={60} value={drafts.nickname} disabled={!canEdit("nickname")} onChange={event => setDrafts(current => ({ ...current, nickname: event.target.value }))} /></div>
+              </div>
+              <div className="py-5">
+                <div className="space-y-2"><Label htmlFor="account-signature">个性签名</Label><Textarea id="account-signature" maxLength={255} rows={3} className="min-h-20 resize-y" value={drafts.signature} disabled={!canEdit("signature")} onChange={event => setDrafts(current => ({ ...current, signature: event.target.value }))} placeholder={activeAccount.profile.signatureReadStatus === "available" ? "当前未设置签名" : activeAccount.profile.signatureReadStatus === "unsupported" ? "适配器未提供签名读取接口" : "暂无法读取当前签名"} /></div>
+              </div>
+              <div className="grid gap-4 py-5 sm:grid-cols-2">
+                <div className="space-y-2"><Label htmlFor="account-sex">性别</Label><Select value={drafts.sex} onValueChange={sex => setDrafts(current => ({ ...current, sex }))}><SelectTrigger id="account-sex" disabled={!canEdit("sex")} className="bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="male">男</SelectItem><SelectItem value="female">女</SelectItem><SelectItem value="unknown">未知</SelectItem></SelectContent></Select></div>
+                <div className="space-y-2"><Label htmlFor="account-age">年龄</Label><Input id="account-age" type="number" min={1} max={120} value={drafts.age} disabled={!canEdit("age")} onChange={event => setDrafts(current => ({ ...current, age: event.target.value }))} placeholder="未提供" /></div>
+              </div>
+            </div>
+          </section>}
+        </div>}
   </>
 }
 

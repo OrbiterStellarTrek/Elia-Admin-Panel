@@ -1125,6 +1125,55 @@ function getAccountSummary() {
   })
 }
 
+function getBotAccount(id) {
+  const bot = global.Bot
+  return bot?.[id] || (String(bot?.uin) === id ? bot : null)
+}
+
+async function getAccountProfile(summary) {
+  const account = getBotAccount(summary.id)
+  let info = {}
+  let signatureReadStatus = account?.version?.name === "NapCat.Adapter" && typeof account?.napcat?.get_stranger_info === "function"
+    ? "unavailable"
+    : "unsupported"
+  if (summary.online && account?.version?.name === "NapCat.Adapter" && typeof account.napcat?.get_stranger_info === "function") {
+    try {
+      info = await account.napcat.get_stranger_info({ user_id: Number(summary.id) }) || {}
+      signatureReadStatus = "available"
+    } catch {}
+  }
+  if (summary.online && !Object.keys(info).length && typeof account?.getStrangerInfo === "function") {
+    try {
+      const adapterInfo = await account.getStrangerInfo(Number(summary.id)) || {}
+      info = { ...adapterInfo, ...info }
+      if (["long_nick", "longNick", "personal_note", "signature", "sign"].some(key => Object.hasOwn(adapterInfo, key))) {
+        signatureReadStatus = "available"
+      }
+    } catch {}
+  }
+  const age = Number(info.age ?? account?.age)
+  const signature = info.long_nick ?? info.longNick ?? info.personal_note ?? info.signature ?? info.sign ?? account?.signature
+  return {
+    ...summary,
+    profile: {
+      nickname: String(account?.nickname || info.nickname || summary.nickname),
+      avatar: String(account?.avatar || summary.avatar),
+      signature: typeof signature === "string" ? signature : "",
+      signatureReadStatus,
+      sex: String(info.sex || account?.sex || "unknown"),
+      age: Number.isSafeInteger(age) && age > 0 ? age : null,
+      area: String(info.area || account?.area || ""),
+    },
+    capabilities: {
+      nickname: typeof account?.setNickname === "function",
+      avatar: typeof account?.setAvatar === "function",
+      signature: typeof account?.setSignature === "function",
+      sex: typeof account?.setSex === "function",
+      age: typeof account?.setAge === "function",
+    },
+  }
+}
+
 async function getMessageMetrics() {
   const receivedCounts = getAccountSummary().map(({ id }) => {
     const account = global.Bot?.[id] || (String(global.Bot?.uin) === id ? global.Bot : null)
@@ -1778,6 +1827,49 @@ export async function startAdminPanel() {
     })
   }))
 
+  app.get("/api/accounts", asyncRoute(async (req, res) => {
+    const accounts = await Promise.all(getAccountSummary().map(getAccountProfile))
+    res.json({ accounts })
+  }))
+
+  app.patch("/api/accounts/:id/profile", asyncRoute(async (req, res) => {
+    const id = String(req.params.id || "")
+    const accountSummary = getAccountSummary().find(item => item.id === id)
+    if (!accountSummary) return res.status(404).json({ error: "账号不存在" })
+
+    const account = getBotAccount(id)
+    const setters = { nickname: "setNickname", avatar: "setAvatar", signature: "setSignature", sex: "setSex", age: "setAge" }
+    const field = String(req.body?.field || "")
+    if (!Object.hasOwn(setters, field)) return res.status(400).json({ error: "不支持的资料字段" })
+    const setterName = setters[field]
+    if (typeof account?.[setterName] !== "function") return res.status(409).json({ error: "当前适配器不支持修改此资料" })
+
+    let value = req.body?.value
+    if (field === "nickname" || field === "signature") {
+      value = typeof value === "string" ? value.trim() : ""
+      const maxLength = field === "nickname" ? 60 : 255
+      if ((!value && field === "nickname") || value.length > maxLength) return res.status(400).json({ error: `${field === "nickname" ? "昵称" : "个性签名"}长度不符合要求` })
+    } else if (field === "avatar") {
+      value = typeof value === "string" ? value.trim() : ""
+      const isBase64 = /^base64:\/\/[A-Za-z0-9+/=_-]+$/.test(value)
+      let isHttpsUrl = false
+      try { isHttpsUrl = new URL(value).protocol === "https:" } catch {}
+      if ((!isBase64 && !isHttpsUrl) || value.length > 2_800_000) return res.status(400).json({ error: "头像需为 HTTPS 图片地址或有效的 base64 图片" })
+    } else if (field === "age") {
+      value = Number(value)
+      if (!Number.isInteger(value) || value < 1 || value > 120) return res.status(400).json({ error: "年龄需为 1 到 120 的整数" })
+    } else if (field === "sex" && !["male", "female", "unknown"].includes(value)) {
+      return res.status(400).json({ error: "性别值无效" })
+    }
+
+    const result = await account[setterName](value)
+    if (result === false) return res.status(502).json({ error: "适配器未能更新资料" })
+    if (field === "nickname") account.nickname = value
+    if (field === "avatar") account.avatar = `https://q1.qlogo.cn/g?b=qq&s=100&nk=${encodeURIComponent(id)}&t=${Date.now()}`
+    if (field === "signature" || field === "sex" || field === "age") account[field] = value
+    res.json({ ok: true })
+  }))
+
   app.get("/api/config", asyncRoute(async (req, res) => {
     const directory = path.join(ROOT, "config", "config")
     const files = (await fs.readdir(directory, { withFileTypes: true }))
@@ -2192,7 +2284,7 @@ export async function startAdminPanel() {
   } else {
     app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
     app.use((req, res, next) => {
-      const section = req.path.match(/^\/(config|plugins|files|logs|debug)\/?$/)?.[1]
+      const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug)\/?$/)?.[1]
       const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
       fs.access(entry)
         .then(() => res.sendFile(entry))
