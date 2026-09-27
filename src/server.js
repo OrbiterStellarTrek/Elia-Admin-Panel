@@ -47,6 +47,7 @@ const PLUGIN_SCAN_IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".next"
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
+const pluginRuleSnapshotCache = new WeakMap()
 let sessionSecret = ""
 let sessionStoreWrite = Promise.resolve()
 const loginAttempts = new Map()
@@ -75,6 +76,47 @@ const safeLogger = (level, message) => {
     else console.log(message)
   } catch {
     console.log(message)
+  }
+}
+
+function readPluginRuleSnapshot(entry) {
+  const PluginClass = entry?.class
+  if (typeof PluginClass !== "function") return { rules: [], error: "插件类不可读取" }
+  const cached = pluginRuleSnapshotCache.get(PluginClass)
+  if (cached) return cached
+  try {
+    const instance = new PluginClass()
+    const rules = (Array.isArray(instance.rule) ? instance.rule : []).flatMap((rule, index) => {
+      if (!rule || rule.reg === undefined || rule.reg === null) return []
+      try {
+        const expression = rule.reg instanceof RegExp ? rule.reg : new RegExp(rule.reg)
+        return [{
+          index,
+          pattern: expression.source,
+          flags: expression.flags,
+          fnc: String(rule.fnc || "未指定"),
+          event: String(rule.event || ""),
+          permission: String(rule.permission || "all"),
+        }]
+      } catch (error) {
+        return [{
+          index,
+          pattern: String(rule.reg),
+          flags: "",
+          fnc: String(rule.fnc || "未指定"),
+          event: String(rule.event || ""),
+          permission: String(rule.permission || "all"),
+          regexError: error.message || "正则表达式无效",
+        }]
+      }
+    })
+    const snapshot = { rules }
+    pluginRuleSnapshotCache.set(PluginClass, snapshot)
+    return snapshot
+  } catch (error) {
+    const snapshot = { rules: [], error: error.message || "实例化插件类失败" }
+    pluginRuleSnapshotCache.set(PluginClass, snapshot)
+    return snapshot
   }
 }
 
@@ -1373,6 +1415,82 @@ export async function startAdminPanel() {
       .map(file => file.name)
       .sort()
     res.json({ files })
+  }))
+  app.get("/api/diagnostics/plugin-rules", asyncRoute(async (req, res) => {
+    const groupId = String(req.query.groupId || "default")
+    if (groupId !== "default" && (!/^\d+$/.test(groupId) || !Number.isSafeInteger(Number(groupId)))) {
+      return res.status(400).json({ error: "群号无效" })
+    }
+    const groupConfig = cfg.getConfig("group") || {}
+    const defaultGroupConfig = groupConfig.default || {}
+    const groupIds = new Set(Object.keys(groupConfig).filter(id => /^\d+$/.test(id)))
+    try {
+      for (const id of global.Bot?.gl?.keys?.() || []) if (/^\d+$/.test(String(id))) groupIds.add(String(id))
+    } catch {}
+    const getGroupName = id => {
+      try {
+        const group = global.Bot?.pickGroup?.(Number(id))
+        return String(group?.name || group?.group_name || global.Bot?.gl?.get?.(Number(id))?.group_name || id)
+      } catch { return String(global.Bot?.gl?.get?.(Number(id))?.group_name || id) }
+    }
+    const groups = [
+      { id: "default", name: "默认群组" },
+      ...[...groupIds].sort((left, right) => left.localeCompare(right, "zh-CN")).map(id => ({ id, name: getGroupName(id) })),
+    ]
+    const targetGroupConfig = groupId === "default" ? defaultGroupConfig : cfg.getGroup(Number(groupId)) || {}
+    const entries = Array.isArray(pluginsLoader.priority) ? pluginsLoader.priority : []
+    const sourceNames = new Map()
+    const nameSources = new Map()
+    for (const entry of entries) {
+      const sourcePlugin = String(entry.key || entry.name || "未知插件").replace(/\\/g, "/").split("/")[0]
+      if (!sourceNames.has(sourcePlugin)) sourceNames.set(sourcePlugin, new Set())
+      if (typeof entry.name === "string" && entry.name) {
+        sourceNames.get(sourcePlugin).add(entry.name)
+        if (!nameSources.has(entry.name)) nameSources.set(entry.name, new Set())
+        nameSources.get(entry.name).add(sourcePlugin)
+      }
+    }
+    const blockedPluginNames = [...new Set(entries.filter(entry => !pluginsLoader.checkDisable(entry.name, targetGroupConfig, defaultGroupConfig)).map(entry => entry.name))]
+    const scanErrors = []
+    const rules = entries.flatMap((entry, entryIndex) => {
+      const sourceKey = String(entry.key || "")
+      const sourcePlugin = sourceKey.replace(/\\/g, "/").split("/")[0] || String(entry.name || "未知插件")
+      const snapshot = readPluginRuleSnapshot(entry)
+      if (snapshot.error) scanErrors.push({ pluginName: entry.name, sourceKey, message: snapshot.error })
+      return snapshot.rules.map(rule => ({
+        id: `${entryIndex}:${sourceKey}:${entry.name}:${rule.index}`,
+        pluginName: String(entry.name || "未知插件"),
+        sourcePlugin,
+        sourceKey,
+        sourcePluginNames: [...(sourceNames.get(sourcePlugin) || [])],
+        nameSources: [...(nameSources.get(String(entry.name || "")) || [])],
+        pluginEvent: String(entry.event || ""),
+        priority: Number(entry.priority || 0),
+        enabled: pluginsLoader.checkDisable(entry.name, targetGroupConfig, defaultGroupConfig),
+        ...rule,
+      }))
+    })
+    res.json({ groupId, groupName: groupId === "default" ? "默认群组" : getGroupName(groupId), groups, blockedPluginNames, rules, scanErrors })
+  }))
+  app.get("/api/config/group-plugin-names/:groupId", asyncRoute(async (req, res) => {
+    const groupId = String(req.params.groupId || "")
+    if (groupId !== "default" && (!/^\d+$/.test(groupId) || !Number.isSafeInteger(Number(groupId)))) {
+      return res.status(400).json({ error: "群号无效" })
+    }
+    let groupName = "默认群组"
+    if (groupId !== "default") {
+      if (typeof global.Bot?.pickGroup !== "function") return res.status(503).json({ error: "当前 Yunzai 暂不支持获取群信息" })
+      let group
+      try { group = global.Bot.pickGroup(Number(groupId)) }
+      catch { return res.status(404).json({ error: `无法获取群 ${groupId}` }) }
+      if (!group) return res.status(404).json({ error: `无法获取群 ${groupId}` })
+      groupName = String(group.name || group.group_name || groupId)
+    }
+    const pluginNames = [...new Set((pluginsLoader.priority || [])
+      .map(plugin => plugin?.name)
+      .filter(name => typeof name === "string" && name.trim()))]
+      .sort((left, right) => left.localeCompare(right, "zh-CN"))
+    res.json({ groupId, groupName, pluginNames })
   }))
   app.get("/api/config/:name", asyncRoute(async (req, res) => {
     if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })

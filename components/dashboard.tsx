@@ -370,7 +370,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const noticeTimer = useRef<number | null>(null)
   const noticeExitTimer = useRef<number | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useBrowserBooleanPreference("mainSidebarCollapsed")
   const api: Api = useCallback((url, init) => request(url, init), [])
   const notify = useCallback((kind: "success" | "error" | "info", message: string) => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
@@ -532,6 +532,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         </main>
       </div>
       {notice && <div className={`admin-toast fixed right-4 top-4 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border bg-white px-4 py-3 text-sm shadow-xl sm:right-6 sm:top-6 ${notice.exiting ? "admin-toast-out" : ""} ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
+      <PluginMatchHelper api={api} notify={notify} />
     </div>
   )
 }
@@ -570,6 +571,133 @@ function PageIntro({ actions }: { actions: PageAction[] }) {
     </div>}
     <Button ref={triggerRef} type="button" variant="outline" size="icon" className="size-12 rounded-full border-border/80 bg-white shadow-lg" aria-label={open ? "关闭页面操作" : "打开页面操作"} aria-haspopup="true" aria-expanded={open} aria-controls="page-actions-menu" title={open ? "关闭页面操作" : "打开页面操作"} onClick={() => setOpen(value => !value)}>{open ? <X /> : <Ellipsis />}</Button>
   </div>
+}
+
+function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
+  const [open, setOpen] = useState(false)
+  const [groupId, setGroupId] = useState("default")
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([{ id: "default", name: "默认群组" }])
+  const [groupName, setGroupName] = useState("默认群组")
+  const [rules, setRules] = useState<any[]>([])
+  const [blockedPluginNames, setBlockedPluginNames] = useState<string[]>([])
+  const [search, setSearch] = useState("")
+  const [testMessage, setTestMessage] = useState("")
+  const [messageType, setMessageType] = useState<"group" | "private">("group")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [scanErrors, setScanErrors] = useState<any[]>([])
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError("")
+    try {
+      const result = await api(`/api/diagnostics/plugin-rules?groupId=${encodeURIComponent(groupId)}`)
+      setGroups(Array.isArray(result.groups) ? result.groups : [{ id: "default", name: "默认群组" }])
+      setGroupName(String(result.groupName || groupId))
+      setRules(Array.isArray(result.rules) ? result.rules : [])
+      setBlockedPluginNames(Array.isArray(result.blockedPluginNames) ? result.blockedPluginNames : [])
+      setScanErrors(Array.isArray(result.scanErrors) ? result.scanErrors : [])
+    } catch (reason) { setError((reason as Error).message) }
+    finally { setLoading(false) }
+  }, [api, groupId])
+
+  useEffect(() => { if (open) void load() }, [load, open])
+
+  const expectedEvent = ["message", messageType, messageType === "group" ? "normal" : "friend"]
+  function eventMatches(pattern: string) {
+    if (!pattern) return true
+    const parts = pattern.split(".")
+    const resolved = parts.map((part, index) => part === "*" ? "*" : expectedEvent[index] || "")
+    return pattern === resolved.join(".")
+  }
+
+  const query = search.trim().toLowerCase()
+  const hasTestMessage = Boolean(testMessage.trim())
+  const filteredRules = rules.filter(rule => {
+    const searchable = `${rule.pluginName} ${rule.sourcePlugin} ${rule.sourceKey} ${rule.fnc} ${rule.pattern}/${rule.flags} ${rule.event} ${rule.pluginEvent}`.toLowerCase()
+    if (query && !searchable.includes(query)) return false
+    if (!hasTestMessage) return true
+    if (!eventMatches(rule.pluginEvent) || (rule.event && !eventMatches(rule.event)) || rule.regexError) return false
+    try {
+      const expression = new RegExp(rule.pattern, rule.flags)
+      expression.lastIndex = 0
+      return expression.test(testMessage)
+    } catch { return false }
+  })
+
+  async function quickDisable(rule: any, scope: "name" | "source") {
+    const names = scope === "source" ? rule.sourcePluginNames as string[] : [String(rule.pluginName)]
+    const additions = [...new Set(names)].filter(name => name && !blockedPluginNames.includes(name))
+    if (!additions.length) return
+    const scopeLabel = scope === "source" ? `整个插件 ${rule.sourcePlugin}` : `子插件 ${rule.pluginName}`
+    const sharedSources = [...new Set(additions.flatMap(name => Array.isArray(rule.nameSources) ? rule.nameSources : []).filter((source: string) => source !== rule.sourcePlugin))]
+    const impactNote = sharedSources.length ? `\n注意：同名插件还来自 ${sharedSources.join("、")}，Yunzai 按名称屏蔽时这些来源也会一起受影响。` : ""
+    if (!window.confirm(`将${scopeLabel}对应的 ${additions.join("、")} 加入「${groupName}」的禁用列表，并立即刷新运行时配置？${impactNote}`)) return
+    setBusy(true)
+    try {
+      const current = await api("/api/config/group.yaml")
+      const nextData = { ...(isObject(current.data) ? current.data : {}) }
+      const existing = groupId === "default" ? nextData.default : nextData[groupId]
+      const target = { ...(isObject(existing) ? existing : groupId === "default" ? {} : { isInheritDefault: 1 }) }
+      const currentDisabled = Array.isArray(target.disable)
+        ? target.disable.map(String)
+        : typeof target.disable === "string" ? target.disable.split(/\r?\n/).filter(Boolean) : []
+      target.disable = [...new Set([...currentDisabled, ...additions])]
+      nextData[groupId] = target
+      const result = await api("/api/config/group.yaml", { method: "PUT", body: JSON.stringify({ data: nextData, baseContent: current.content }) })
+      notify("success", result.message || `${scopeLabel}已加入禁用列表`)
+      await load()
+    } catch (reason) { notify("error", (reason as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  return <>
+    <Button type="button" size="icon" className="fixed bottom-16 right-4 z-40 sm:bottom-[72px] sm:right-6" aria-label="插件正则排查帮助" title="排查插件正则匹配" onClick={() => setOpen(true)}><CircleHelp /></Button>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex h-[min(88dvh,820px)] w-[calc(100%-1.5rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white shadow-2xl focus:outline-none sm:w-[calc(100%-3rem)]">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
+            <div><Dialog.Title className="text-base font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">查找当前是哪个傻逼给你匹配的正则，可以直接快速屏蔽这个插件</Dialog.Description></div>
+            <div className="flex shrink-0 items-center gap-1"><Button type="button" size="icon" variant="ghost" aria-label="刷新插件规则" title="刷新插件规则" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭插件正则排查"><X className="size-4" /></Button></Dialog.Close></div>
+          </div>
+          <div className="grid shrink-0 gap-3 border-b border-border px-5 py-4 md:grid-cols-[minmax(180px,260px)_minmax(0,1fr)]">
+            <div className="space-y-2"><Label className="text-xs">屏蔽作用范围</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-9 text-xs"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent>{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? group.name : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select><div className="text-[10px] text-muted-foreground">当前目标：{groupName}</div></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="plugin-rule-search" className="text-xs">搜索插件、子插件或正则</Label><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input id="plugin-rule-search" className="h-9 pl-9 text-xs" placeholder="名称、处理方法、正则内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
+              <div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label htmlFor="plugin-rule-message" className="text-xs">测试消息（可选）</Label><div role="group" aria-label="消息类型" className="flex rounded-md border border-border p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`rounded px-2 py-0.5 text-[10px] transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div></div><Input id="plugin-rule-message" className="h-9 text-xs" maxLength={512} placeholder="粘贴触发的原始消息（最多 512 字）" value={testMessage} onChange={event => setTestMessage(event.target.value)} /></div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-2.5 text-[10px] text-muted-foreground"><span>{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>禁用按 Yunzai 实际匹配的插件名称写入 group.yaml</span></div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+            {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs text-rose-700">{error}</p>}
+            {loading ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-5 animate-spin" />正在读取当前已加载插件</div>
+              : !error && !filteredRules.length ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground">{hasTestMessage ? "没有规则匹配这条消息" : "没有找到匹配规则"}</div>
+                : filteredRules.map((rule, ruleIndex) => {
+                  const nameBlocked = blockedPluginNames.includes(rule.pluginName)
+                  const sourceNames = Array.isArray(rule.sourcePluginNames) ? rule.sourcePluginNames : [rule.pluginName]
+                  const sourceNeedsBlock = sourceNames.some((name: string) => !blockedPluginNames.includes(name))
+                  return <div key={`${rule.id}:${ruleIndex}`} className="border-b border-border/70 py-3 last:border-0">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-800">{rule.pluginName}</span>{rule.enabled ? <Badge className="border-0 bg-emerald-50 text-emerald-700">当前启用</Badge> : <Badge className="border-0 bg-slate-100 text-slate-600">当前未启用</Badge>}{hasTestMessage && <Badge className="border-0 bg-amber-50 text-amber-800">命中测试消息</Badge>}</div>
+                        <code className="mt-1.5 block break-all rounded-md bg-slate-50 px-2.5 py-2 font-mono text-[11px] leading-5 text-slate-700">/{rule.pattern}/{rule.flags}</code>
+                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground"><span>处理：{rule.fnc}</span><span>来源：{rule.sourceKey || rule.sourcePlugin}</span><span>事件：{rule.event || rule.pluginEvent || "未限制"}</span><span>权限：{rule.permission}</span>{Array.isArray(rule.nameSources) && rule.nameSources.length > 1 && <span className="text-amber-700">同名来源：{rule.nameSources.join("、")}（屏蔽将全部生效）</span>}{rule.regexError && <span className="text-rose-600">正则无效：{rule.regexError}</span>}</div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        {sourceNames.length > 1 && <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={busy || nameBlocked} onClick={() => void quickDisable(rule, "name")}>屏蔽此子插件</Button>}
+                        <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={busy || !sourceNeedsBlock} onClick={() => void quickDisable(rule, sourceNames.length > 1 ? "source" : "name")}>{sourceNames.length > 1 ? "屏蔽整个插件" : "屏蔽插件"}</Button>
+                      </div>
+                    </div>
+                  </div>
+                })}
+            {scanErrors.length > 0 && <p className="mt-3 text-[10px] text-amber-700">有 {scanErrors.length} 个插件类无法读取规则；其余规则仍可检索。</p>}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  </>
 }
 
 function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: typeof Cpu; label: string; value: string; detail: string; tone?: string }) {
@@ -633,7 +761,15 @@ function InfoTile({ icon: Icon, label, value }: { icon: typeof Server; label: st
 function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const [files, setFiles] = useState<string[]>([])
   const [selected, setSelected] = useState("")
-  const [fileSidebarCollapsed, setFileSidebarCollapsed] = useState(false)
+  const [activeGroupId, setActiveGroupId] = useState("default")
+  const [addGroupOpen, setAddGroupOpen] = useState(false)
+  const [newGroupId, setNewGroupId] = useState("")
+  const [groupActionError, setGroupActionError] = useState("")
+  const [pluginNameOptions, setPluginNameOptions] = useState<string[]>([])
+  const [pluginNameGroup, setPluginNameGroup] = useState("")
+  const [pluginNamesLoading, setPluginNamesLoading] = useState(false)
+  const [pluginNamesError, setPluginNamesError] = useState("")
+  const [fileSidebarCollapsed, setFileSidebarCollapsed] = useBrowserBooleanPreference("configSidebarCollapsed")
   const [data, setData] = useState<any>(null)
   const [defaults, setDefaults] = useState<any>(null)
   const [raw, setRaw] = useState("")
@@ -649,7 +785,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const selectedLabel = configFileLabel(selected)
   const load = useCallback(async (name: string) => {
     setLoading(true); setError("")
-    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setLoadedContent(result.content); setDirty(false); setRawMode(false); setEditorFullscreen(false) }
+    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setActiveGroupId("default"); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setLoadedContent(result.content); setDirty(false); setRawMode(false); setEditorFullscreen(false) }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }, [api])
@@ -681,7 +817,64 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   }, [editorFullscreen])
   useEffect(() => { if (selected && !data) load(selected) }, [selected, data, load])
   const visible = files.filter(file => `${file} ${configFileLabel(file)}`.toLowerCase().includes(search.toLowerCase()))
+  const groupSectionKeys = selected.toLowerCase() === "group.yaml" && isObject(data)
+    ? Object.keys(data).filter(key => (key === "default" || /^\d+$/.test(key)) && isObject(data[key])).sort((left, right) => left === "default" ? -1 : right === "default" ? 1 : 0)
+    : []
+  const activeGroupSection = groupSectionKeys.includes(activeGroupId) ? activeGroupId : groupSectionKeys[0] || ""
+  useEffect(() => {
+    if (selected.toLowerCase() !== "group.yaml" || !activeGroupSection) {
+      setPluginNameOptions([])
+      setPluginNameGroup("")
+      setPluginNamesError("")
+      setPluginNamesLoading(false)
+      return
+    }
+    let cancelled = false
+    setPluginNameOptions([])
+    setPluginNamesError("")
+    setPluginNamesLoading(true)
+    api(`/api/config/group-plugin-names/${encodeURIComponent(activeGroupSection)}`)
+      .then(result => {
+        if (cancelled) return
+        setPluginNameOptions(Array.isArray(result.pluginNames) ? result.pluginNames : [])
+        setPluginNameGroup(String(result.groupName || activeGroupSection))
+      })
+      .catch(reason => { if (!cancelled) setPluginNamesError((reason as Error).message) })
+      .finally(() => { if (!cancelled) setPluginNamesLoading(false) })
+    return () => { cancelled = true }
+  }, [activeGroupSection, api, selected])
+  const groupOverrides = activeGroupSection !== "default" && isObject(data?.[activeGroupSection]) ? data[activeGroupSection] : {}
+  const mergedGroupSettings = activeGroupSection && activeGroupSection !== "default"
+    ? { ...(isObject(defaults?.default) ? defaults.default : {}), ...(isObject(data?.default) ? data.default : {}), ...groupOverrides }
+    : null
+  const activeGroupSettings = activeGroupSection === "default"
+    ? data?.default
+    : mergedGroupSettings?.isInheritDefault === 1
+      ? mergedGroupSettings
+      : { ...mergedGroupSettings, enable: Object.prototype.hasOwnProperty.call(groupOverrides, "enable") ? groupOverrides.enable : [], disable: Object.prototype.hasOwnProperty.call(groupOverrides, "disable") ? groupOverrides.disable : [] }
   function update(path: string[], value: any) { setData((old: any) => setNested(old, path, value)); setDirty(true) }
+  function addGroup(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const groupId = newGroupId.trim()
+    if (!/^\d+$/.test(groupId)) { setGroupActionError("群号只能包含数字"); return }
+    if (Object.prototype.hasOwnProperty.call(data, groupId)) { setGroupActionError("这个群已经有单独配置了"); return }
+    setData((current: any) => ({ ...current, [groupId]: { isInheritDefault: 1 } }))
+    setDirty(true)
+    setActiveGroupId(groupId)
+    setAddGroupOpen(false)
+    setNewGroupId("")
+    setGroupActionError("")
+  }
+  function removeGroup(groupId: string) {
+    if (!window.confirm(`确定删除群 ${groupId} 的单独配置？删除内容会在点击“保存更改”后写入配置文件。`)) return
+    setData((current: any) => {
+      const next = { ...current }
+      delete next[groupId]
+      return next
+    })
+    setDirty(true)
+    setActiveGroupId(current => current === groupId ? "default" : current)
+  }
   async function save() {
     if (!selected || saving || (!dirty && !rawMode)) return
     setSaving(true)
@@ -748,15 +941,52 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
             <Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button>
           </div>
         </CardHeader>
+        {!rawMode && groupSectionKeys.length > 0 && <div role="group" aria-label="群组设置分组" className="flex shrink-0 items-center border-b border-border bg-card px-3 sm:px-5">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+          {groupSectionKeys.map(groupId => {
+            const active = groupId === activeGroupSection
+            return <div key={groupId} className={`flex shrink-0 items-center border-b-2 transition-colors ${active ? "border-primary" : "border-transparent"}`}>
+              <button type="button" aria-pressed={active} title={groupId === "default" ? "默认群组配置" : `群 ${groupId}`} onClick={() => setActiveGroupId(groupId)} className={`flex shrink-0 items-center gap-2 py-2 pl-3 text-xs font-medium ${groupId === "default" ? "pr-3" : "pr-1"} ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                <span className="relative grid size-6 shrink-0 place-items-center overflow-hidden rounded-full bg-muted">
+                  <Users className="size-3.5 text-muted-foreground" />
+                  {groupId !== "default" && <img src={`https://p.qlogo.cn/gh/${encodeURIComponent(groupId)}/${encodeURIComponent(groupId)}/100`} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} />}
+                </span>
+                {groupId === "default" ? "默认群组" : `群 ${groupId}`}
+              </button>
+              {groupId !== "default" && <button type="button" aria-label={`删除群 ${groupId}`} title="删除此群配置" onClick={() => removeGroup(groupId)} className="mr-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground/60 transition hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3.5" /></button>}
+            </div>
+          })}
+          </div>
+          <Button type="button" size="icon" variant="ghost" className="ml-1 size-8 shrink-0" aria-label="新增群配置" title="新增群配置" onClick={() => { setNewGroupId(""); setGroupActionError(""); setAddGroupOpen(true) }}><Plus className="size-4" /></Button>
+        </div>}
         <CardContent className={rawMode || editorFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : "p-5"}>
         {error && <div className="mb-4"><ErrorState message={error} /></div>}
         {loading && <div className="grid min-h-64 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div>}
         {!loading && rawMode && <MonacoCodeEditor key={selected} path={selected || "config.yaml"} value={raw} className="min-h-0 flex-1 overflow-hidden border-t border-border" onChange={value => { setRaw(value); setDirty(true) }} />}
-        {!loading && !rawMode && data && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <ConfigField key={key} name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} />)}</div>}
+        {!loading && !rawMode && groupSectionKeys.length > 0 && activeGroupSection && isObject(activeGroupSettings) && <div className="space-y-5">{Object.entries(activeGroupSettings).map(([key, value]) => {
+          const listDoesNotInherit = activeGroupSection !== "default" && (key === "enable" || key === "disable") && activeGroupSettings.isInheritDefault !== 1 && !Object.prototype.hasOwnProperty.call(groupOverrides, key)
+          const defaultValue = activeGroupSection === "default" ? defaults?.default?.[key] : listDoesNotInherit ? undefined : data.default?.[key] ?? defaults?.default?.[key]
+          return <ConfigField key={key} name={key} value={value} defaultValue={defaultValue} path={[activeGroupSection, key]} onChange={update} depth={1} pluginNames={key === "enable" || key === "disable" ? pluginNameOptions : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} />
+        })}</div>}
+        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <ConfigField key={key} name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} />)}</div>}
         {!loading && !data && !error && <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">选择左侧配置文件开始编辑</div>}
         </CardContent>
       </Card>
     </div>
+    <Dialog.Root open={addGroupOpen} onOpenChange={open => { setAddGroupOpen(open); if (!open) setGroupActionError("") }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+          <Dialog.Title className="text-base font-semibold">新增群配置</Dialog.Title>
+          <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">新群默认继承默认群组配置，可在创建后单独调整。</Dialog.Description>
+          <form onSubmit={addGroup} className="mt-4 space-y-3">
+            <div className="space-y-1.5"><Label htmlFor="new-group-id" className="text-xs">群号</Label><Input id="new-group-id" autoFocus inputMode="numeric" pattern="[0-9]+" value={newGroupId} onChange={event => { setNewGroupId(event.target.value); setGroupActionError("") }} placeholder="输入纯数字群号" required /></div>
+            {groupActionError && <p role="alert" className="text-xs text-rose-600">{groupActionError}</p>}
+            <div className="flex justify-end gap-2 pt-1"><Button type="button" variant="outline" onClick={() => setAddGroupOpen(false)}>取消</Button><Button type="submit"><Plus />添加群</Button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   </>
 }
 
@@ -783,6 +1013,34 @@ function useSaveShortcut(onSave: () => void | Promise<void>) {
     return () => document.removeEventListener("keydown", handleKeyDown, true)
   }, [])
 }
+
+type UIPreferenceKey = "mainSidebarCollapsed" | "configSidebarCollapsed" | "pluginSidebarCollapsed"
+const UI_PREFERENCES_KEY = "elia-admin-panel:ui-preferences"
+
+function readUIPreferences(): Partial<Record<UIPreferenceKey, boolean>> {
+  try {
+    const stored = window.localStorage.getItem(UI_PREFERENCES_KEY)
+    if (!stored) return {}
+    const parsed = JSON.parse(stored)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+  } catch { return {} }
+}
+
+function useBrowserBooleanPreference(name: UIPreferenceKey, initialValue = false) {
+  const [value, setValue] = useState(initialValue)
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => {
+    const stored = readUIPreferences()[name]
+    if (typeof stored === "boolean") setValue(stored)
+    setLoaded(true)
+  }, [name])
+  useEffect(() => {
+    if (!loaded) return
+    try { window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({ ...readUIPreferences(), [name]: value })) } catch {}
+  }, [loaded, name, value])
+  return [value, setValue] as const
+}
+
 function listField(name: string) {
   return /^(enable|disable|botAlias|otherBotQQ|masterQQ|disableAdopt|white(?:Group|QQ)?|black(?:Group|QQ)?)$/i.test(name)
     || /(?:whitelist|blacklist|allowlist|denylist|(?:qq|group|user)?ids?)$/i.test(name)
@@ -797,9 +1055,14 @@ function inferredListItemType(name: string) {
 function numericBooleanField(name: string, value: unknown) {
   return (name === "autoFriend" || name === "addPrivate" || name === "isInheritDefault") && (value === 0 || value === 1)
 }
-function TagListField({ values, label, itemType = "string", placeholder = "输入新项", onChange }: { values: any[]; label: string; itemType?: "string" | "number" | "boolean"; placeholder?: string; onChange: (value: any[]) => void }) {
+function TagListField({ values, label, itemType = "string", placeholder = "输入新项", pluginNames, pluginNameGroup, pluginNamesLoading = false, pluginNamesError = "", onChange }: { values: any[]; label: string; itemType?: "string" | "number" | "boolean"; placeholder?: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; onChange: (value: any[]) => void }) {
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerSearch, setPickerSearch] = useState("")
+  const [selectedPluginNames, setSelectedPluginNames] = useState<string[]>([])
+  const filteredPluginNames = (pluginNames || []).filter(name => name.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
+  const existingPluginNames = new Set(values.map(String))
 
   function addValues(text = draft) {
     const entries = text.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
@@ -818,6 +1081,13 @@ function TagListField({ values, label, itemType = "string", placeholder = "输�
     setError("")
   }
 
+  function addSelectedPlugins() {
+    const additions = selectedPluginNames.filter(name => !existingPluginNames.has(name))
+    if (additions.length) onChange([...values, ...additions])
+    setSelectedPluginNames([])
+    setPickerOpen(false)
+  }
+
   return <div className="space-y-1.5">
     <div role="group" aria-label={`${label}列表`} className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl border border-input bg-background p-2 shadow-sm transition focus-within:ring-2 focus-within:ring-indigo-300">
     {values.map((item, index) => <span key={`${index}-${String(item)}`} className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-xs text-slate-700">
@@ -826,14 +1096,39 @@ function TagListField({ values, label, itemType = "string", placeholder = "输�
     </span>)}
     <Input aria-label={`${label}，添加一项`} className="h-8 min-w-32 flex-1 border-0 bg-transparent px-1 text-xs shadow-none focus-visible:ring-0" inputMode={itemType === "number" ? "decimal" : undefined} placeholder={placeholder} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); addValues() } }} onPaste={event => { const text = event.clipboardData.getData("text"); if (text.includes("\n")) { event.preventDefault(); addValues([draft, text].filter(Boolean).join("\n")) } }} />
     <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0" aria-label={`添加${label}`} title="添加一项" disabled={!draft.trim()} onClick={() => addValues()}><Plus className="size-4" /></Button>
+    {pluginNames !== undefined && <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" aria-label={`从插件名称选择${label}`} title="从已加载插件中选择" onClick={() => { setPickerSearch(""); setSelectedPluginNames([]); setPickerOpen(true) }}><Search className="size-3.5" />选择插件</Button>}
     </div>
     {error && <p role="alert" className="text-[10px] text-rose-600">{error}</p>}
+    {pluginNames !== undefined && <Dialog.Root open={pickerOpen} onOpenChange={open => { setPickerOpen(open); if (!open) setSelectedPluginNames([]) }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+          <Dialog.Title className="text-base font-semibold">选择{label}</Dialog.Title>
+          <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{pluginNameGroup || "当前群组"} · 名称与 Yunzai 插件匹配规则一致。</Dialog.Description>
+          <div className="relative mt-4"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input aria-label="搜索插件名称" className="h-9 pl-9 text-xs" placeholder="搜索已加载插件…" value={pickerSearch} onChange={event => setPickerSearch(event.target.value)} /></div>
+          <div role="listbox" aria-label="已加载插件名称" aria-multiselectable="true" className="mt-3 min-h-24 flex-1 space-y-1 overflow-y-auto rounded-lg border border-border/70 p-1.5">
+            {pluginNamesLoading ? <div className="grid min-h-24 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-4 animate-spin" />正在获取插件名称</div>
+              : pluginNamesError ? <p role="alert" className="p-3 text-xs text-rose-600">{pluginNamesError}</p>
+                : filteredPluginNames.length ? filteredPluginNames.map(name => {
+                  const added = existingPluginNames.has(name)
+                  const checked = selectedPluginNames.includes(name)
+                  return <button key={name} type="button" role="option" aria-selected={added || checked} disabled={added} onClick={() => setSelectedPluginNames(current => checked ? current.filter(item => item !== name) : [...current, name])} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition ${added ? "text-slate-400" : checked ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                    {checked || added ? <Check className="size-3.5 shrink-0" /> : <Plus className="size-3.5 shrink-0 text-slate-400" />}
+                    <span className="min-w-0 flex-1 truncate">{name}</span><span className="text-[10px] text-muted-foreground">{added ? "已添加" : ""}</span>
+                  </button>
+                })
+                : <p className="p-3 text-xs text-muted-foreground">{pluginNames?.length ? "没有匹配的插件" : "当前没有已加载的插件名称"}</p>}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-muted-foreground">已选 {selectedPluginNames.length} 项</span><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setPickerOpen(false)}>取消</Button><Button type="button" size="sm" disabled={!selectedPluginNames.length || pluginNamesLoading} onClick={addSelectedPlugins}><Check />添加所选</Button></div></div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>}
   </div>
 }
 
-function StringListField({ value, label, onChange }: { value: string; label: string; onChange: (value: string) => void }) {
+function StringListField({ value, label, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError, onChange }: { value: string; label: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; onChange: (value: string) => void }) {
   const values = value.split(/\r?\n/).filter(item => item.trim() !== "")
-  return <TagListField values={values} label={label} placeholder="添加一项" onChange={next => onChange(next.join("\n"))} />
+  return <TagListField values={values} label={label} placeholder="添加一项" pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(next.join("\n"))} />
 }
 
 function isSimpleRecord(value: any) {
@@ -885,7 +1180,7 @@ function StructuredConfigField({ value, label, onChange, arrayOnly = false }: { 
   />
 }
 
-function ConfigListField({ name, label, value, defaultValue, onChange, forceItemType }: { name: string; label: string; value: any; defaultValue?: any; onChange: (value: any) => void; forceItemType?: "string" | "number" | "boolean" }) {
+function ConfigListField({ name, label, value, defaultValue, onChange, forceItemType, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError }: { name: string; label: string; value: any; defaultValue?: any; onChange: (value: any) => void; forceItemType?: "string" | "number" | "boolean"; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string }) {
   const values = Array.isArray(value) ? value : []
   const defaults = Array.isArray(defaultValue) ? defaultValue : []
   const sampleValues = values.length ? values : defaults
@@ -906,12 +1201,13 @@ function ConfigListField({ name, label, value, defaultValue, onChange, forceItem
     <TagListField values={values} label={label} placeholder="例如：stoken" onChange={onChange} />
   </div>
 
-  return <TagListField values={values} label={label} itemType={itemType} placeholder={itemType === "number" ? "输入数字" : itemType === "boolean" ? "输入 true/false" : "输入新项"} onChange={next => onChange(next)} />
+  const supportsPluginNames = name === "enable" || name === "disable"
+  return <TagListField values={values} label={label} itemType={itemType} placeholder={itemType === "number" ? "输入数字" : itemType === "boolean" ? "输入 true/false" : "输入新项"} pluginNames={supportsPluginNames ? pluginNames : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(next)} />
 }
 
-function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: { name: string; value: any; defaultValue?: any; path: string[]; onChange: (path: string[], value: any) => void; depth?: number }) {
+function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError }: { name: string; value: any; defaultValue?: any; path: string[]; onChange: (path: string[], value: any) => void; depth?: number; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string }) {
   const label = configFieldLabel(name)
-  if (isObject(value)) return <div className={`${depth ? "ml-3 border-l border-border pl-4" : ""}`}><div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-2"><span className="grid size-6 place-items-center rounded-md bg-indigo-50 text-indigo-600"><Braces className="size-3.5" /></span><span className="text-sm font-semibold">{label}</span></div><div className="space-y-4">{Object.entries(value).map(([child, current]) => <ConfigField key={child} name={child} value={current} defaultValue={defaultValue?.[child]} path={[...path, child]} onChange={onChange} depth={depth + 1} />)}</div></div>
+  if (isObject(value)) return <div className={`${depth ? "ml-3 border-l border-border pl-4" : ""}`}><div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-2"><span className="grid size-6 place-items-center rounded-md bg-indigo-50 text-indigo-600"><Braces className="size-3.5" /></span><span className="text-sm font-semibold">{label}</span></div><div className="space-y-4">{Object.entries(value).map(([child, current]) => <ConfigField key={child} name={child} value={current} defaultValue={defaultValue?.[child]} path={[...path, child]} onChange={onChange} depth={depth + 1} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} />)}</div></div>
   const hintValue = Array.isArray(defaultValue) ? defaultValue.join(", ") : isObject(defaultValue) ? stringifyYaml(defaultValue).replace(/\s+/g, " ").trim() : String(defaultValue)
   const hint = defaultValue !== undefined && JSON.stringify(value) !== JSON.stringify(defaultValue) ? `默认值：${hintValue}` : ""
   const nullableList = (value === null || value === undefined) && listField(name)
@@ -925,8 +1221,8 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
     <div className="min-w-0">{selectOptions ? <Select value={selectValue} onValueChange={selected => onChange(path, numericConfigSelectFields.has(name) ? Number(selected) : selected)}><SelectTrigger aria-label={label} className={` ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`}><SelectValue placeholder="未设置，请选择" /></SelectTrigger><SelectContent>{!hasValidSelection && selectValue && <SelectItem value={selectValue} disabled>无效值：{selectValue}，请选择</SelectItem>}{selectOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
-      : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
-      : listField(name) && typeof value === "string" ? <StringListField label={label} value={value} onChange={next => onChange(path, next)} />
+      : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(path, next)} />
+      : listField(name) && typeof value === "string" ? <StringListField label={label} value={value} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(path, next)} />
       : value === null || value === undefined ? secretField(name) ? <SecretInput value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} /> : <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
       : multilineText && !secretField(name) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={String(value)} onChange={event => onChange(path, event.target.value)} />
       : secretField(name) ? <SecretInput value={String(value)} onChange={event => onChange(path, event.target.value)} /> : <Input type="text" value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
@@ -955,7 +1251,7 @@ function splitPluginSchemaGroups(schemas: any[]) {
 
 function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [plugins, setPlugins] = useState<any[]>([])
-  const [pluginSidebarCollapsed, setPluginSidebarCollapsed] = useState(false)
+  const [pluginSidebarCollapsed, setPluginSidebarCollapsed] = useBrowserBooleanPreference("pluginSidebarCollapsed")
   const [sourceFullscreen, setSourceFullscreen] = useState(false)
   const [archives, setArchives] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
