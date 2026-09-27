@@ -27,13 +27,13 @@ type Section = "overview" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
 
-const navigation: { id: Section; label: string; description: string; icon: typeof LayoutDashboard }[] = [
-  { id: "overview", label: "运行概览", description: "运行状态、资源与快捷操作", icon: LayoutDashboard },
-  { id: "config", label: "配置中心", description: "系统、群组与运行配置", icon: Settings2 },
-  { id: "plugins", label: "插件控制", description: "兼容 Guoba 配置与操作", icon: Plug },
-  { id: "files", label: "文件管理", description: "浏览并编辑工作区文本文件", icon: FileCode2 },
-  { id: "logs", label: "运行日志", description: "查看近期 Bot 日志", icon: TerminalSquare },
-  { id: "debug", label: "消息调试", description: "模拟标准输入并调试插件消息", icon: MessageSquareText },
+const navigation: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: "overview", label: "运行概览", icon: LayoutDashboard },
+  { id: "config", label: "配置中心", icon: Settings2 },
+  { id: "plugins", label: "插件控制", icon: Plug },
+  { id: "files", label: "文件管理", icon: FileCode2 },
+  { id: "logs", label: "运行日志", icon: TerminalSquare },
+  { id: "debug", label: "消息调试", icon: MessageSquareText },
 ]
 
 const configFileLabels: Record<string, string> = {
@@ -385,7 +385,7 @@ export default function Dashboard() {
             const selected = section === item.id
             return <button key={item.id} title={sidebarCollapsed ? item.label : undefined} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
               <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
-              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label min-w-0 flex-1"><span className="block text-[13px] font-medium">{item.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{item.description}</span></span>
+              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label min-w-0 flex-1"><span className="block text-[13px] font-medium">{item.label}</span></span>
               {selected && <span aria-hidden="true" className="admin-sidebar-selected size-1.5 rounded-full bg-blue-300" />}
             </button>
           })}
@@ -409,7 +409,7 @@ export default function Dashboard() {
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <header className="sticky top-0 z-20 flex h-[70px] items-center justify-between border-b border-border/80 bg-white/90 px-5 backdrop-blur-xl md:px-9">
-          <div className="flex min-w-0 items-center gap-3"><Button variant="ghost" size="icon" className="md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button><div className="grid size-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><ActiveIcon className="size-[18px]" /></div><div className="min-w-0"><div className="text-[14px] font-semibold">{active.label}</div><div className="hidden text-[11px] text-muted-foreground sm:block">{active.description}</div></div></div>
+          <div className="flex min-w-0 items-center gap-3"><Button variant="ghost" size="icon" className="md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button><div className="grid size-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><ActiveIcon className="size-[18px]" /></div><div className="min-w-0"><div className="text-[14px] font-semibold">{active.label}</div></div></div>
           <div className="flex items-center gap-2 sm:gap-4"><Badge className="gap-1.5 border-emerald-100 bg-emerald-50 text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-500" />本机管理</Badge><span className="hidden text-xs text-slate-400 lg:block">Yunzai</span><Button variant="ghost" size="icon" aria-label="退出登录" onClick={logout}><LogOut className="size-4 text-slate-500" /></Button></div>
         </header>
         <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-9 lg:py-8">
@@ -426,8 +426,8 @@ export default function Dashboard() {
   )
 }
 
-function PageIntro({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-indigo-500">{eyebrow}</div><h1 className="text-[25px] font-semibold tracking-tight">{title}</h1><p className="mt-1.5 text-sm text-muted-foreground">{description}</p></div>{action}</div>
+function PageIntro({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: React.ReactNode }) {
+  return <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div>{eyebrow && <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-indigo-500">{eyebrow}</div>}<h1 className="text-[25px] font-semibold tracking-tight">{title}</h1>{description && <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>}</div>{action}</div>
 }
 
 function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: typeof Cpu; label: string; value: string; detail: string; tone?: string }) {
@@ -783,8 +783,6 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     setError("")
   }
   const shown = plugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(search.toLowerCase()))
-  const largePlugins = shown.filter(plugin => plugin.kind === "large")
-  const smallPlugins = shown.filter(plugin => plugin.kind === "small")
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
   async function save() {
     if (!selected || busy) return
@@ -806,7 +804,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     try {
       const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: selected.sourcePath, content: sourceContent }) })
       setSourceDirty(false)
-      notify("success", result.message || "小插件源码已保存")
+      notify("success", result.message || "源码已保存")
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
   }
@@ -860,28 +858,19 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   }
   function renderPlugin(plugin: any) {
     const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
-    const subtitle = plugin.kind === "small"
-      ? `小插件 · ${plugin.sourcePath.replace(/^plugins\//, "")}`
-      : plugin.hasConfig
-        ? "大插件 · support 配置入口"
-        : plugin.hasSupport
-          ? "大插件 · support 操作入口"
-        : plugin.configFiles?.length
-          ? `大插件 · 可查看 ${plugin.configFiles.length} 个配置文件`
-          : "大插件 · 未发现配置入口"
     const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
     return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}>
       <span className={`grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
         {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
       </span>
-      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{plugin.title}</span><span className="mt-1 block truncate text-[10px] text-muted-foreground">{subtitle}</span></span>
+      <span className="min-w-0 flex-1 truncate text-xs font-medium">{plugin.title}</span>
       {canOpen && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />}
     </button>
   }
   function renderCompactPlugin(plugin: any) {
     const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
     const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
-    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-label={`${plugin.title}，${plugin.kind === "small" ? "小插件" : "大插件"}`} title={`${plugin.title} · ${plugin.kind === "small" ? "小插件" : "大插件"}`} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`relative mx-auto flex size-11 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-label={plugin.title} title={plugin.title} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`relative mx-auto flex size-11 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
       <span className={`grid size-8 place-items-center overflow-hidden rounded-lg ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
         {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
       </span>
@@ -889,23 +878,21 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     </button>
   }
   return <>
-    <PageIntro eyebrow="Plugin control" title="插件控制" description="大插件优先使用 *.support.js 配置入口；小插件可直接编辑源码，没有入口的大插件可查看目录内的配置文件。" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
+    <PageIntro title="插件控制" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`}>
       <Card className="relative h-fit overflow-visible">
         <div className={`absolute inset-x-0 top-0 z-20 hidden gap-1 p-2 transition-opacity duration-200 xl:block ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <Button size="icon" variant="ghost" className="mx-auto mb-1 flex" aria-label="展开插件列表侧栏" title="展开插件列表侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
           <div className="max-h-[570px] space-y-1 overflow-y-auto scrollbar-thin">
-            {largePlugins.length > 0 && <div className="space-y-1">{largePlugins.map(renderCompactPlugin)}</div>}
-            {smallPlugins.length > 0 && <div className={`${largePlugins.length ? "mt-2 border-t border-border/70 pt-2" : ""} space-y-1`}>{smallPlugins.map(renderCompactPlugin)}</div>}
+            {shown.map(renderCompactPlugin)}
             {!shown.length && !loading && <p className="px-1 py-3 text-center text-[9px] text-muted-foreground">无插件</p>}
           </div>
         </div>
         <div className={`transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
         <div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold"><span>本地插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件列表侧栏" title="收起插件列表侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
         <div className="max-h-[470px] overflow-y-auto px-2 pb-3">
-          {largePlugins.length > 0 && <section aria-label="大插件" className="space-y-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>大插件 · 独立目录</span><span>{largePlugins.length}</span></div>{largePlugins.map(renderPlugin)}</section>}
-          {smallPlugins.length > 0 && <section aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>小插件 · 单文件源码</span><span>{smallPlugins.length}</span></div>{smallPlugins.map(renderPlugin)}</section>}
+          {shown.map(renderPlugin)}
           {!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
         </div>
         {archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}
@@ -916,8 +903,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
           : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} /> : null)}</div>
-            : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前大插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
-              : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或为大插件添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
+            : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
+              : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
       </CardContent></Card>
     </div>
