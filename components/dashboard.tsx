@@ -519,7 +519,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
       <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-[#373737] bg-[#202124] text-slate-100 shadow-xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0">
+        <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0 md:top-8">
           <div className="flex items-center gap-3 px-2 pb-7">
             <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
             <div className="min-w-0 truncate font-semibold tracking-tight">EliaAdminPanel</div>
@@ -543,7 +543,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronLeft className="size-4" />收起</button></div>
           </div>
         </div>
-        <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3">
+        <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3 md:top-8">
           <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
           <nav className="w-full space-y-1" aria-label="主导航">
             {navigation.map(item => {
@@ -562,7 +562,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
