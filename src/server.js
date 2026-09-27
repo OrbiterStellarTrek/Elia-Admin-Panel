@@ -14,11 +14,9 @@ import cfg from "../../../lib/config/config.js"
 const ROOT = process.cwd()
 const PLUGINS = path.join(ROOT, "plugins")
 const PANEL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const PANEL_CONFIG = path.join(PANEL_DIR, "config.yaml")
 const DATA_DIR = path.join(ROOT, "data", "elia-admin-panel")
+const PANEL_CONFIG = path.join(DATA_DIR, "config.yaml")
 const LOGS_DIR = path.join(ROOT, "logs")
-const PASSWORD_FILE = path.join(DATA_DIR, "access-password.txt")
-const SESSION_SECRET_FILE = path.join(DATA_DIR, "session-secret.txt")
 const SESSION_STORE_FILE = path.join(DATA_DIR, "sessions.json")
 const STATIC_DIR = path.join(PANEL_DIR, "out")
 const MAX_TEXT_BYTES = 1_500_000
@@ -26,6 +24,7 @@ const MAX_LOG_TAIL_BYTES = 512 * 1024
 const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000
+const PASSWORD_HASH_ITERATIONS = 310_000
 const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
@@ -52,9 +51,7 @@ let expressServer
 let logWebSocketServer
 let logDirectoryWatcher
 let logHeartbeatTimer
-let generatedPassword = ""
 let loginCode
-let activeSettings
 let warnedInvalidPublicUrl = false
 const logWatchTimers = new Map()
 
@@ -101,32 +98,92 @@ async function rejectSymlinkPath(absolute) {
   }
 }
 
-async function readPanelSettings() {
+async function readPanelConfig() {
   try {
     const parsed = YAML.parse(await fs.readFile(PANEL_CONFIG, "utf8")) || {}
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("配置内容必须是 YAML 对象")
+    return parsed
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error
+    return { host: "127.0.0.1", port: 50882, publicUrl: "" }
+  }
+}
+
+async function writePanelConfig(config) {
+  await fs.mkdir(DATA_DIR, { recursive: true })
+  const temporaryFile = `${PANEL_CONFIG}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`
+  await fs.writeFile(temporaryFile, YAML.stringify(config), { encoding: "utf8", mode: 0o600, flag: "wx" })
+  try {
+    await fs.rename(temporaryFile, PANEL_CONFIG)
+  } catch (error) {
+    await fs.rm(temporaryFile, { force: true }).catch(() => {})
+    throw error
+  }
+}
+
+async function readPanelSettings() {
+  try {
+    const parsed = await readPanelConfig()
     const port = Number(parsed.port || 50882)
     return {
       host: String(parsed.host || "127.0.0.1").trim(),
       port: Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 50882,
+      publicUrl: String(parsed.publicUrl || "").trim(),
     }
   } catch (error) {
-    if (error.code !== "ENOENT") safeLogger("error", `[AdminPanel] 读取面板配置失败：${error.message}`)
-    return { host: "127.0.0.1", port: 50882 }
+    safeLogger("error", `[AdminPanel] 读取面板配置失败：${error.message}`)
+    return { host: "127.0.0.1", port: 50882, publicUrl: "" }
   }
 }
 
-async function getPassword() {
-  if (process.env.YUNZAI_PANEL_PASSWORD?.length) return process.env.YUNZAI_PANEL_PASSWORD
-  try {
-    return (await fs.readFile(PASSWORD_FILE, "utf8")).trim()
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error
+function derivePassword(password, salt, iterations = PASSWORD_HASH_ITERATIONS) {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, iterations, 32, "sha256", (error, derived) => {
+      if (error) reject(error)
+      else resolve(derived)
+    })
+  })
+}
+
+async function createPasswordCredential(password) {
+  const salt = crypto.randomBytes(16)
+  const hash = await derivePassword(password, salt)
+  return {
+    passwordSalt: salt.toString("hex"),
+    passwordHash: hash.toString("hex"),
+    passwordIterations: PASSWORD_HASH_ITERATIONS,
   }
-  await fs.mkdir(DATA_DIR, { recursive: true })
-  generatedPassword = crypto.randomBytes(24).toString("base64url")
-  await fs.writeFile(PASSWORD_FILE, `${generatedPassword}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
-  safeLogger("mark", `[AdminPanel] 已生成首次登录密码并保存至 ${path.relative(ROOT, PASSWORD_FILE)}`)
-  return generatedPassword
+}
+
+function hasPasswordCredential(config) {
+  return typeof config.passwordSalt === "string" && /^[a-f0-9]{32}$/i.test(config.passwordSalt)
+    && typeof config.passwordHash === "string" && /^[a-f0-9]{64}$/i.test(config.passwordHash)
+    && Number.isInteger(config.passwordIterations) && config.passwordIterations >= 100_000 && config.passwordIterations <= 1_000_000
+}
+
+async function initializePassword() {
+  const config = await readPanelConfig()
+  if (hasPasswordCredential(config)) return
+  if (config.passwordHash || config.passwordSalt || config.passwordIterations) {
+    throw new Error("面板配置中的密码哈希无效；请在插件配置页重新设置面板密码")
+  }
+  const generatedPassword = crypto.randomBytes(24).toString("base64url")
+  const credential = await createPasswordCredential(generatedPassword)
+  const { password: _plaintext, ...safeConfig } = config
+  await writePanelConfig({ ...safeConfig, ...credential })
+  safeLogger("mark", `[EliaAdminPanel] 首次登录密码（仅显示本次）：${generatedPassword}`)
+}
+
+async function verifyPanelPassword(submitted) {
+  if (typeof submitted !== "string" || submitted.length > 1024) return false
+  const config = await readPanelConfig()
+  if (hasPasswordCredential(config)) {
+    const salt = Buffer.from(config.passwordSalt, "hex")
+    const expected = Buffer.from(config.passwordHash, "hex")
+    const actual = await derivePassword(submitted, salt, config.passwordIterations)
+    return crypto.timingSafeEqual(actual, expected)
+  }
+  return false
 }
 
 function hashSecret(value) {
@@ -134,37 +191,15 @@ function hashSecret(value) {
 }
 
 async function loadSessionSecret() {
-  const envSecret = process.env.YUNZAI_PANEL_SECRET
-  if (envSecret) {
-    if (Buffer.byteLength(envSecret, "utf8") < 32) {
-      throw new Error("YUNZAI_PANEL_SECRET 至少需要 32 个 UTF-8 字节")
-    }
-    return envSecret
+  const config = await readPanelConfig()
+  if (typeof config.secret === "string" && config.secret) {
+    if (Buffer.byteLength(config.secret, "utf8") < 32) throw new Error("面板配置中的 Secret 至少需要 32 个 UTF-8 字节")
+    return config.secret
   }
-
-  try {
-    const savedSecret = (await fs.readFile(SESSION_SECRET_FILE, "utf8")).trim()
-    if (Buffer.byteLength(savedSecret, "utf8") < 32) {
-      throw new Error(`${path.relative(ROOT, SESSION_SECRET_FILE)} 中的 Secret 无效，至少需要 32 个 UTF-8 字节`)
-    }
-    return savedSecret
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error
-  }
-
   const generatedSecret = crypto.randomBytes(32).toString("base64url")
-  try {
-    await fs.writeFile(SESSION_SECRET_FILE, `${generatedSecret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
-    safeLogger("mark", `[AdminPanel] 已生成并保存浏览器会话 Secret：${path.relative(ROOT, SESSION_SECRET_FILE)}`)
-    return generatedSecret
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error
-    const savedSecret = (await fs.readFile(SESSION_SECRET_FILE, "utf8")).trim()
-    if (Buffer.byteLength(savedSecret, "utf8") < 32) {
-      throw new Error(`${path.relative(ROOT, SESSION_SECRET_FILE)} 中的 Secret 无效，至少需要 32 个 UTF-8 字节`)
-    }
-    return savedSecret
-  }
+  await writePanelConfig({ ...config, secret: generatedSecret })
+  safeLogger("mark", `[AdminPanel] 已生成并保存浏览器会话 Secret：${path.relative(ROOT, PANEL_CONFIG)}`)
+  return generatedSecret
 }
 
 async function loadPersistedSessions() {
@@ -313,8 +348,10 @@ function allowAttempt(bucket, key, limit, windowMs) {
   return true
 }
 
-function panelAddresses() {
-  const envAddresses = String(process.env.YUNZAI_PANEL_PUBLIC_URL || "").split(",").map(value => {
+async function panelAddresses() {
+  const settings = await readPanelSettings()
+  const publicUrl = settings.publicUrl
+  const configuredAddresses = publicUrl.split(/[,\r\n]+/).map(value => {
     try {
       const url = new URL(value.trim())
       if (!["http:", "https:"].includes(url.protocol) || url.pathname !== "/" || url.search || url.hash) return ""
@@ -323,12 +360,12 @@ function panelAddresses() {
       return ""
     }
   }).filter(Boolean)
-  if (envAddresses.length) return [...new Set(envAddresses)]
-  if (process.env.YUNZAI_PANEL_PUBLIC_URL && !warnedInvalidPublicUrl) {
+  if (configuredAddresses.length) return [...new Set(configuredAddresses)]
+  if (publicUrl && !warnedInvalidPublicUrl) {
     warnedInvalidPublicUrl = true
-    safeLogger("warn", "[AdminPanel] YUNZAI_PANEL_PUBLIC_URL 仅接受 http(s) 站点根地址，子路径无效；将使用监听地址生成快捷登录链接")
+    safeLogger("warn", "[AdminPanel] 公网访问地址只接受 http(s) 站点根地址；将使用监听地址生成快捷登录链接")
   }
-  const { host, port } = activeSettings || { host: "127.0.0.1", port: 50882 }
+  const { host, port } = settings
   const hosts = []
   if (host === "127.0.0.1" || host === "localhost" || host === "::1") {
     hosts.push(host === "::1" ? "[::1]" : "127.0.0.1")
@@ -889,12 +926,11 @@ function asyncRoute(handler) {
 export async function startAdminPanel() {
   if (expressServer) return
   const settings = await readPanelSettings()
-  activeSettings = settings
   await fs.mkdir(DATA_DIR, { recursive: true })
   await fs.mkdir(LOGS_DIR, { recursive: true })
   sessionSecret = await loadSessionSecret()
   await loadPersistedSessions()
-  const password = await getPassword()
+  await initializePassword()
   const app = express()
   app.disable("x-powered-by")
   app.use((req, res, next) => {
@@ -924,7 +960,7 @@ export async function startAdminPanel() {
     }
     if (attempt.count >= 10) return res.status(429).json({ error: "登录尝试次数过多，请 15 分钟后重试" })
     const submitted = String(req.body?.password || "")
-    if (crypto.timingSafeEqual(hashSecret(submitted), hashSecret(password))) {
+    if (await verifyPanelPassword(submitted)) {
       loginAttempts.delete(ip)
       const expiresAt = await issueSession(req, res)
       return res.json({ authenticated: true, expiresAt })
@@ -1196,9 +1232,6 @@ export async function startAdminPanel() {
   const address = expressServer.address()
   const shownHost = settings.host === "0.0.0.0" || settings.host === "::" ? "127.0.0.1" : settings.host
   safeLogger("mark", `[EliaAdminPanel] Web 管理面板已启动：http://${shownHost}:${address.port}`)
-  if (generatedPassword) {
-    safeLogger("mark", `[AdminPanel] 首次登录密码保存在 ${path.relative(ROOT, PASSWORD_FILE)}；请登录后配置 YUNZAI_PANEL_PASSWORD 环境变量`)
-  }
 }
 
 export async function createQuickLoginLinks() {
@@ -1207,6 +1240,6 @@ export async function createQuickLoginLinks() {
   for (const [code, expiresAt] of quickLogins) if (expiresAt <= now) quickLogins.delete(code)
   const code = crypto.randomBytes(12).toString("base64url")
   quickLogins.set(code, now + 3 * 60 * 1000)
-  const links = panelAddresses().map(address => `${address.replace(/\/$/, "")}/#/ml/${code}`)
+  const links = (await panelAddresses()).map(address => `${address.replace(/\/$/, "")}/#/ml/${code}`)
   return { links, expiresIn: 180 }
 }

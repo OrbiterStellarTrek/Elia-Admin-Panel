@@ -254,7 +254,7 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
                 {remaining > 0 ? `验证码已输出到 Bot 日志（${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}）` : "获取验证码"}
               </Button>
               <p className="text-xs leading-5 text-muted-foreground">点击获取后，到运行 Bot 的控制台查看验证码。验证码 5 分钟有效且只能使用一次。</p>
-            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="首次启动生成的密码或 YUNZAI_PANEL_PASSWORD" /></div>}
+            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="首次启动时 Bot 控制台显示的密码" /></div>}
             {error && <ErrorState message={error} />}
             <Button className="w-full" disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : <KeyRound />}进入控制台</Button>
           </form>
@@ -505,15 +505,16 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const visible = files.filter(file => `${file} ${configFileLabel(file)}`.toLowerCase().includes(search.toLowerCase()))
   function update(path: string[], value: any) { setData((old: any) => setNested(old, path, value)); setDirty(true) }
   async function save() {
+    if (!selected || saving || (!dirty && !rawMode)) return
     setSaving(true)
     try {
-      const content = rawMode ? raw : undefined
-      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify(content ? { content } : { data }) })
+      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify(rawMode ? { content: raw } : { data }) })
       notify("success", `${selectedLabel} 已保存并刷新运行时配置`)
       await load(selected)
     } catch (reason) { setError((reason as Error).message); notify("error", (reason as Error).message) }
     finally { setSaving(false) }
   }
+  useSaveShortcut(save)
   return <>
     <PageIntro eyebrow="运行配置" title="配置中心" description="图形化编辑 YAML 配置；群组规则、黑白名单与运行参数统一管理。" action={<Button onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button>} />
     <div className={`grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "xl:grid-cols-[72px_minmax(0,1fr)]" : "xl:grid-cols-[245px_minmax(0,1fr)]"}`}>
@@ -556,6 +557,20 @@ function setNested(value: any, path: string[], next: any): any {
 function getNested(value: any, path: string) { return path.split(".").reduce((current, key) => current?.[key], value) }
 function isObject(value: any) { return value !== null && typeof value === "object" && !Array.isArray(value) }
 function secretField(name: string) { return /(password|passwd|secret|token|cookie|private.?key|\bpwd\b)/i.test(name) }
+function useSaveShortcut(onSave: () => void | Promise<void>) {
+  const saveRef = useRef(onSave)
+  saveRef.current = onSave
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || (event.key.toLowerCase() !== "s" && event.code !== "KeyS")) return
+      event.preventDefault()
+      event.stopPropagation()
+      void saveRef.current()
+    }
+    document.addEventListener("keydown", handleKeyDown, true)
+    return () => document.removeEventListener("keydown", handleKeyDown, true)
+  }, [])
+}
 function listField(name: string) {
   return /^(enable|disable|botAlias|otherBotQQ|masterQQ|disableAdopt|white(?:Group|QQ)?|black(?:Group|QQ)?)$/i.test(name)
     || /(?:whitelist|blacklist|allowlist|denylist|(?:qq|group|user)?ids?)$/i.test(name)
@@ -727,7 +742,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const smallPlugins = shown.filter(plugin => plugin.kind === "small")
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
   async function save() {
-    if (!selected) return
+    if (!selected || busy) return
     setBusy(true)
     try {
       const values: Record<string, any> = {}
@@ -750,6 +765,11 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
   }
+  useSaveShortcut(() => {
+    if (!selected || busy) return
+    if (selected.kind === "small") return saveSource()
+    if (selected.hasConfig) return save()
+  })
   async function runAction(action: string) {
     let args: any
     try { args = JSON.parse(actionArgs) } catch { notify("error", "操作参数必须是有效 JSON"); return }
@@ -828,7 +848,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
       <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
-          : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea spellCheck={false} disabled={busy} aria-label={`${selected.title} 插件源码`} className="min-h-[545px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={sourceContent} onChange={event => { setSourceContent(event.target.value); setSourceDirty(true) }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveSource() } }} />}</div>
+          : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea spellCheck={false} disabled={busy} aria-label={`${selected.title} 插件源码`} className="min-h-[545px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={sourceContent} onChange={event => { setSourceContent(event.target.value); setSourceDirty(true) }} />}</div>
           : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div>
             : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前大插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
               : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或为大插件添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
@@ -855,7 +875,7 @@ function SchemaField({ schema, value, onChange }: { schema: any; value: any; onC
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} onChange={onChange} forceItemType="string" />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />
       : component === "InputTextArea" || (multilineTextField(schema.field, value) && !secretField(schema.field)) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={textValue} rows={props.rows} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />
-      : <Input type={secretField(schema.field) || props.type === "password" ? "password" : "text"} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
+      : <Input type={secretField(schema.field) || props.type === "password" ? "password" : "text"} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
   </div>
 }
 
@@ -866,6 +886,7 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   const [content, setContent] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [dirty, setDirty] = useState(false)
   const [search, setSearch] = useState("")
   const [error, setError] = useState("")
@@ -884,22 +905,14 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
     finally { setLoading(false) }
   }
   const save = useCallback(async () => {
-    if (!current || !dirty || saving) return
+    if (!current || !dirty || saving || savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     try { const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: current.path, content }) }); setDirty(false); notify("success", result.message || "文件已保存") }
     catch (reason) { notify("error", (reason as Error).message) }
-    finally { setSaving(false) }
+    finally { savingRef.current = false; setSaving(false) }
   }, [api, content, current, dirty, notify, saving])
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "s") {
-        event.preventDefault()
-        if (current && dirty && !saving) void save()
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [current, dirty, save, saving])
+  useSaveShortcut(save)
   const filtered = entries.filter(entry => entry.name.toLowerCase().includes(search.toLowerCase()))
   const crumbs = directory === "." ? [] : directory.split("/")
   return <>
