@@ -137,6 +137,15 @@ button, input, textarea { font: inherit; }
     height: 100dvh;
     transition: width 300ms cubic-bezier(.2,.8,.2,1);
   }
+  .config-center-sidebar-fixed {
+    position: fixed;
+    top: 0;
+    left: var(--admin-sidebar-size);
+    z-index: 10;
+    width: var(--config-sidebar-width);
+    height: 100dvh;
+    transition: width 300ms cubic-bezier(.2,.8,.2,1);
+  }
 }
 
 .admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1), translate 200ms cubic-bezier(.2,.8,.2,1); }
@@ -184,6 +193,8 @@ button, input, textarea { font: inherit; }
   .admin-panel-shell,
   .plugin-center-grid,
   .plugin-center-sidebar-fixed,
+  .config-center-grid,
+  .config-center-sidebar-fixed,
   .admin-panel-sidebar,
   .admin-sidebar-expanded,
   .admin-sidebar-compact {
