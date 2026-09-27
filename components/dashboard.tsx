@@ -12,6 +12,10 @@ import {
   WrapText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -48,6 +52,7 @@ function SecretInput({ className, ...props }: SecretInputProps) {
 type Section = "overview" | "accounts" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string; exiting: boolean } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
+type Confirm = (message: string) => Promise<boolean>
 type FriendOption = { id: string; name: string; avatar: string }
 type GroupOption = { id: string; name: string; avatar: string }
 type AccountProfileField = "nickname" | "avatar" | "signature" | "sex" | "age"
@@ -384,11 +389,27 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const [section, setSection] = useState<Section>(initialSection)
   const [fileManagerPath, setFileManagerPath] = useState(() => typeof window === "undefined" ? "." : routeQuery("path") || ".")
   const [notice, setNotice] = useState<Notice>(null)
+  const [confirmation, setConfirmation] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
   const noticeExitTimer = useRef<number | null>(null)
+  const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useBrowserBooleanPreference("mainSidebarCollapsed")
   const api: Api = useCallback((url, init) => request(url, init), [])
+  const confirm = useCallback<Confirm>((message: string) => new Promise<boolean>(resolve => {
+    if (confirmationResolver.current) {
+      resolve(false)
+      return
+    }
+    confirmationResolver.current = resolve
+    setConfirmation(message)
+  }), [])
+  const resolveConfirmation = useCallback((confirmed: boolean) => {
+    const resolve = confirmationResolver.current
+    confirmationResolver.current = null
+    setConfirmation(null)
+    resolve?.(confirmed)
+  }, [])
   const notify = useCallback((kind: "success" | "error" | "info", message: string) => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
     if (noticeExitTimer.current !== null) window.clearTimeout(noticeExitTimer.current)
@@ -417,6 +438,8 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   useEffect(() => () => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
     if (noticeExitTimer.current !== null) window.clearTimeout(noticeExitTimer.current)
+    confirmationResolver.current?.(false)
+    confirmationResolver.current = null
   }, [])
 
   useEffect(() => {
@@ -540,17 +563,29 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
         <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
-          {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
-          {section === "accounts" && <AccountManager api={api} notify={notify} />}
-          {section === "config" && <ConfigCenter api={api} notify={notify} />}
-          {section === "plugins" && <PluginCenter api={api} notify={notify} />}
-          {section === "files" && <FileManager api={api} notify={notify} initialPath={fileManagerPath} />}
+          {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
+          {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
+          {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
+          {section === "plugins" && <PluginCenter api={api} notify={notify} confirm={confirm} />}
+          {section === "files" && <FileManager api={api} notify={notify} confirm={confirm} initialPath={fileManagerPath} />}
           {section === "logs" && <LogViewer api={api} />}
           {section === "debug" && <MessageDebugger api={api} />}
         </main>
       </div>
       {notice && <div className={`admin-toast fixed right-4 top-4 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border bg-white px-4 py-3 text-sm shadow-xl sm:right-6 sm:top-6 ${notice.exiting ? "admin-toast-out" : ""} ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
-      <PluginMatchHelper api={api} notify={notify} />
+      <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open) resolveConfirmation(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认操作</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">{confirmation ?? " "}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild><Button type="button" variant="outline">取消</Button></AlertDialogCancel>
+            <AlertDialogAction asChild><Button type="button" onClick={() => resolveConfirmation(true)}>确认</Button></AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <PluginMatchHelper api={api} notify={notify} confirm={confirm} />
     </div>
   )
 }
@@ -591,7 +626,7 @@ function PageIntro({ actions }: { actions: PageAction[] }) {
   </div>
 }
 
-function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
+function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
   const [open, setOpen] = useState(false)
   const [groupId, setGroupId] = useState("default")
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([{ id: "default", name: "全局" }])
@@ -651,7 +686,7 @@ function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
     const scopeLabel = scope === "source" ? `整个插件 ${rule.sourcePlugin}` : `子插件 ${rule.pluginName}`
     const sharedSources = [...new Set(additions.flatMap(name => Array.isArray(rule.nameSources) ? rule.nameSources : []).filter((source: string) => source !== rule.sourcePlugin))]
     const impactNote = sharedSources.length ? `\n注意：同名插件还来自 ${sharedSources.join("、")}，Yunzai 按名称屏蔽时这些来源也会一起受影响。` : ""
-    if (!window.confirm(`将${scopeLabel}对应的 ${additions.join("、")} 加入「${groupName}」的禁用列表，并立即刷新运行时配置？${impactNote}`)) return
+    if (!await confirm(`将${scopeLabel}对应的 ${additions.join("、")} 加入「${groupName}」的禁用列表，并立即刷新运行时配置？${impactNote}`)) return
     setBusy(true)
     try {
       const current = await api("/api/config/group.yaml")
@@ -722,7 +757,7 @@ function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: t
   return <Card><CardContent className="flex items-start justify-between p-5"><div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-2 text-[23px] font-semibold tracking-tight">{value}</div><div className="mt-1 text-[11px] text-muted-foreground">{detail}</div></div><div className={`grid size-10 place-items-center rounded-xl ${palette[tone]}`}><Icon className="size-[18px]" /></div></CardContent></Card>
 }
 
-function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: (section: Section) => void }) {
+function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; confirm: Confirm; navigate: (section: Section) => void }) {
   const [status, setStatus] = useState<any>(null)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
@@ -733,7 +768,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
   }, [api])
   useEffect(() => { refresh(); const timer = window.setInterval(refresh, 15000); return () => window.clearInterval(timer) }, [refresh])
   async function restart() {
-    if (!window.confirm("确定要重启 Bot 吗？当前运行任务可能会中断。")) return
+    if (!await confirm("确定要重启 Bot 吗？当前运行任务可能会中断。")) return
     setRestarting(true)
     try { const result = await api("/api/runtime/restart", { method: "POST", body: "{}" }); notify("success", result.message || "重启请求已发送") }
     catch (reason) { notify("error", (reason as Error).message) }
@@ -778,7 +813,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
   </>
 }
 
-function AccountManager({ api, notify }: { api: Api; notify: any }) {
+function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
   const [accounts, setAccounts] = useState<ManagedAccount[]>([])
   const [selectedId, setSelectedId] = useState("")
   const [drafts, setDrafts] = useState({ nickname: "", signature: "", sex: "unknown", age: "" })
@@ -894,7 +929,7 @@ function AccountManager({ api, notify }: { api: Api; notify: any }) {
     {activeAccount && <PageIntro actions={[{ label: "保存更改", render: iconOnly => <Button type="button" size={iconOnly ? "icon" : "default"} aria-label="保存更改" title={pendingUpdates.length ? `保存 ${pendingUpdates.length} 项更改` : " 没有待保存的更改"} disabled={!pendingUpdates.length || invalidPendingUpdate || saving} onClick={() => void saveAll()}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && (saving ? "保存中" : "保存更改")}</Button> }]} />}
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div><h1 className="text-xl font-semibold">账号管理</h1><p className="mt-1 text-sm text-muted-foreground">机器人 QQ 个人资料</p></div>
-      <Button type="button" variant="outline" onClick={() => { if (!pendingUpdates.length || window.confirm("刷新会丢弃尚未保存的修改，继续吗？")) void refresh() }} disabled={refreshing || saving} aria-label="刷新账号资料" title="刷新账号资料"><RefreshCw className={refreshing ? "animate-spin" : ""} />刷新</Button>
+      <Button type="button" variant="outline" onClick={async () => { if (!pendingUpdates.length || await confirm("刷新会丢弃尚未保存的修改，继续吗？")) void refresh() }} disabled={refreshing || saving} aria-label="刷新账号资料" title="刷新账号资料"><RefreshCw className={refreshing ? "animate-spin" : ""} />刷新</Button>
     </div>
     {error && <div className="mb-5"><ErrorState message={error} /></div>}
     {loading && !accounts.length ? <div className="grid min-h-56 place-items-center text-muted-foreground"><LoaderCircle className="size-6 animate-spin" /></div>
@@ -903,7 +938,7 @@ function AccountManager({ api, notify }: { api: Api; notify: any }) {
           <aside className="min-w-0">
             <h2 className="mb-3 text-sm font-semibold">机器人账号</h2>
             <div className="space-y-1">
-              {accounts.map(account => <button key={account.id} type="button" disabled={saving || refreshing} onClick={() => { if (selectedId === account.id || saving || refreshing) return; if (pendingUpdates.length && !window.confirm("切 换账号会丢弃尚未保存的修改，继续吗？")) return; setDraftAccountId(""); setSelectedId(account.id) }} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${selectedId === account.id ? "border-sky-300 bg-sky-50/70" : "border-transparent hover:border-border hover:bg-white"}`}>
+              {accounts.map(account => <button key={account.id} type="button" disabled={saving || refreshing} onClick={async () => { if (selectedId === account.id || saving || refreshing) return; if (pendingUpdates.length && !await confirm("切 换账号会丢弃尚未保存的修改，继续吗？")) return; setDraftAccountId(""); setSelectedId(account.id) }} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${selectedId === account.id ? "border-sky-300 bg-sky-50/70" : "border-transparent hover:border-border hover:bg-white"}`}>
                 <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500"><Bot className="size-5" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span>
                 <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-xs text-muted-foreground">QQ {account.id}</span></span>
                 <span aria-label={account.status} title={account.status} className={`size-2 shrink-0 rounded-full ${account.online ? "bg-emerald-500" : "bg-slate-300"}`} />
@@ -944,7 +979,7 @@ function InfoTile({ icon: Icon, label, value }: { icon: typeof Server; label: st
   return <div className="flex items-center gap-3 rounded-xl border border-border/70 p-3"><span className="grid size-8 place-items-center rounded-lg bg-slate-50 text-slate-500"><Icon className="size-4" /></span><div className="min-w-0"><div className="text-[10px] text-muted-foreground">{label}</div><div className="mt-1 truncate text-xs font-medium">{value}</div></div></div>
 }
 
-function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
+function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
   const [files, setFiles] = useState<string[]>([])
   const [selected, setSelected] = useState("")
   const [activeGroupId, setActiveGroupId] = useState("default")
@@ -1096,8 +1131,8 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
     setNewGroupPickerOpen(false)
     setGroupActionError("")
   }
-  function removeGroup(groupId: string) {
-    if (!window.confirm(`确定删除群 ${groupId} 的单独配置？删除内容会在点击“保存更改”后写入配置文件。`)) return
+  async function removeGroup(groupId: string) {
+    if (!await confirm(`确定删除群 ${groupId} 的单独配置？删除内容会在点击“保存更改”后写入配置文件。`)) return
     setData((current: any) => {
       const next = { ...current }
       delete next[groupId]
@@ -1150,9 +1185,9 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
         <CardHeader className="shrink-0 flex-row items-center justify-between border-b border-border/70 pb-4">
           <div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={() => {
+            <Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={async () => {
               if (!rawMode) {
-                if (dirty && !window.confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return
+                if (dirty && !await confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return
                 setDirty(raw !== loadedContent)
                 setEditorFullscreen(false)
                 setRawMode(true)
@@ -1586,7 +1621,7 @@ function splitPluginSchemaGroups(schemas: any[]) {
   return groups
 }
 
-function PluginCenter({ api, notify }: { api: Api; notify: any }) {
+function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
   const [plugins, setPlugins] = useState<any[]>([])
   const [pluginSidebarCollapsed, setPluginSidebarCollapsed] = useBrowserBooleanPreference("pluginSidebarCollapsed")
   const [sourceFullscreen, setSourceFullscreen] = useState(false)
@@ -1768,7 +1803,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   async function runAction(action: string) {
     let args: any
     try { args = JSON.parse(actionArgs) } catch { notify("error", "操作参数必须是有效 JSON"); return }
-    if (!window.confirm(`确定执行插件操作“${action}”吗？`)) return
+    if (!await confirm(`确定执行插件操作“${action}”吗？`)) return
     setBusy(true)
     try { const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/action`, { method: "POST", body: JSON.stringify({ action, args }) }); if (result.code !== undefined && result.code !== 0) throw new Error(result.message || "操作失败"); notify("success", result.message || "操作完成") }
     catch (reason) { notify("error", (reason as Error).message) }
@@ -1780,7 +1815,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
       installDependencies ? "安装 package.json 依赖（不执行生命周期脚本）" : "跳过依赖安装",
       restartAfterInstall ? "安装完成后尝试重启 Bot" : "安装完成后不自动重启",
     ]
-    if (!window.confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n${installOptions.join("\n")}`)) return
+    if (!await confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n${installOptions.join("\n")}`)) return
     setBusy(true)
     try {
       const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
@@ -1792,7 +1827,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   }
   async function archivePlugin() {
     if (!selected || selected.directory.includes("/") || selected.id.toLowerCase() === "eliaadminpanel") return
-    if (!window.confirm(`将“${selected.title}”移入可恢复归档？\n\n归档后重启 Bot 即可卸载；插件文件保存在 data/elia-admin-panel/archived-plugins，可随时恢复。`)) return
+    if (!await confirm(`将“${selected.title}”移入可恢复归档？\n\n归档后重启 Bot 即可卸载；插件文件保存在 data/elia-admin-panel/archived-plugins，可随时恢复。`)) return
     setBusy(true)
     try {
       const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/archive`, { method: "POST", body: "{}" })
@@ -1801,7 +1836,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     finally { setBusy(false) }
   }
   async function restorePlugin(archive: any) {
-    if (!window.confirm(`恢复“${archive.name}”到 plugins/${archive.name}？`)) return
+    if (!await confirm(`恢复“${archive.name}”到 plugins/${archive.name}？`)) return
     setBusy(true)
     try {
       const result = await api(`/api/plugins/archives/${encodeURIComponent(archive.id)}/restore`, { method: "POST", body: "{}" })
@@ -2019,7 +2054,7 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   </div>
 }
 
-function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any; initialPath?: string }) {
+function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; notify: any; confirm: Confirm; initialPath?: string }) {
   const [editorFullscreen, setEditorFullscreen] = useState(false)
   const [imageLightbox, setImageLightbox] = useState(false)
   const [directory, setDirectory] = useState(".")
@@ -2072,7 +2107,7 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
     }
   }, [editorFullscreen])
   async function openFile(entry: any) {
-    if (dirty && !window.confirm("当前文件有未保存修改，继续切换吗？")) return
+    if (dirty && !await confirm("当前文件有未保存修改，继续切换吗？")) return
     if (entry.type === "image") {
       setCurrent(entry); setContent(""); setDirty(false); setError(""); setImageLightbox(false); setRouteQuery("path", entry.path)
       return
