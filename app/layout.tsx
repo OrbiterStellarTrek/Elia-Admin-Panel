@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import type React from "react"
 import "./globals.css"
+import "monaco-editor/min/vs/editor/editor.main.css"
 
 export const metadata: Metadata = {
   title: "EliaAdminPanel · 管理面板",
