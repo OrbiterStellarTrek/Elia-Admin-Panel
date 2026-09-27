@@ -26,6 +26,7 @@ const LOGS_DIR = path.join(ROOT, "logs")
 const SESSION_STORE_FILE = path.join(DATA_DIR, "sessions.json")
 const STATIC_DIR = path.join(PANEL_DIR, "out")
 const MAX_TEXT_BYTES = 1_500_000
+const MAX_PREVIEW_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_LOG_TAIL_BYTES = 512 * 1024
 const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
@@ -35,6 +36,11 @@ const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
   ".sh", ".bat", ".ps1", ".properties", ".env", ".gitignore", ".editorconfig",
+])
+const IMAGE_MIME_TYPES = new Map([
+  [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"], [".webp", "image/webp"], [".bmp", "image/bmp"],
+  [".avif", "image/avif"], [".ico", "image/x-icon"],
 ])
 const PLUGIN_CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".properties"])
 const PLUGIN_SCAN_IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".next", "out", "dist", "build", "coverage", "data", "logs"])
@@ -1525,8 +1531,12 @@ export async function startAdminPanel() {
       } else if (entry.isFile()) {
         const extension = path.extname(entry.name).toLowerCase() || (entry.name.startsWith(".") ? entry.name.toLowerCase() : "")
         const childStat = await fs.stat(childPath)
-        if (childStat.size > MAX_TEXT_BYTES || !ALLOWED_TEXT_EXTENSIONS.has(extension)) continue
-        files.push({ name: entry.name, path: path.relative(ROOT, childPath).split(path.sep).join("/"), type: "file", size: childStat.size })
+        const relativePath = path.relative(ROOT, childPath).split(path.sep).join("/")
+        if (childStat.size <= MAX_TEXT_BYTES && ALLOWED_TEXT_EXTENSIONS.has(extension)) {
+          files.push({ name: entry.name, path: relativePath, type: "file", size: childStat.size })
+        } else if (childStat.size <= MAX_PREVIEW_IMAGE_BYTES && IMAGE_MIME_TYPES.has(extension)) {
+          files.push({ name: entry.name, path: relativePath, type: "image", size: childStat.size })
+        }
       }
     }
     files.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1)
@@ -1537,12 +1547,31 @@ export async function startAdminPanel() {
     const absolute = resolveWorkspacePath(relative)
     await rejectSymlinkPath(absolute)
     const stat = await fs.stat(absolute)
-    if (!stat.isFile() || stat.size > MAX_TEXT_BYTES) return res.status(400).json({ error: "文件不存在或超过 1.5 MB 编辑上限" })
+    if (!stat.isFile()) return res.status(400).json({ error: "文件不存在" })
     const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    const imageMime = IMAGE_MIME_TYPES.get(extension)
+    if (imageMime) {
+      if (stat.size > MAX_PREVIEW_IMAGE_BYTES) return res.status(413).json({ error: "图片超过 20 MB 预览上限" })
+      return res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/"), type: "image", size: stat.size, modifiedAt: stat.mtime.toISOString(), mime: imageMime })
+    }
+    if (stat.size > MAX_TEXT_BYTES) return res.status(400).json({ error: "文件超过 1.5 MB 编辑上限" })
     if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
     const content = await fs.readFile(absolute, "utf8")
     if (content.includes("\0")) return res.status(415).json({ error: "二进制文件不能在面板中编辑" })
     res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/"), content, size: stat.size, modifiedAt: stat.mtime.toISOString() })
+  }))
+  app.get("/api/files/image", asyncRoute(async (req, res) => {
+    const relative = String(req.query.path || "")
+    const absolute = resolveWorkspacePath(relative)
+    await rejectSymlinkPath(absolute)
+    const stat = await fs.stat(absolute)
+    if (!stat.isFile()) return res.status(400).json({ error: "图片文件不存在" })
+    const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    const mime = IMAGE_MIME_TYPES.get(extension)
+    if (!mime) return res.status(415).json({ error: "该图片类型不受支持" })
+    if (stat.size > MAX_PREVIEW_IMAGE_BYTES) return res.status(413).json({ error: "图片超过 20 MB 预览上限" })
+    res.set({ "Content-Type": mime, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" })
+    res.send(await fs.readFile(absolute))
   }))
   app.put("/api/files/write", asyncRoute(async (req, res) => {
     const relative = String(req.body?.path || "")

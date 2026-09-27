@@ -1,14 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import * as Dialog from "@radix-ui/react-dialog"
 import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
-  Eye, EyeOff, FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
+  Ellipsis, Eye, EyeOff, FileText, Folder, Gauge, Github, HardDrive, Image as ImageIcon, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Maximize2, Menu, MessageSquareText, Minimize2, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
   Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, Users, X,
+  WrapText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,6 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 
@@ -466,8 +468,6 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
     return () => window.clearTimeout(timer)
   }, [authenticated, sessionExpiresAt])
 
-  const active = navigation.find(item => item.id === section)!
-  const ActiveIcon = active.icon
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
   if (!authenticated) return <Login initialError={loginError} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); setAuthenticated(true) }} />
 
@@ -477,9 +477,9 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }
 
   return (
-      <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px" } as React.CSSProperties}>
+      <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
       <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-[#373737] bg-[#202124] text-slate-100 shadow-xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0 pt-5">
+        <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0">
           <div className="flex items-center gap-3 px-2 pb-7">
             <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
             <div className="min-w-0 truncate font-semibold tracking-tight">EliaAdminPanel</div>
@@ -503,7 +503,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronLeft className="size-4" />收起</button></div>
           </div>
         </div>
-        <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3 pt-5">
+        <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3">
           <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
           <nav className="w-full space-y-1" aria-label="主导航">
             {navigation.map(item => {
@@ -521,11 +521,8 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
-        <header className="sticky top-0 z-20 flex h-[70px] items-center justify-between border-b border-border/80 bg-white/90 px-5 backdrop-blur-xl md:px-9">
-          <div className="flex min-w-0 items-center gap-3"><Button variant="ghost" size="icon" className="md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button><div className="grid size-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600"><ActiveIcon className="size-[18px]" /></div><div className="min-w-0"><div className="text-[14px] font-semibold">{active.label}</div></div></div>
-          <div className="flex items-center gap-2 sm:gap-4"><Badge className="gap-1.5 border-emerald-100 bg-emerald-50 text-emerald-700"><span className="size-1.5 rounded-full bg-emerald-500" />本机管理</Badge><span className="hidden text-xs text-slate-400 lg:block">Yunzai</span><Button variant="ghost" size="icon" aria-label="退出登录" onClick={logout}><LogOut className="size-4 text-slate-500" /></Button></div>
-        </header>
-        <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-9 lg:py-8">
+        <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
+        <main className="mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32">
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}
@@ -539,8 +536,40 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   )
 }
 
-function PageIntro({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: React.ReactNode }) {
-  return <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div>{eyebrow && <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-indigo-500">{eyebrow}</div>}<h1 className="text-[25px] font-semibold tracking-tight">{title}</h1>{description && <p className="mt-1.5 text-sm text-muted-foreground">{description}</p>}</div>{action}</div>
+type PageAction = { label: string; render: (iconOnly: boolean) => React.ReactNode }
+
+function PageIntro({ actions }: { actions: PageAction[] }) {
+  const hasMenu = actions.length > 4
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open || !hasMenu) return
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [open, hasMenu])
+  if (!hasMenu) return <div className="fixed bottom-4 right-4 z-30 flex flex-col gap-2 sm:bottom-6 sm:right-6">
+    {actions.map(action => <Fragment key={action.label}>{action.render(true)}</Fragment>)}
+  </div>
+  return <div ref={containerRef} className="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6">
+    {open && <div id="page-actions-menu" role="group" aria-label="页面操作" className="admin-action-popover min-w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-border/80 bg-white/95 p-2 shadow-xl backdrop-blur" onClick={() => setOpen(false)}>
+      <div className="flex flex-col gap-2 [&_button]:w-full [&_button]:justify-start">{actions.map(action => <Fragment key={action.label}>{action.render(false)}</Fragment>)}</div>
+    </div>}
+    <Button ref={triggerRef} type="button" variant="outline" size="icon" className="size-12 rounded-full border-border/80 bg-white shadow-lg" aria-label={open ? "关闭页面操作" : "打开页面操作"} aria-haspopup="true" aria-expanded={open} aria-controls="page-actions-menu" title={open ? "关闭页面操作" : "打开页面操作"} onClick={() => setOpen(value => !value)}>{open ? <X /> : <Ellipsis />}</Button>
+  </div>
 }
 
 function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: typeof Cpu; label: string; value: string; detail: string; tone?: string }) {
@@ -566,7 +595,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
     finally { setRestarting(false) }
   }
   return <>
-    <PageIntro eyebrow="System overview" title="运行概览" description="查看 Bot 当前运行状态，并快速进入需要管理的区域。" action={<Button variant="outline" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}刷新状态</Button>} />
+    <PageIntro actions={[{ label: "刷新状态", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新状态" title="刷新状态" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新状态"}</Button> }]} />
     {error && <div className="mb-5"><ErrorState message={error} /></div>}
     <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Metric icon={Activity} label="运行状态" value={status ? "运行中" : "读取中"} detail={status ? `进程 PID ${status.pid}` : "正在连接 Bot"} tone="green" />
@@ -653,7 +682,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   }
   useSaveShortcut(save)
   return <>
-    <PageIntro eyebrow="运行配置" title="配置中心" description="图形化编辑 YAML 配置；群组规则、黑白名单与运行参数统一管理。" action={<Button onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button>} />
+    <PageIntro actions={[{ label: "保存更改", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存更改" title="保存更改" onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存更改"}</Button> }]} />
     <div
       className={`config-center-grid grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "is-collapsed" : ""}`}
     >
@@ -851,7 +880,7 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
   const hasValidSelection = selectOptions?.some(option => option.value === selectValue)
   return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
     <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
-    <div className="min-w-0">{selectOptions ? <select aria-label={label} className={`h-10 w-full rounded-xl border bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`} value={selectValue} onChange={event => onChange(path, numericConfigSelectFields.has(name) ? Number(event.target.value) : event.target.value)}>{!hasValidSelection && <option value={selectValue} disabled>{selectValue ? `无效值：${selectValue}，请选择` : "未设置，请选择"}</option>}{selectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+    <div className="min-w-0">{selectOptions ? <Select value={selectValue} onValueChange={selected => onChange(path, numericConfigSelectFields.has(name) ? Number(selected) : selected)}><SelectTrigger aria-label={label} className={` ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`}><SelectValue placeholder="未设置，请选择" /></SelectTrigger><SelectContent>{!hasValidSelection && selectValue && <SelectItem value={selectValue} disabled>无效值：{selectValue}，请选择</SelectItem>}{selectOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
@@ -1067,10 +1096,14 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   }
   return <>
     <Dialog.Root open={showInstall} onOpenChange={setShowInstall}>
-    <PageIntro title="插件控制" action={<div className="flex gap-2"><Dialog.Trigger asChild><Button variant="outline"><Plus />安装插件</Button></Dialog.Trigger><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
+    <PageIntro actions={[
+      { label: "安装插件", render: iconOnly => <Dialog.Trigger asChild><Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="安装插件" title="安装插件"><Plus />{!iconOnly && "安装插件"}</Button></Dialog.Trigger> },
+      { label: "重新扫描", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="重新扫描" title="重新扫描" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "重新扫描"}</Button> },
+    ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`}>
-      <div className="relative flex h-[640px] min-h-[640px] min-w-0 flex-col gap-3 xl:sticky xl:top-[86px] xl:h-[calc(100dvh-110px)] xl:min-h-0 xl:self-start">
+    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "72px" : "280px" } as React.CSSProperties}>
+      <div className="relative h-[640px] min-h-[640px] min-w-0 xl:h-dvh xl:min-h-0">
+        <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
         <div className={`absolute inset-0 z-20 hidden flex-col rounded-2xl border border-border bg-white p-2 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <Button size="icon" variant="ghost" className="mx-auto mb-2 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -1078,8 +1111,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
             <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
         </div>
-        <div className={`flex min-h-[640px] flex-1 flex-col gap-3 transition-opacity duration-150 xl:min-h-0 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className={`flex min-h-[640px] flex-1 flex-col transition-opacity duration-150 xl:min-h-0 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+          <Card className="flex max-h-[50%] min-h-0 flex-[0_1_auto] flex-col overflow-hidden rounded-none">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -1087,7 +1120,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
           </Card>
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-t-0">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{smallPlugins.length}</Badge></span></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -1096,6 +1129,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
             </div>
             {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div>}
           </Card>
+        </div>
         </div>
       </div>
       <Card className={sourceFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-none border-0" : selected?.kind === "small" ? "flex min-h-0 min-w-0 flex-col" : "min-w-0"}><CardHeader className={sourceFullscreen ? "hidden" : "flex-row items-start justify-between border-b border-border/70 pb-4"}><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle>{(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 truncate">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}</div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-5" : "p-5"}>
@@ -1198,7 +1232,7 @@ function CronExpressionField({ value, onChange, validate }: { value: string; onC
   return <div className="space-y-2">
     <div className="flex gap-2"><Input aria-label="Cron 表达式" className="font-mono text-sm" value={value} placeholder="分 时 日 月 星期（或在前面增加秒字段）" onChange={event => onChange(event.target.value)} /><Button type="button" variant="outline" className="shrink-0" aria-expanded={quickEdit} onClick={() => setQuickEdit(open => !open)}>{quickEdit ? "收起快速编辑" : "快速编辑"}<ChevronDown className={`transition-transform ${quickEdit ? "rotate-180" : ""}`} /></Button></div>
     <p className="text-[10px] leading-4 text-muted-foreground">支持 Node 定时器常见的 5 段格式与含秒的 6 段格式；保存前会使用当前 Yunzai 的 cron-parser 实际校验。</p>
-    {validation && <p className={`text-[10px] ${validation.valid ? "text-emerald-700" : "text-rose-600"}`}>{validation.message}{validation.valid && validation.nextRun ? ` · 下次执行：${new Date(validation.nextRun).toLocaleString("zh-CN")}` : ""}</p>}
+    <p aria-live="polite" aria-atomic="true" className={`min-h-[15px] text-[10px] leading-[15px] ${validation ? validation.valid ? "text-emerald-700" : "text-rose-600" : ""}`}>{validation ? <>{validation.message}{validation.valid && validation.nextRun ? ` · 下次执行：${new Date(validation.nextRun).toLocaleString("zh-CN")}` : ""}</> : ""}</p>
     {quickEdit && <div className="space-y-3 rounded-xl border border-border bg-slate-50/70 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex gap-1.5">{([[5, "5 段"], [6, "6 段（含秒）"]] as const).map(([fieldCount, title]) => <Button key={fieldCount} type="button" size="sm" variant={mode === fieldCount ? "default" : "outline"} className="h-7 px-2.5 text-[10px]" onClick={() => changeMode(fieldCount)}>{title}</Button>)}</div><div className="flex flex-wrap gap-1.5">{[["每天 1:20", "daily"], ["工作日 1:20", "weekdays"], ["每小时", "hourly"], ["每分钟", "minute"]].map(([title, preset]) => <Button key={preset} type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => applyPreset(preset as "daily" | "weekdays" | "hourly" | "minute")}>{title}</Button>)}</div></div>
       {hasSupportedShape ? <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${mode === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}>{fieldNames.map((name, index) => { const segmentIndex = mode === 6 ? index : index + 1; return <label key={name} className="space-y-1 text-[10px] text-muted-foreground">{name}<Input aria-label={`Cron ${name}`} className="h-9 bg-white font-mono text-xs" value={segments[segmentIndex]} placeholder={name === "星期" ? "* / 1-5 / ?" : "* / 数字 / 范围"} onChange={event => changeSegment(segmentIndex, event.target.value)} /></label> })}</div> : <p className="text-[10px] text-amber-700">原表达式字段数异常。选择上方快捷模板可生成标准格式，或手动修正表达式。</p>}
@@ -1231,6 +1265,7 @@ function SchemaField({ schema, value, onChange, validateCron }: { schema: any; v
 
 function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any; initialPath?: string }) {
   const [editorFullscreen, setEditorFullscreen] = useState(false)
+  const [imageLightbox, setImageLightbox] = useState(false)
   const [directory, setDirectory] = useState(".")
   const [entries, setEntries] = useState<any[]>([])
   const [current, setCurrent] = useState<any>(null)
@@ -1260,7 +1295,7 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
         const file = await api(`/api/files/read?path=${encodeURIComponent(path)}`)
         const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
         const result = await api(`/api/files?path=${encodeURIComponent(parent)}`)
-        setDirectory(result.path); setEntries(result.entries); setCurrent(file); setContent(file.content); setDirty(false)
+        setDirectory(result.path); setEntries(result.entries); setCurrent(file); setContent(file.content || ""); setDirty(false)
         if (updateUrl) setRouteQuery("path", path)
       } catch (readError) { reportFileError(readError) }
     }
@@ -1282,6 +1317,10 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   }, [editorFullscreen])
   async function openFile(entry: any) {
     if (dirty && !window.confirm("当前文件有未保存修改，继续切换吗？")) return
+    if (entry.type === "image") {
+      setCurrent(entry); setContent(""); setDirty(false); setError(""); setImageLightbox(false); setRouteQuery("path", entry.path)
+      return
+    }
     setLoading(true); setError("")
     try { const result = await api(`/api/files/read?path=${encodeURIComponent(entry.path)}`); setCurrent(result); setContent(result.content); setDirty(false); setRouteQuery("path", entry.path) }
     catch (reason) { reportFileError(reason) }
@@ -1298,13 +1337,24 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   useSaveShortcut(save)
   const filtered = entries.filter(entry => entry.name.toLowerCase().includes(search.toLowerCase()))
   const crumbs = directory === "." ? [] : directory.split("/")
+  const selectedImageUrl = current?.type === "image" ? `/api/files/image?path=${encodeURIComponent(current.path)}` : ""
   return <>
-    <PageIntro eyebrow="Workspace files" title="文件管理" description="浏览 Yunzai 工作区中的可读文本文件；每次保存都会创建时间戳备份。按 Ctrl+S / ⌘+S 保存当前文件。" action={<Button onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>} />
+    <PageIntro actions={[{ label: "保存文件", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存文件" title="保存文件" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存文件"}</Button> }]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <Card className={editorFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0" : "overflow-hidden"}><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".", true)} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path, true)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="flex w-full items-center gap-2 sm:w-auto"><div className="relative min-w-0 flex-1 sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div>{editorFullscreen && <Button size="sm" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}</div></div>
-      <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span className="flex items-center gap-1.5">文件浏览器{loading && <LoaderCircle role="status" aria-label="正在加载" className="size-3.5 animate-spin text-indigo-500" />}</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".", true)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path, true) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
-        <div className={`flex min-w-0 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs"><FileCode2 className="size-4 text-indigo-500" /><span className="truncate font-medium">{current?.path || "选择一个文本文件"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{formatBytes(new Blob([content]).size)} · UTF-8</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current ? <div className={`flex flex-1 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><MonacoCodeEditor key={current.path} path={current.path} value={content} className={editorFullscreen ? "h-full min-h-0 flex-1" : undefined} onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
+      <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span className="flex items-center gap-1.5">文件浏览器{loading && <LoaderCircle role="status" aria-label="正在加载" className="size-3.5 animate-spin text-indigo-500" />}</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".", true)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path, true) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : entry.type === "image" ? "text-sky-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : entry.type === "image" ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type !== "directory" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
+        <div className={`flex min-w-0 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs">{current?.type === "image" ? <ImageIcon className="size-4 text-sky-500" /> : <FileCode2 className="size-4 text-indigo-500" />}<span className="truncate font-medium">{current?.path || "选择一个文本文件或图片"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{current.type === "image" ? `${formatBytes(current.size)} · 图片预览` : `${formatBytes(new Blob([content]).size)} · UTF-8`}</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current?.type === "image" ? <div className={`grid flex-1 place-items-center overflow-auto bg-slate-50 p-5 ${editorFullscreen ? "min-h-0" : "min-h-[420px]"}`}><button type="button" aria-label={`放大查看 ${current.path}`} title="点击查看大图" className="grid max-h-full max-w-full cursor-zoom-in place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" onClick={() => setImageLightbox(true)}><img src={selectedImageUrl} alt={current.path} className={`max-w-full object-contain ${editorFullscreen ? "max-h-[calc(100dvh-10rem)]" : "max-h-[min(70vh,720px)]"}`} /></button></div> : current ? <div className={`flex flex-1 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><MonacoCodeEditor key={current.path} path={current.path} value={content} className={editorFullscreen ? "h-full min-h-0 flex-1" : undefined} onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
       </div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-slate-50/70 px-4 py-2.5 text-[10px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" />写入前自动备份 · 自动忽略 node_modules / .git / 构建产物</span><div className="flex items-center gap-3">{current?.modifiedAt && <span>上次修改：{new Date(current.modifiedAt).toLocaleString("zh-CN")}</span>}{editorFullscreen && <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setEditorFullscreen(false)}>退出全屏 <Minimize2 className="size-3" /></Button>}</div></div></Card>
+    <Dialog.Root open={imageLightbox && current?.type === "image"} onOpenChange={setImageLightbox}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm" />
+        <Dialog.Content className="admin-dialog-content fixed inset-3 z-[71] flex items-center justify-center rounded-xl bg-black/90 p-3 shadow-2xl focus:outline-none sm:inset-6 sm:p-6">
+          <Dialog.Title className="sr-only">{current?.path || "图片预览"}</Dialog.Title>
+          <Dialog.Close asChild><Button type="button" variant="ghost" size="icon" aria-label="关闭图片预览" className="absolute right-2 top-2 z-10 text-white hover:bg-white/15 hover:text-white"><X /></Button></Dialog.Close>
+          {selectedImageUrl && <img src={selectedImageUrl} alt={current?.path || "图片预览"} className="max-h-full max-w-full object-contain" />}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   </>
 }
 
@@ -1346,7 +1396,6 @@ function MessageDebugger({ api }: { api: Api }) {
   }
 
   return <>
-    <PageIntro eyebrow="Message debugger" title="消息调试" description="通过 stdin 适配器构造消息事件，并送入 Yunzai 插件处理链。" />
     <div className="grid items-start gap-5 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)]">
       <Card><CardHeader className="border-b border-border/70 pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></CardHeader><CardContent className="p-5">
         <form className="space-y-4" onSubmit={sendMessage}>
@@ -1549,7 +1598,10 @@ function LogViewer({ api }: { api: Api }) {
   }, [entries, followLatest])
   const visibleEntries = useMemo(() => entries.filter(entry => !search || entry.text.toLowerCase().includes(search.toLowerCase())), [entries, search])
   return <>
-    <PageIntro eyebrow="Runtime logs" title="运行日志" description="默认打开今天的命令日志最新内容；文件更新会实时推送，断线后自动重连并补取最近 50 条。" action={<div className="flex gap-2"><Button variant={wrapLines ? "secondary" : "outline"} onClick={() => setWrapLines(value => !value)}>{wrapLines ? "关闭自动换行" : "自动换行"}</Button><Button variant="outline" onClick={() => refresh(selected, true)} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}刷新日志</Button></div>} />
+    <PageIntro actions={[
+      { label: wrapLines ? "关闭自动换行" : "自动换行", render: iconOnly => <Button variant={wrapLines ? "secondary" : "outline"} size={iconOnly ? "icon" : "default"} aria-label={wrapLines ? "关闭自动换行" : "自动换行"} title={wrapLines ? "关闭自动换行" : "自动换行"} onClick={() => setWrapLines(value => !value)}><WrapText />{!iconOnly && (wrapLines ? "关闭自动换行" : "自动换行")}</Button> },
+      { label: "刷新日志", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新日志" title="刷新日志" onClick={() => refresh(selected, true)} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新日志"}</Button> },
+    ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex flex-wrap items-center gap-2"><TerminalSquare className="size-4 text-indigo-500" /><label htmlFor="log-file-select" className="text-xs font-medium">日期与类型</label><select id="log-file-select" value={selected} onChange={event => void refresh(event.target.value, true)} className="h-9 min-w-56 rounded-lg border border-border bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" disabled={!files.length}>{files.length ? files.map(file => <option key={file} value={file}>{logFileLabel(file)}</option>) : <option value="">没有可用日志</option>}</select></div><div className="relative w-full sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索日志内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div><div className="flex items-center justify-between px-4 py-2 text-[10px] text-muted-foreground"><span>{selected ? `${logFileLabel(selected)} · ${selected}` : "没有可用日志"}</span><span className="flex items-center gap-3"><span>{visibleEntries.length} 行 · 保留末尾最多 600 行</span><span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : "bg-amber-400"}`} />{liveStatus === "connected" ? "实时连接" : liveStatus === "connecting" ? "正在连接" : "正在重连"}</span></span></div><pre ref={logViewRef} onScroll={event => { const element = event.currentTarget; setFollowLatest(element.scrollHeight - element.scrollTop - element.clientHeight <= 48) }} className={`scrollbar-thin min-h-[560px] max-h-[calc(100vh-300px)] overflow-auto bg-[#171a26] p-4 font-mono text-[11px] leading-[1.75] text-slate-200 ${wrapLines ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>{loading && !entries.length ? "正在读取…" : visibleEntries.length ? visibleEntries.map((entry, index) => <span key={`${selected}-${entry.id}-${index}`} className="block min-h-[1.75em]">{colorizeLogLine(entry.text).map((segment, segmentIndex) => <span key={segmentIndex} style={segment.color ? { color: segment.color } : undefined}>{segment.text}</span>)}</span>) : "暂无日志内容"}</pre><div className="flex items-center gap-2 border-t border-border px-4 py-3 text-[10px] text-muted-foreground"><Activity className="size-3.5 text-emerald-500" />文件变更会即时推送，并每 10 秒补取最近 50 条；滚动查看旧内容后会暂停自动跟随</div></Card>
   </>

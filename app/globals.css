@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+@property --admin-sidebar-size {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 220px;
+}
+
+@property --admin-sidebar-half-size {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 110px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -85,9 +97,17 @@ button, input, textarea { font: inherit; }
 .admin-toast { animation: admin-toast-pop-in 500ms cubic-bezier(.16,1,.3,1) both; }
 .admin-toast.admin-toast-out { animation: admin-toast-pop-out 500ms cubic-bezier(.4,0,.8,.5) both; pointer-events: none; }
 
+@keyframes admin-action-popover-in {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.admin-action-popover { transform-origin: bottom right; animation: admin-action-popover-in 140ms ease-out both; }
+
 @media (prefers-reduced-motion: reduce) {
   .admin-dialog-overlay,
   .admin-dialog-content,
+  .admin-action-popover,
   .admin-toast {
     animation-duration: 1ms !important;
   }
@@ -108,16 +128,25 @@ button, input, textarea { font: inherit; }
   .plugin-center-grid.is-collapsed {
     grid-template-columns: 72px minmax(0, 1fr);
   }
+  .plugin-center-sidebar-fixed {
+    position: fixed;
+    top: 0;
+    left: var(--admin-sidebar-size);
+    z-index: 10;
+    width: var(--plugin-sidebar-width);
+    height: 100dvh;
+    transition: width 300ms cubic-bezier(.2,.8,.2,1);
+  }
 }
 
-.admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1), translate 200ms cubic-bezier(.2,.8,.2,1), width 300ms cubic-bezier(.2,.8,.2,1); }
+.admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1), translate 200ms cubic-bezier(.2,.8,.2,1); }
 .admin-sidebar-expanded { width: 264px; }
  .admin-sidebar-compact { display: none; }
 
 @media (min-width: 768px) {
   .admin-panel-shell {
     padding-left: var(--admin-sidebar-size);
-    transition: padding-left 300ms cubic-bezier(.2,.8,.2,1);
+    transition: --admin-sidebar-size 300ms cubic-bezier(.2,.8,.2,1), --admin-sidebar-half-size 300ms cubic-bezier(.2,.8,.2,1);
   }
   .admin-panel-sidebar {
     width: var(--admin-sidebar-size);
@@ -153,6 +182,8 @@ button, input, textarea { font: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .admin-panel-shell,
+  .plugin-center-grid,
+  .plugin-center-sidebar-fixed,
   .admin-panel-sidebar,
   .admin-sidebar-expanded,
   .admin-sidebar-compact {
