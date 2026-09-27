@@ -867,6 +867,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState("")
   const [installName, setInstallName] = useState("")
+  const [installDependencies, setInstallDependencies] = useState(false)
+  const [restartAfterInstall, setRestartAfterInstall] = useState(false)
   const [actionArgs, setActionArgs] = useState("{}")
   const [error, setError] = useState("")
   const refresh = useCallback(async () => {
@@ -980,11 +982,15 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   }
   async function installPlugin(event: React.FormEvent) {
     event.preventDefault()
-    if (!window.confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n依赖安装脚本不会自动运行。`)) return
+    const installOptions = [
+      installDependencies ? "安装 package.json 依赖（不执行生命周期脚本）" : "跳过依赖安装",
+      restartAfterInstall ? "安装完成后尝试重启 Bot" : "安装完成后不自动重启",
+    ]
+    if (!window.confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n${installOptions.join("\n")}`)) return
     setBusy(true)
     try {
-      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ url: installUrl, name: installName || undefined }) })
-      setShowInstall(false); setInstallUrl(""); setInstallName("")
+      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
+      setShowInstall(false); setInstallUrl(""); setInstallName(""); setInstallDependencies(false); setRestartAfterInstall(false)
       await refresh()
       notify("success", result.message)
     } catch (reason) { notify("error", (reason as Error).message) }
@@ -1089,6 +1095,10 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
         <form onSubmit={installPlugin} className="space-y-3">
           <div className="space-y-1.5"><Label htmlFor="plugin-install-url" className="text-xs">HTTPS 仓库地址</Label><Input id="plugin-install-url" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /></div>
           <div className="space-y-1.5"><Label htmlFor="plugin-install-name" className="text-xs">插件目录名</Label><Input id="plugin-install-name" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="可选，默认使用仓库名" /></div>
+          <div className="divide-y divide-border rounded-lg border border-border/70 px-3">
+            <div className="flex items-center justify-between gap-4 py-3"><div className="min-w-0"><Label htmlFor="plugin-install-dependencies" className="text-xs">安装对应依赖</Label><p className="mt-1 text-[10px] leading-4 text-muted-foreground">按 package.json 安装依赖，不运行第三方安装脚本。</p></div><Switch id="plugin-install-dependencies" checked={installDependencies} onCheckedChange={setInstallDependencies} /></div>
+            <div className="flex items-center justify-between gap-4 py-3"><div className="min-w-0"><Label htmlFor="plugin-restart-after-install" className="text-xs">重启 Bot</Label><p className="mt-1 text-[10px] leading-4 text-muted-foreground">安装成功后重启；需要 ksr 或 PM2 管理。</p></div><Switch id="plugin-restart-after-install" checked={restartAfterInstall} onCheckedChange={setRestartAfterInstall} /></div>
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Dialog.Close asChild><Button type="button" variant="outline">取消</Button></Dialog.Close>
             <Button type="submit" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button>

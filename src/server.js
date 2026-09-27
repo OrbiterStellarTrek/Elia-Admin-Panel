@@ -1137,9 +1137,9 @@ async function restartBot() {
   throw Object.assign(new Error("当前没有可识别的守护进程，面板未强制结束 Bot。请通过外部进程管理器重启。"), { status: 409 })
 }
 
-function runProcess(command, args, timeoutMs = 120_000) {
+function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: ROOT, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] })
+    const child = spawn(command, args, { cwd, windowsHide: true, shell, stdio: ["ignore", "pipe", "pipe"] })
     let output = ""
     let timedOut = false
     const collect = chunk => { if (output.length < 160_000) output += chunk.toString() }
@@ -1149,7 +1149,7 @@ function runProcess(command, args, timeoutMs = 120_000) {
     child.once("error", error => { clearTimeout(timeout); reject(error) })
     child.once("close", code => {
       clearTimeout(timeout)
-      if (timedOut) return reject(new Error("Git 操作超过 2 分钟，已停止"))
+      if (timedOut) return reject(new Error(`命令执行超过 ${Math.ceil(timeoutMs / 60_000)} 分钟，已停止`))
       if (code !== 0) return reject(new Error(output.trim() || `命令退出码 ${code}`))
       resolve(output.trim())
     })
@@ -1425,6 +1425,8 @@ export async function startAdminPanel() {
   app.post("/api/plugins/install", asyncRoute(async (req, res) => {
     const { url, name: inferredName } = validateRemoteRepository(String(req.body?.url || ""))
     const name = String(req.body?.name || inferredName)
+    const installDependencies = req.body?.installDependencies === true
+    const restartAfterInstall = req.body?.restartBot === true
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name) || name === "..") return res.status(400).json({ error: "插件目录名无效" })
     const target = path.join(PLUGINS, name)
     try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在` }) } catch (error) { if (error.code !== "ENOENT") throw error }
@@ -1434,7 +1436,41 @@ export async function startAdminPanel() {
       if (!entries.includes("index.js") && !entries.some(entry => entry.endsWith(".js"))) throw new Error("仓库克隆成功，但未找到 Yunzai 插件入口文件")
       let hasPackage = false
       try { await fs.access(path.join(target, "package.json")); hasPackage = true } catch {}
-      res.json({ ok: true, name, hasPackage, message: `已下载到 plugins/${name}${hasPackage ? "。请在项目终端安装插件依赖" : ""}，重启 Bot 后加载。` })
+      let dependenciesInstalled = false
+      let dependencyInstallFailed = false
+      if (installDependencies && hasPackage) {
+        try {
+          await runProcess("pnpm", ["install", "--filter", `./plugins/${name}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32")
+          dependenciesInstalled = true
+        } catch (error) {
+          dependencyInstallFailed = true
+          safeLogger("warn", `[AdminPanel] plugins/${name} 依赖安装失败：${error.message}`)
+        }
+      }
+      const restartAvailable = Boolean(process.env.KSR_RESTART_TOKEN) || process.env.pm_id !== undefined
+      const restartScheduled = restartAfterInstall && restartAvailable && !dependencyInstallFailed
+      const messages = [`已下载到 plugins/${name}`]
+      if (installDependencies) {
+        if (!hasPackage) messages.push("仓库没有 package.json，已跳过依赖安装")
+        else if (dependencyInstallFailed) messages.push("依赖安装失败，插件代码已保留，请检查后手动安装")
+        else messages.push("插件依赖已安装（未执行安装脚本）")
+      }
+      else if (hasPackage) messages.push("请手动安装插件依赖")
+      if (restartScheduled) messages.push("Bot 即将重启")
+      else if (restartAfterInstall && dependencyInstallFailed) messages.push("依赖未就绪，未自动重启 Bot")
+      else if (restartAfterInstall) messages.push("未检测到 ksr/PM2 自动重启服务，请手动重启 Bot")
+      else messages.push("重启 Bot 后加载")
+      res.json({ ok: true, name, hasPackage, dependenciesInstalled, restartScheduled, message: `${messages.join("；")}。` })
+      if (restartScheduled) {
+        res.once("finish", () => {
+          const restartTimer = setTimeout(() => {
+            restartBot()
+              .then(message => safeLogger("mark", `[AdminPanel] ${message}`))
+              .catch(error => safeLogger("error", `[AdminPanel] 安装后的 Bot 重启失败：${error.message}`))
+          }, 1000)
+          restartTimer.unref?.()
+        })
+      }
     } catch (error) {
       await fs.rm(target, { recursive: true, force: true }).catch(() => {})
       throw error
