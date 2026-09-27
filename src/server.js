@@ -711,14 +711,30 @@ async function writeBackupAndFile(absolute, contents) {
 function getAccountSummary() {
   const bot = global.Bot
   if (!bot) return []
-  const ids = Object.keys(bot).filter(key => /^\d+$/.test(key))
+  const adapterIds = Array.isArray(bot.adapter)
+    ? bot.adapter.map(id => String(id)).filter(id => /^\d+$/.test(id))
+    : []
+  const primaryIds = Array.isArray(bot.uin) ? bot.uin : [bot.uin]
+  const ids = [...new Set([
+    ...adapterIds,
+    ...Object.keys(bot).filter(key => /^\d+$/.test(key)),
+    ...primaryIds.map(id => String(id ?? "")).filter(id => /^\d+$/.test(id)),
+  ])]
+
   return ids.map(id => {
-    const account = bot[id]
+    const account = bot[id] || (String(bot.uin) === id ? bot : null)
+    let online = adapterIds.includes(id)
+    if (!online && account) {
+      try {
+        online = typeof account.isOnline === "function" ? account.isOnline() : account.isOnline === true
+      } catch {}
+    }
     return {
       id,
-      online: account?.isOnline !== false && account?.status !== "offline",
-      status: account?.isOnline === false || account?.status === "offline" ? "离线" : "在线",
-      nickname: account?.nickname || "",
+      online,
+      status: online ? "在线" : account ? "离线" : "未连接",
+      nickname: account?.nickname || "未知",
+      avatar: account?.avatar || `https://q1.qlogo.cn/g?b=qq&s=100&nk=${encodeURIComponent(id)}`,
     }
   })
 }
