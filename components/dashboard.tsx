@@ -5,7 +5,7 @@ import dynamic from "next/dynamic"
 import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
-  FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
+  Eye, EyeOff, FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Maximize2, Menu, MessageSquareText, Minimize2, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
   Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, Users, X,
 } from "lucide-react"
@@ -22,6 +22,25 @@ const MonacoCodeEditor = dynamic(
   () => import("@/components/monaco-code-editor").then(module => module.MonacoCodeEditor),
   { ssr: false, loading: () => <div className="min-h-[545px] flex-1 animate-pulse bg-slate-50" /> },
 )
+
+type SecretInputProps = Omit<React.ComponentProps<typeof Input>, "type">
+
+function SecretInput({ className, ...props }: SecretInputProps) {
+  const [visible, setVisible] = useState(false)
+  return <div className="relative">
+    <Input {...props} type={visible ? "text" : "password"} className={`pr-11 ${className || ""}`} />
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="absolute right-0 top-0 h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+      aria-label={visible ? "隐藏内容" : "显示内容"}
+      aria-pressed={visible}
+      title={visible ? "隐藏内容" : "显示内容"}
+      onClick={() => setVisible(current => !current)}
+    >{visible ? <EyeOff /> : <Eye />}</Button>
+  </div>
+}
 
 type Section = "overview" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string } | null
@@ -823,9 +842,9 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
-      : value === null || value === undefined ? <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
+      : value === null || value === undefined ? secretField(name) ? <SecretInput value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} /> : <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
       : multilineText && !secretField(name) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={String(value)} onChange={event => onChange(path, event.target.value)} />
-      : <Input type={secretField(name) ? "password" : "text"} value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
+      : secretField(name) ? <SecretInput value={String(value)} onChange={event => onChange(path, event.target.value)} /> : <Input type="text" value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
   </div>
 }
 
@@ -1148,7 +1167,7 @@ function SchemaField({ schema, value, onChange, validateCron }: { schema: any; v
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} onChange={onChange} forceItemType="string" />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />
       : component === "InputTextArea" || (multilineTextField(schema.field, value) && !secretField(schema.field)) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={textValue} rows={props.rows} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />
-      : <Input type={secretField(schema.field) || props.type === "password" ? "password" : "text"} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
+      : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : <Input type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
   </div>
 }
 
