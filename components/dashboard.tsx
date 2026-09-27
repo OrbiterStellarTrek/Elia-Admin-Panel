@@ -592,6 +592,9 @@ function multilineTextField(name: string, value: unknown) {
 function inferredListItemType(name: string) {
   return /qq|group|(?:^|[_-])ids?$/i.test(name) ? "number" : "string"
 }
+function numericBooleanField(name: string, value: unknown) {
+  return (name === "autoFriend" || name === "addPrivate" || name === "isInheritDefault") && (value === 0 || value === 1)
+}
 function listValueText(value: any) {
   return Array.isArray(value) ? value.map(item => typeof item === "string" ? item : String(item)).join("\n") : ""
 }
@@ -704,9 +707,10 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
   const hint = defaultValue !== undefined && JSON.stringify(value) !== JSON.stringify(defaultValue) ? `默认值：${hintValue}` : ""
   const nullableList = (value === null || value === undefined) && listField(name)
   const multilineText = multilineTextField(name, value)
+  const numericToggle = numericBooleanField(name, value)
   return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
     <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
-    <div className="min-w-0">{typeof value === "boolean" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={value} onCheckedChange={next => onChange(path, next)} /></div>
+    <div className="min-w-0">{typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
       : value === null || value === undefined ? <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
@@ -728,7 +732,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [search, setSearch] = useState("")
+  const [largeSearch, setLargeSearch] = useState("")
+  const [smallSearch, setSmallSearch] = useState("")
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState("")
   const [installName, setInstallName] = useState("")
@@ -782,7 +787,10 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     setConfigPreview("")
     setError("")
   }
-  const shown = plugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(search.toLowerCase()))
+  const largePlugins = plugins.filter(plugin => plugin.kind === "large")
+  const smallPlugins = plugins.filter(plugin => plugin.kind === "small")
+  const shownLarge = largePlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(largeSearch.toLowerCase()))
+  const shownSmall = smallPlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(smallSearch.toLowerCase()))
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
   async function save() {
     if (!selected || busy) return
@@ -881,23 +889,35 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     <PageIntro title="插件控制" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`}>
-      <Card className="relative h-fit overflow-visible">
-        <div className={`absolute inset-x-0 top-0 z-20 hidden gap-1 p-2 transition-opacity duration-200 xl:block ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
-          <Button size="icon" variant="ghost" className="mx-auto mb-1 flex" aria-label="展开插件列表侧栏" title="展开插件列表侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
-          <div className="max-h-[570px] space-y-1 overflow-y-auto scrollbar-thin">
-            {shown.map(renderCompactPlugin)}
-            {!shown.length && !loading && <p className="px-1 py-3 text-center text-[9px] text-muted-foreground">无插件</p>}
+      <div className="relative flex h-[640px] min-h-[640px] min-w-0 flex-col gap-3">
+        <div className={`absolute inset-0 z-20 hidden flex-col rounded-2xl border border-border bg-white p-2 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+          <Button size="icon" variant="ghost" className="mx-auto mb-2 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+            <div aria-label="大插件" className="space-y-1">{largePlugins.map(renderCompactPlugin)}</div>
+            <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
         </div>
-        <div className={`transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
-        <div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold"><span>本地插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件列表侧栏" title="收起插件列表侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
-        <div className="max-h-[470px] overflow-y-auto px-2 pb-3">
-          {shown.map(renderPlugin)}
-          {!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
+        <div className={`flex min-h-[640px] flex-1 flex-col gap-3 transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
+            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
+            {showInstall && <form onSubmit={installPlugin} className="mx-3 mb-2 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {shownLarge.map(renderPlugin)}
+              {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
+            </div>
+          </Card>
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{smallPlugins.length}</Badge></span></div>
+            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+              {shownSmall.map(renderPlugin)}
+              {!loading && !shownSmall.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
+            </div>
+            {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div>}
+          </Card>
         </div>
-        {archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}
-        </div>
-      </Card>
+      </div>
       <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
