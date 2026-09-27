@@ -114,6 +114,9 @@ button, input, textarea { font: inherit; }
 }
 
 @media (min-width: 1280px) {
+  .debug-workbench-grid {
+    grid-template-columns: minmax(0, var(--debug-left-track)) 8px minmax(0, var(--debug-right-track));
+  }
   .config-center-grid {
     grid-template-columns: 245px minmax(0, 1fr);
     transition: grid-template-columns 300ms cubic-bezier(.2,.8,.2,1);

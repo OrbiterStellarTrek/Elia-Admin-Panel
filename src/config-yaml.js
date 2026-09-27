@@ -46,10 +46,18 @@ function collectScalarEdits(document, original, current, next, path, edits) {
 }
 
 function replaceNode(document, path, value, previous) {
+  const isEmptyScalar = YAML.isScalar(previous) && previous.value === null && previous.range?.[0] === previous.range?.[1]
+  const parent = isEmptyScalar ? document.getIn(path.slice(0, -1), true) : null
+  const pair = YAML.isMap(parent) ? parent.items.find(item => item.value === previous) : null
+  const inlineComment = isEmptyScalar ? previous.comment : undefined
+  if (inlineComment) previous.comment = undefined
   document.setIn(path, document.createNode(value))
   const replacement = document.getIn(path, true)
   if (!previous || !replacement || typeof replacement !== "object") return
-  if (YAML.isScalar(previous) && previous.value === null && previous.range?.[0] === previous.range?.[1]) return
+  if (isEmptyScalar) {
+    if (inlineComment && pair && YAML.isScalar(pair.key)) pair.key.comment = inlineComment.trimEnd()
+    return
+  }
   for (const property of ["comment", "commentBefore", "spaceBefore"]) {
     if (previous[property] !== undefined && replacement[property] === undefined) {
       replacement[property] = previous[property]
@@ -94,7 +102,9 @@ function updateNode(document, path, value) {
 function sequenceEdit(document, original, path, value) {
   const previous = document.getIn(path, true)
   if (!previous?.range) return null
-  const [start, end] = previous.range
+  const [start, nodeEnd, commentEnd] = previous.range
+  const inlineComment = YAML.isScalar(previous) && previous.value === null ? previous.comment : undefined
+  const end = inlineComment ? commentEnd : nodeEnd
   const updated = YAML.parseDocument(original)
   updateNode(updated, path, value)
   const rendered = updated.toString()
@@ -113,8 +123,12 @@ function sequenceEdit(document, original, path, value) {
   }
 
   if (!YAML.isSeq(previous)) {
-    const renderedPrefix = rendered.slice(newLineStart, newNode.range[0])
-    text = renderedPrefix.includes(":") ? ` ${text}` : `${eol}${" ".repeat(oldIndent)}${text}`
+    if (inlineComment) {
+      text = ` #${inlineComment.trimEnd()}${eol}${" ".repeat(oldIndent)}${text}`
+    } else {
+      const renderedPrefix = rendered.slice(newLineStart, newNode.range[0])
+      text = renderedPrefix.includes(":") ? ` ${text}` : `${eol}${" ".repeat(oldIndent)}${text}`
+    }
   }
   if (!/\r?\n$/.test(original.slice(start, end))) text = text.replace(/\r?\n$/, "")
   return { start, end, text }

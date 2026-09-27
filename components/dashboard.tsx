@@ -8,7 +8,7 @@ import {
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
   Ellipsis, Eye, EyeOff, FileText, Folder, Gauge, Github, HardDrive, Image as ImageIcon, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Maximize2, Menu, MessageSquareText, Minimize2, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
-  Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, Users, X,
+  Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, UserRound, Users, X,
   WrapText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,8 @@ function SecretInput({ className, ...props }: SecretInputProps) {
 type Section = "overview" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string; exiting: boolean } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
+type FriendOption = { id: string; name: string; avatar: string }
+type GroupOption = { id: string; name: string; avatar: string }
 
 const navigation: { id: Section; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "运行概览", icon: LayoutDashboard },
@@ -526,7 +528,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}
@@ -774,11 +776,19 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const [activeGroupId, setActiveGroupId] = useState("default")
   const [addGroupOpen, setAddGroupOpen] = useState(false)
   const [newGroupId, setNewGroupId] = useState("")
+  const [newGroupPickerOpen, setNewGroupPickerOpen] = useState(false)
+  const [newGroupSearch, setNewGroupSearch] = useState("")
   const [groupActionError, setGroupActionError] = useState("")
   const [pluginNameOptions, setPluginNameOptions] = useState<string[]>([])
   const [pluginNameGroup, setPluginNameGroup] = useState("")
   const [pluginNamesLoading, setPluginNamesLoading] = useState(false)
   const [pluginNamesError, setPluginNamesError] = useState("")
+  const [friendOptions, setFriendOptions] = useState<FriendOption[]>()
+  const [friendsLoading, setFriendsLoading] = useState(false)
+  const [friendsError, setFriendsError] = useState("")
+    const [groupOptions, setGroupOptions] = useState<GroupOption[]>()
+    const [groupsLoading, setGroupsLoading] = useState(false)
+    const [groupsError, setGroupsError] = useState("")
   const [fileSidebarCollapsed, setFileSidebarCollapsed] = useBrowserBooleanPreference("configSidebarCollapsed")
   const [data, setData] = useState<any>(null)
   const [defaults, setDefaults] = useState<any>(null)
@@ -831,6 +841,8 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
     ? Object.keys(data).filter(key => (key === "default" || /^\d+$/.test(key)) && isObject(data[key])).sort((left, right) => left === "default" ? -1 : right === "default" ? 1 : 0)
     : []
   const activeGroupSection = groupSectionKeys.includes(activeGroupId) ? activeGroupId : groupSectionKeys[0] || ""
+  const configuredGroupIds = new Set(groupSectionKeys.filter(groupId => groupId !== "default"))
+  const filteredNewGroupOptions = (groupOptions || []).filter(group => `${group.name} ${group.id}`.toLowerCase().includes(newGroupSearch.trim().toLowerCase()))
   useEffect(() => {
     if (selected.toLowerCase() !== "group.yaml" || !activeGroupSection) {
       setPluginNameOptions([])
@@ -853,6 +865,40 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
       .finally(() => { if (!cancelled) setPluginNamesLoading(false) })
     return () => { cancelled = true }
   }, [activeGroupSection, api, selected])
+  useEffect(() => {
+    if (!selected) {
+      setFriendOptions(undefined)
+      setFriendsError("")
+      setFriendsLoading(false)
+      return
+    }
+    let cancelled = false
+    setFriendOptions([])
+    setFriendsError("")
+    setFriendsLoading(true)
+    api("/api/config/friends")
+      .then(result => { if (!cancelled) setFriendOptions(Array.isArray(result.friends) ? result.friends : []) })
+      .catch(reason => { if (!cancelled) setFriendsError((reason as Error).message) })
+      .finally(() => { if (!cancelled) setFriendsLoading(false) })
+    return () => { cancelled = true }
+  }, [api, selected])
+    useEffect(() => {
+      if (!selected) {
+        setGroupOptions(undefined)
+        setGroupsError("")
+        setGroupsLoading(false)
+        return
+      }
+      let cancelled = false
+      setGroupOptions([])
+      setGroupsError("")
+      setGroupsLoading(true)
+      api("/api/config/groups")
+        .then(result => { if (!cancelled) setGroupOptions(Array.isArray(result.groups) ? result.groups : []) })
+        .catch(reason => { if (!cancelled) setGroupsError((reason as Error).message) })
+        .finally(() => { if (!cancelled) setGroupsLoading(false) })
+      return () => { cancelled = true }
+    }, [api, selected])
   const groupOverrides = activeGroupSection !== "default" && isObject(data?.[activeGroupSection]) ? data[activeGroupSection] : {}
   const mergedGroupSettings = activeGroupSection && activeGroupSection !== "default"
     ? { ...(isObject(defaults?.default) ? defaults.default : {}), ...(isObject(data?.default) ? data.default : {}), ...groupOverrides }
@@ -873,6 +919,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
     setActiveGroupId(groupId)
     setAddGroupOpen(false)
     setNewGroupId("")
+    setNewGroupPickerOpen(false)
     setGroupActionError("")
   }
   function removeGroup(groupId: string) {
@@ -959,7 +1006,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
               <button type="button" aria-pressed={active} title={groupId === "default" ? "全局配置" : `群 ${groupId}`} onClick={() => setActiveGroupId(groupId)} className={`flex shrink-0 items-center gap-2 py-2 pl-3 text-xs font-medium ${groupId === "default" ? "pr-3" : "pr-1"} ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
                 <span className="relative grid size-6 shrink-0 place-items-center overflow-hidden rounded-full bg-muted">
                   <Users className="size-3.5 text-muted-foreground" />
-                  {groupId !== "default" && <img src={`https://p.qlogo.cn/gh/${encodeURIComponent(groupId)}/${encodeURIComponent(groupId)}/100`} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} />}
+                  {groupId !== "default" && <img src={`https://p.qlogo.cn/gh/${encodeURIComponent(groupId)}/${encodeURIComponent(groupId)}/100/`} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} />}
                 </span>
                 {groupId === "default" ? "全局" : `群 ${groupId}`}
               </button>
@@ -967,7 +1014,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
             </div>
           })}
           </div>
-          <Button type="button" size="icon" variant="ghost" className="ml-1 size-8 shrink-0" aria-label="新增群配置" title="新增群配置" onClick={() => { setNewGroupId(""); setGroupActionError(""); setAddGroupOpen(true) }}><Plus className="size-4" /></Button>
+          <Button type="button" size="icon" variant="ghost" className="ml-1 size-8 shrink-0" aria-label="新增群配置" title="新增群配置" onClick={() => { setNewGroupId(""); setNewGroupSearch(""); setNewGroupPickerOpen(false); setGroupActionError(""); setAddGroupOpen(true) }}><Plus className="size-4" /></Button>
         </div>}
         <CardContent className={rawMode || editorFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : "p-5"}>
         {error && <div className="mb-4"><ErrorState message={error} /></div>}
@@ -976,23 +1023,42 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
         {!loading && !rawMode && groupSectionKeys.length > 0 && activeGroupSection && isObject(activeGroupSettings) && <div className="space-y-5">{Object.entries(activeGroupSettings).map(([key, value]) => {
           const listDoesNotInherit = activeGroupSection !== "default" && (key === "enable" || key === "disable") && activeGroupSettings.isInheritDefault !== 1 && !Object.prototype.hasOwnProperty.call(groupOverrides, key)
           const defaultValue = activeGroupSection === "default" ? defaults?.default?.[key] : listDoesNotInherit ? undefined : data.default?.[key] ?? defaults?.default?.[key]
-          return <ConfigField key={key} name={key} value={value} defaultValue={defaultValue} path={[activeGroupSection, key]} onChange={update} depth={1} pluginNames={key === "enable" || key === "disable" ? pluginNameOptions : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} />
+          const mutuallyExclusiveName = key === "enable" ? "disable" : key === "disable" ? "enable" : ""
+          const mutuallyExclusiveValues = mutuallyExclusiveName && Array.isArray(activeGroupSettings[mutuallyExclusiveName]) ? activeGroupSettings[mutuallyExclusiveName] : undefined
+          return <ConfigField key={key} name={key} value={value} defaultValue={defaultValue} path={[activeGroupSection, key]} onChange={update} depth={1} pluginNames={key === "enable" || key === "disable" ? pluginNameOptions : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveName ? configFieldLabel(mutuallyExclusiveName) : undefined} />
         })}</div>}
-        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <ConfigField key={key} name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} />)}</div>}
+        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <ConfigField key={key} name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} />)}</div>}
         {!loading && !data && !error && <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">选择左侧配置文件开始编辑</div>}
         </CardContent>
       </Card>
     </div>
-    <Dialog.Root open={addGroupOpen} onOpenChange={open => { setAddGroupOpen(open); if (!open) setGroupActionError("") }}>
+    <Dialog.Root open={addGroupOpen} onOpenChange={open => { setAddGroupOpen(open); if (!open) { setGroupActionError(""); setNewGroupPickerOpen(false) } }}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
-        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
           <Dialog.Title className="text-base font-semibold">新增群配置</Dialog.Title>
           <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">新群默认继承全局配置，可在创建后单独调整。</Dialog.Description>
           <form onSubmit={addGroup} className="mt-4 space-y-3">
-            <div className="space-y-1.5"><Label htmlFor="new-group-id" className="text-xs">群号</Label><Input id="new-group-id" autoFocus inputMode="numeric" pattern="[0-9]+" value={newGroupId} onChange={event => { setNewGroupId(event.target.value); setGroupActionError("") }} placeholder="输入纯数字群号" required /></div>
+            <div className="space-y-1.5"><Label htmlFor="new-group-id" className="text-xs">群号</Label><Input id="new-group-id" autoFocus inputMode="numeric" pattern="[0-9]+" value={newGroupId} onChange={event => { setNewGroupId(event.target.value); setGroupActionError("") }} placeholder="输入纯数字群号" required /><Button type="button" size="sm" variant="outline" className="h-8 w-full text-[11px]" aria-expanded={newGroupPickerOpen} onClick={() => { setNewGroupSearch(""); setNewGroupPickerOpen(open => !open) }}><Users className="size-3.5" />{newGroupPickerOpen ? "收起群聊列表" : "从群聊列表选择"}</Button></div>
+            {newGroupPickerOpen && <div className="overflow-hidden rounded-lg border border-border/80">
+              <div className="relative border-b border-border/70"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input aria-label="搜索可配置群聊" className="h-9 border-0 pl-9 text-xs shadow-none focus-visible:ring-0" placeholder="搜索群名或群号…" value={newGroupSearch} onChange={event => setNewGroupSearch(event.target.value)} /></div>
+              <div role="listbox" aria-label="可新增配置的群聊" className="max-h-48 space-y-1 overflow-y-auto p-1.5">
+                {groupsLoading ? <div className="grid min-h-20 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-4 animate-spin" />正在获取群聊</div>
+                  : groupsError ? <p role="alert" className="p-3 text-xs text-rose-600">{groupsError}</p>
+                    : filteredNewGroupOptions.length ? filteredNewGroupOptions.map(group => {
+                      const alreadyConfigured = configuredGroupIds.has(group.id)
+                      const selectedGroup = newGroupId === group.id
+                      return <button key={group.id} type="button" role="option" aria-selected={selectedGroup} aria-disabled={alreadyConfigured} disabled={alreadyConfigured} onClick={() => { setNewGroupId(group.id); setGroupActionError(""); setNewGroupPickerOpen(false) }} className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition ${alreadyConfigured ? "cursor-not-allowed text-slate-400" : selectedGroup ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                        <span className="relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-400"><Users className="size-3.5" /><img src={group.avatar} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} /></span>
+                        {selectedGroup ? <Check className="size-3.5 shrink-0" /> : <Plus className="size-3.5 shrink-0 text-slate-400" />}
+                        <span className="min-w-0 flex-1"><span className="block truncate">{group.name}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{group.id}</span></span><span className="text-[10px] text-muted-foreground">{alreadyConfigured ? "已有配置" : ""}</span>
+                      </button>
+                    })
+                    : <p className="p-3 text-xs text-muted-foreground">{groupOptions?.length ? "没有匹配的群聊" : "当前没有可选择的群聊"}</p>}
+              </div>
+            </div>}
             {groupActionError && <p role="alert" className="text-xs text-rose-600">{groupActionError}</p>}
-            <div className="flex justify-end gap-2 pt-1"><Button type="button" variant="outline" onClick={() => setAddGroupOpen(false)}>取消</Button><Button type="submit"><Plus />添加群</Button></div>
+            <div className="flex justify-end gap-2 pt-1"><Button type="button" variant="outline" onClick={() => { setAddGroupOpen(false); setNewGroupPickerOpen(false) }}>取消</Button><Button type="submit"><Plus />添加群</Button></div>
           </form>
         </Dialog.Content>
       </Dialog.Portal>
@@ -1065,18 +1131,30 @@ function inferredListItemType(name: string) {
 function numericBooleanField(name: string, value: unknown) {
   return (name === "autoFriend" || name === "addPrivate" || name === "isInheritDefault") && (value === 0 || value === 1)
 }
-function TagListField({ values, label, itemType = "string", placeholder = "输入新项", pluginNames, pluginNameGroup, pluginNamesLoading = false, pluginNamesError = "", onChange }: { values: any[]; label: string; itemType?: "string" | "number" | "boolean"; placeholder?: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; onChange: (value: any[]) => void }) {
+function TagListField({ values, label, itemType = "string", placeholder = "输入新项", pluginNames, pluginNameGroup, pluginNamesLoading = false, pluginNamesError = "", friendOptions, friendsLoading = false, friendsError = "", groupOptions, groupsLoading = false, groupsError = "", mutuallyExclusiveValues = [], mutuallyExclusiveLabel = "另一名单", avatarKind, onChange }: { values: any[]; label: string; itemType?: "string" | "number" | "boolean"; placeholder?: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string; mutuallyExclusiveValues?: any[]; mutuallyExclusiveLabel?: string; avatarKind?: "qq" | "group"; onChange: (value: any[]) => void }) {
   const [draft, setDraft] = useState("")
   const [error, setError] = useState("")
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerSearch, setPickerSearch] = useState("")
   const [selectedPluginNames, setSelectedPluginNames] = useState<string[]>([])
+  const [friendPickerOpen, setFriendPickerOpen] = useState(false)
+  const [friendSearch, setFriendSearch] = useState("")
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([])
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false)
+  const [groupSearch, setGroupSearch] = useState("")
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
   const filteredPluginNames = (pluginNames || []).filter(name => name.toLowerCase().includes(pickerSearch.trim().toLowerCase()))
-  const existingPluginNames = new Set(values.map(String))
+  const existingValues = new Set(values.map(String))
+  const mutuallyExclusiveSet = new Set(mutuallyExclusiveValues.map(String))
+  const existingConflicts = values.filter(item => mutuallyExclusiveSet.has(String(item)))
+  const filteredFriends = (friendOptions || []).filter(friend => `${friend.name} ${friend.id}`.toLowerCase().includes(friendSearch.trim().toLowerCase()))
+  const filteredGroups = (groupOptions || []).filter(group => `${group.name} ${group.id}`.toLowerCase().includes(groupSearch.trim().toLowerCase()))
 
   function addValues(text = draft) {
     const entries = text.split(/\r?\n/).map(item => item.trim()).filter(Boolean)
     if (!entries.length) return
+    const conflicts = entries.filter(item => mutuallyExclusiveSet.has(item))
+    if (conflicts.length) { setError(`${conflicts.join("、")} 已在${mutuallyExclusiveLabel}中，不能重复添加`); return }
     let additions: any[] = entries
     if (itemType === "number") {
       additions = entries.map(Number)
@@ -1092,23 +1170,66 @@ function TagListField({ values, label, itemType = "string", placeholder = "输�
   }
 
   function addSelectedPlugins() {
-    const additions = selectedPluginNames.filter(name => !existingPluginNames.has(name))
+    const additions = selectedPluginNames.filter(name => !existingValues.has(name) && !mutuallyExclusiveSet.has(name))
     if (additions.length) onChange([...values, ...additions])
     setSelectedPluginNames([])
     setPickerOpen(false)
   }
 
+  function addSelectedFriends() {
+    const additions = selectedFriendIds.filter(id => !existingValues.has(id)).map(id => itemType === "number" ? Number(id) : id)
+    if (additions.length) onChange([...values, ...additions])
+    setSelectedFriendIds([])
+    setFriendPickerOpen(false)
+  }
+
+  function addSelectedGroups() {
+    const additions = selectedGroupIds.filter(id => !existingValues.has(id)).map(id => itemType === "number" ? Number(id) : id)
+    if (additions.length) onChange([...values, ...additions])
+    setSelectedGroupIds([])
+    setGroupPickerOpen(false)
+  }
+
   return <div className="space-y-1.5">
     <div role="group" aria-label={`${label}列表`} className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl border border-input bg-background p-2 shadow-sm transition focus-within:ring-2 focus-within:ring-indigo-300">
     {values.map((item, index) => <span key={`${index}-${String(item)}`} className="inline-flex max-w-full items-center gap-1 rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-xs text-slate-700">
-      <span className="max-w-[min(32ch,60vw)] truncate" title={item}>{item}</span>
+      {avatarKind && /^\d+$/.test(String(item)) && <span className="relative grid size-5 shrink-0 place-items-center overflow-hidden rounded-full bg-white text-slate-400">{avatarKind === "group" ? <Users className="size-3" /> : <UserRound className="size-3" />}<img src={avatarKind === "group" ? (groupOptions || []).find(group => group.id === String(item))?.avatar || `https://p.qlogo.cn/gh/${encodeURIComponent(String(item))}/${encodeURIComponent(String(item))}/100/` : (friendOptions || []).find(friend => friend.id === String(item))?.avatar || `https://q1.qlogo.cn/g?b=qq&s=100&nk=${encodeURIComponent(String(item))}`} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} /></span>}
+      <span className="max-w-[min(32ch,60vw)] truncate" title={String(item)}>{item}</span>
       <button type="button" className="grid size-5 shrink-0 place-items-center rounded text-slate-400 transition hover:bg-white hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" aria-label={`删除${label}：${item}`} title="删除此项" onClick={() => onChange(values.filter((_, valueIndex) => valueIndex !== index))}><X className="size-3.5" /></button>
     </span>)}
     <Input aria-label={`${label}，添加一项`} className="h-8 min-w-32 flex-1 border-0 bg-transparent px-1 text-xs shadow-none focus-visible:ring-0" inputMode={itemType === "number" ? "decimal" : undefined} placeholder={placeholder} value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); addValues() } }} onPaste={event => { const text = event.clipboardData.getData("text"); if (text.includes("\n")) { event.preventDefault(); addValues([draft, text].filter(Boolean).join("\n")) } }} />
     <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0" aria-label={`添加${label}`} title="添加一项" disabled={!draft.trim()} onClick={() => addValues()}><Plus className="size-4" /></Button>
+    {friendOptions !== undefined && <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" aria-label={`从好友中选择${label}`} title="从好友列表中选择" onClick={() => { setFriendSearch(""); setSelectedFriendIds([]); setFriendPickerOpen(true) }}><Users className="size-3.5" />选择好友</Button>}
+      {groupOptions !== undefined && <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" aria-label={`从群聊中选择${label}`} title="从群聊列表中选择" onClick={() => { setGroupSearch(""); setSelectedGroupIds([]); setGroupPickerOpen(true) }}><Users className="size-3.5" />选择群聊</Button>}
     {pluginNames !== undefined && <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2 text-[11px]" aria-label={`从插件名称选择${label}`} title="从已加载插件中选择" onClick={() => { setPickerSearch(""); setSelectedPluginNames([]); setPickerOpen(true) }}><Search className="size-3.5" />选择插件</Button>}
     </div>
     {error && <p role="alert" className="text-[10px] text-rose-600">{error}</p>}
+    {existingConflicts.length > 0 && <p role="alert" className="text-[10px] text-amber-700">{existingConflicts.map(String).join("、")} 同时存在于{mutuallyExclusiveLabel}，运行时会按禁用名单处理。</p>}
+        {groupOptions !== undefined && <Dialog.Root open={groupPickerOpen} onOpenChange={open => { setGroupPickerOpen(open); if (!open) setSelectedGroupIds([]) }}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+            <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+              <Dialog.Title className="text-base font-semibold">选择群聊</Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">选择后添加到{label}；已存在的群聊不可重复添加。</Dialog.Description>
+              <div className="relative mt-4"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input aria-label="搜索群聊" className="h-9 pl-9 text-xs" placeholder="搜索群名或群号…" value={groupSearch} onChange={event => setGroupSearch(event.target.value)} /></div>
+              <div role="listbox" aria-label="群聊列表" aria-multiselectable="true" className="mt-3 min-h-24 flex-1 space-y-1 overflow-y-auto rounded-lg border border-border/70 p-1.5">
+                {groupsLoading ? <div className="grid min-h-24 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-4 animate-spin" />正在获取群聊</div>
+                  : groupsError ? <p role="alert" className="p-3 text-xs text-rose-600">{groupsError}</p>
+                    : filteredGroups.length ? filteredGroups.map(group => {
+                      const added = existingValues.has(group.id)
+                      const checked = selectedGroupIds.includes(group.id)
+                      return <button key={group.id} type="button" role="option" aria-selected={added || checked} disabled={added} onClick={() => setSelectedGroupIds(current => checked ? current.filter(id => id !== group.id) : [...current, group.id])} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition ${added ? "text-slate-400" : checked ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                        <span className="relative grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-400"><Users className="size-4" /><img src={group.avatar} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} /></span>
+                        {checked || added ? <Check className="size-3.5 shrink-0" /> : <Plus className="size-3.5 shrink-0 text-slate-400" />}
+                        <span className="min-w-0 flex-1"><span className="block truncate">{group.name}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{group.id}</span></span><span className="text-[10px] text-muted-foreground">{added ? "已添加" : ""}</span>
+                      </button>
+                    })
+                    : <p className="p-3 text-xs text-muted-foreground">{groupOptions.length ? "没有匹配的群聊" : "当前没有已缓存的群聊"}</p>}
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-muted-foreground">已选 {selectedGroupIds.length} 个群</span><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setGroupPickerOpen(false)}>取消</Button><Button type="button" size="sm" disabled={!selectedGroupIds.length || groupsLoading} onClick={addSelectedGroups}><Check />添加所选</Button></div></div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>}
     {pluginNames !== undefined && <Dialog.Root open={pickerOpen} onOpenChange={open => { setPickerOpen(open); if (!open) setSelectedPluginNames([]) }}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
@@ -1120,11 +1241,12 @@ function TagListField({ values, label, itemType = "string", placeholder = "输�
             {pluginNamesLoading ? <div className="grid min-h-24 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-4 animate-spin" />正在获取插件名称</div>
               : pluginNamesError ? <p role="alert" className="p-3 text-xs text-rose-600">{pluginNamesError}</p>
                 : filteredPluginNames.length ? filteredPluginNames.map(name => {
-                  const added = existingPluginNames.has(name)
+                  const added = existingValues.has(name)
+                  const excluded = mutuallyExclusiveSet.has(name)
                   const checked = selectedPluginNames.includes(name)
-                  return <button key={name} type="button" role="option" aria-selected={added || checked} disabled={added} onClick={() => setSelectedPluginNames(current => checked ? current.filter(item => item !== name) : [...current, name])} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition ${added ? "text-slate-400" : checked ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                  return <button key={name} type="button" role="option" aria-selected={added || checked} disabled={added || excluded} onClick={() => setSelectedPluginNames(current => checked ? current.filter(item => item !== name) : [...current, name])} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition ${added || excluded ? "text-slate-400" : checked ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
                     {checked || added ? <Check className="size-3.5 shrink-0" /> : <Plus className="size-3.5 shrink-0 text-slate-400" />}
-                    <span className="min-w-0 flex-1 truncate">{name}</span><span className="text-[10px] text-muted-foreground">{added ? "已添加" : ""}</span>
+                    <span className="min-w-0 flex-1 truncate">{name}</span><span className="text-[10px] text-muted-foreground">{added ? "已添加" : excluded ? `在${mutuallyExclusiveLabel}` : ""}</span>
                   </button>
                 })
                 : <p className="p-3 text-xs text-muted-foreground">{pluginNames?.length ? "没有匹配的插件" : "当前没有已加载的插件名称"}</p>}
@@ -1133,12 +1255,38 @@ function TagListField({ values, label, itemType = "string", placeholder = "输�
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>}
+    {friendOptions !== undefined && <Dialog.Root open={friendPickerOpen} onOpenChange={open => { setFriendPickerOpen(open); if (!open) setSelectedFriendIds([]) }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+          <Dialog.Title className="text-base font-semibold">选择好友</Dialog.Title>
+          <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">选择后添加到{label}；未缓存的 QQ 号仍可手动输入。</Dialog.Description>
+          <div className="relative mt-4"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input aria-label="搜索好友" className="h-9 pl-9 text-xs" placeholder="搜索昵称、备注或 QQ 号…" value={friendSearch} onChange={event => setFriendSearch(event.target.value)} /></div>
+          <div role="listbox" aria-label="好友列表" aria-multiselectable="true" className="mt-3 min-h-24 flex-1 space-y-1 overflow-y-auto rounded-lg border border-border/70 p-1.5">
+            {friendsLoading ? <div className="grid min-h-24 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-4 animate-spin" />正在获取好友列表</div>
+              : friendsError ? <p role="alert" className="p-3 text-xs text-rose-600">{friendsError}</p>
+                : filteredFriends.length ? filteredFriends.map(friend => {
+                  const added = existingValues.has(friend.id)
+                  const checked = selectedFriendIds.includes(friend.id)
+                  return <button key={friend.id} type="button" role="option" aria-selected={added || checked} disabled={added} onClick={() => setSelectedFriendIds(current => checked ? current.filter(id => id !== friend.id) : [...current, friend.id])} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition ${added ? "text-slate-400" : checked ? "bg-indigo-50 text-indigo-700" : "text-slate-700 hover:bg-slate-50"}`}>
+                    <span className="relative grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-400"><UserRound className="size-4" /><img src={friend.avatar} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} /></span>
+                    {checked || added ? <Check className="size-3.5 shrink-0" /> : <Plus className="size-3.5 shrink-0 text-slate-400" />}
+                    <span className="min-w-0 flex-1"><span className="block truncate">{friend.name}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{friend.id}</span></span><span className="text-[10px] text-muted-foreground">{added ? "已添加" : ""}</span>
+                  </button>
+                })
+                : <p className="p-3 text-xs text-muted-foreground">{friendOptions.length ? "没有匹配的好友" : "当前没有已缓存的好友"}</p>}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-muted-foreground">已选 {selectedFriendIds.length} 位</span><div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setFriendPickerOpen(false)}>取消</Button><Button type="button" size="sm" disabled={!selectedFriendIds.length || friendsLoading} onClick={addSelectedFriends}><Check />添加所选</Button></div></div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>}
   </div>
 }
 
-function StringListField({ value, label, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError, onChange }: { value: string; label: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; onChange: (value: string) => void }) {
+function StringListField({ name, value, label, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError, mutuallyExclusiveValues, mutuallyExclusiveLabel, onChange }: { name: string; value: string; label: string; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string; mutuallyExclusiveValues?: any[]; mutuallyExclusiveLabel?: string; onChange: (value: string) => void }) {
   const values = value.split(/\r?\n/).filter(item => item.trim() !== "")
-  return <TagListField values={values} label={label} placeholder="添加一项" pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(next.join("\n"))} />
+  const avatarKind = /group/i.test(name) ? "group" : /qq|user/i.test(name) ? "qq" : undefined
+  return <TagListField values={values} label={label} placeholder="添加一项" pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={avatarKind === "qq" ? friendOptions : undefined} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={avatarKind === "group" ? groupOptions : undefined} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} avatarKind={avatarKind} onChange={next => onChange(next.join("\n"))} />
 }
 
 function isSimpleRecord(value: any) {
@@ -1190,7 +1338,7 @@ function StructuredConfigField({ value, label, onChange, arrayOnly = false }: { 
   />
 }
 
-function ConfigListField({ name, label, value, defaultValue, onChange, forceItemType, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError }: { name: string; label: string; value: any; defaultValue?: any; onChange: (value: any) => void; forceItemType?: "string" | "number" | "boolean"; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string }) {
+function ConfigListField({ name, label, value, defaultValue, onChange, forceItemType, forceAvatarKind, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError, mutuallyExclusiveValues, mutuallyExclusiveLabel }: { name: string; label: string; value: any; defaultValue?: any; onChange: (value: any) => void; forceItemType?: "string" | "number" | "boolean"; forceAvatarKind?: "qq" | "group"; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string; mutuallyExclusiveValues?: any[]; mutuallyExclusiveLabel?: string }) {
   const values = Array.isArray(value) ? value : []
   const defaults = Array.isArray(defaultValue) ? defaultValue : []
   const sampleValues = values.length ? values : defaults
@@ -1212,12 +1360,17 @@ function ConfigListField({ name, label, value, defaultValue, onChange, forceItem
   </div>
 
   const supportsPluginNames = name === "enable" || name === "disable"
-  return <TagListField values={values} label={label} itemType={itemType} placeholder={itemType === "number" ? "输入数字" : itemType === "boolean" ? "输入 true/false" : "输入新项"} pluginNames={supportsPluginNames ? pluginNames : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(next)} />
+  const avatarKind = forceAvatarKind || (/group/i.test(name) ? "group" : /qq|user/i.test(name) ? "qq" : undefined)
+  return <TagListField values={values} label={label} itemType={itemType} placeholder={itemType === "number" ? "输入数字" : itemType === "boolean" ? "输入 true/false" : "输入新项"} pluginNames={supportsPluginNames ? pluginNames : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={avatarKind === "qq" ? friendOptions : undefined} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={avatarKind === "group" ? groupOptions : undefined} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={supportsPluginNames ? mutuallyExclusiveValues : undefined} mutuallyExclusiveLabel={mutuallyExclusiveLabel} avatarKind={avatarKind} onChange={next => onChange(next)} />
 }
 
-function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError }: { name: string; value: any; defaultValue?: any; path: string[]; onChange: (path: string[], value: any) => void; depth?: number; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string }) {
+function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, pluginNames, pluginNameGroup, pluginNamesLoading, pluginNamesError, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError, mutuallyExclusiveValues, mutuallyExclusiveLabel }: { name: string; value: any; defaultValue?: any; path: string[]; onChange: (path: string[], value: any) => void; depth?: number; pluginNames?: string[]; pluginNameGroup?: string; pluginNamesLoading?: boolean; pluginNamesError?: string; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string; mutuallyExclusiveValues?: any[]; mutuallyExclusiveLabel?: string }) {
   const label = configFieldLabel(name)
-  if (isObject(value)) return <div className={`${depth ? "ml-3 border-l border-border pl-4" : ""}`}><div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-2"><span className="grid size-6 place-items-center rounded-md bg-indigo-50 text-indigo-600"><Braces className="size-3.5" /></span><span className="text-sm font-semibold">{label}</span></div><div className="space-y-4">{Object.entries(value).map(([child, current]) => <ConfigField key={child} name={child} value={current} defaultValue={defaultValue?.[child]} path={[...path, child]} onChange={onChange} depth={depth + 1} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} />)}</div></div>
+  if (isObject(value)) return <div className={`${depth ? "ml-3 border-l border-border pl-4" : ""}`}><div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-2"><span className="grid size-6 place-items-center rounded-md bg-indigo-50 text-indigo-600"><Braces className="size-3.5" /></span><span className="text-sm font-semibold">{label}</span></div><div className="space-y-4">{Object.entries(value).map(([child, current]) => {
+    const peerName = child === "enable" ? "disable" : child === "disable" ? "enable" : ""
+    const peerValues = peerName && Array.isArray(value[peerName]) ? value[peerName] : undefined
+    return <ConfigField key={child} name={child} value={current} defaultValue={defaultValue?.[child]} path={[...path, child]} onChange={onChange} depth={depth + 1} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={peerValues} mutuallyExclusiveLabel={peerName ? configFieldLabel(peerName) : undefined} />
+  })}</div></div>
   const hintValue = Array.isArray(defaultValue) ? defaultValue.join(", ") : isObject(defaultValue) ? stringifyYaml(defaultValue).replace(/\s+/g, " ").trim() : String(defaultValue)
   const hint = defaultValue !== undefined && JSON.stringify(value) !== JSON.stringify(defaultValue) ? `默认值：${hintValue}` : ""
   const nullableList = (value === null || value === undefined) && listField(name)
@@ -1231,8 +1384,8 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, plu
     <div className="min-w-0">{selectOptions ? <Select value={selectValue} onValueChange={selected => onChange(path, numericConfigSelectFields.has(name) ? Number(selected) : selected)}><SelectTrigger aria-label={label} className={` ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`}><SelectValue placeholder="未设置，请选择" /></SelectTrigger><SelectContent>{!hasValidSelection && selectValue && <SelectItem value={selectValue} disabled>无效值：{selectValue}，请选择</SelectItem>}{selectOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
-      : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(path, next)} />
-      : listField(name) && typeof value === "string" ? <StringListField label={label} value={value} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} onChange={next => onChange(path, next)} />
+      : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
+      : listField(name) && typeof value === "string" ? <StringListField name={name} label={label} value={value} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
       : value === null || value === undefined ? secretField(name) ? <SecretInput value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} /> : <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
       : multilineText && !secretField(name) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={String(value)} onChange={event => onChange(path, event.target.value)} />
       : secretField(name) ? <SecretInput value={String(value)} onChange={event => onChange(path, event.target.value)} /> : <Input type="text" value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
@@ -1282,6 +1435,12 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [installDependencies, setInstallDependencies] = useState(false)
   const [restartAfterInstall, setRestartAfterInstall] = useState(false)
   const [actionArgs, setActionArgs] = useState("{}")
+  const [schemaFriendOptions, setSchemaFriendOptions] = useState<FriendOption[]>()
+  const [schemaFriendsLoading, setSchemaFriendsLoading] = useState(false)
+  const [schemaFriendsError, setSchemaFriendsError] = useState("")
+  const [schemaGroupOptions, setSchemaGroupOptions] = useState<GroupOption[]>()
+  const [schemaGroupsLoading, setSchemaGroupsLoading] = useState(false)
+  const [schemaGroupsError, setSchemaGroupsError] = useState("")
   const [error, setError] = useState("")
   useEffect(() => {
     if (!sourceFullscreen) return
@@ -1314,6 +1473,38 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const schemaGroups = selected?.hasConfig ? splitPluginSchemaGroups(selected.schemas) : []
   const hasSchemaGroupTabs = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "SOFT_GROUP_BEGIN"))
   const activeSchemaGroupData = schemaGroups[activeSchemaGroup] || schemaGroups[0]
+  const needsSchemaFriends = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectFriend" || /qq|friend|user/i.test(String(schema.field || ""))))
+  const needsSchemaGroups = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectGroup" || /group/i.test(String(schema.field || ""))))
+  useEffect(() => {
+    let cancelled = false
+    if (needsSchemaFriends) {
+      setSchemaFriendOptions([])
+      setSchemaFriendsError("")
+      setSchemaFriendsLoading(true)
+      api("/api/config/friends")
+        .then(result => { if (!cancelled) setSchemaFriendOptions(Array.isArray(result.friends) ? result.friends : []) })
+        .catch(reason => { if (!cancelled) setSchemaFriendsError((reason as Error).message) })
+        .finally(() => { if (!cancelled) setSchemaFriendsLoading(false) })
+    } else {
+      setSchemaFriendOptions(undefined)
+      setSchemaFriendsError("")
+      setSchemaFriendsLoading(false)
+    }
+    if (needsSchemaGroups) {
+      setSchemaGroupOptions([])
+      setSchemaGroupsError("")
+      setSchemaGroupsLoading(true)
+      api("/api/config/groups")
+        .then(result => { if (!cancelled) setSchemaGroupOptions(Array.isArray(result.groups) ? result.groups : []) })
+        .catch(reason => { if (!cancelled) setSchemaGroupsError((reason as Error).message) })
+        .finally(() => { if (!cancelled) setSchemaGroupsLoading(false) })
+    } else {
+      setSchemaGroupOptions(undefined)
+      setSchemaGroupsError("")
+      setSchemaGroupsLoading(false)
+    }
+    return () => { cancelled = true }
+  }, [api, needsSchemaFriends, needsSchemaGroups, selected?.id])
   useEffect(() => {
     if (!selected) return
     let cancelled = false
@@ -1526,7 +1717,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
         <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-5" : "p-5"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${sourceFullscreen ? "" : "rounded-xl border border-border"}`}><div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><div className="flex shrink-0 items-center gap-2"><span className="hidden text-[10px] text-muted-foreground sm:block">Ctrl+S 保存 · 重启后加载</span><Button type="button" size="icon" variant="ghost" className="size-8" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{detailLoading ? <div className="grid min-h-[545px] flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="min-h-[545px] flex-1" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
-          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : (hasSchemaGroupTabs ? activeSchemaGroupData?.schemas || [] : selected.schemas).map((schema: any, index: number) => schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} /> : null)}</div>
+          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : (hasSchemaGroupTabs ? activeSchemaGroupData?.schemas || [] : selected.schemas).map((schema: any, index: number) => schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} friendOptions={schemaFriendOptions} friendsLoading={schemaFriendsLoading} friendsError={schemaFriendsError} groupOptions={schemaGroupOptions} groupsLoading={schemaGroupsLoading} groupsError={schemaGroupsError} /> : null)}</div>
             : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
               : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {!sourceFullscreen && selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
@@ -1631,13 +1822,14 @@ function CronExpressionField({ value, onChange, validate }: { value: string; onC
   </div>
 }
 
-function SchemaField({ schema, value, onChange, validateCron }: { schema: any; value: any; onChange: (value: any) => void; validateCron: (expression: string) => Promise<any> }) {
+function SchemaField({ schema, value, onChange, validateCron, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError }: { schema: any; value: any; onChange: (value: any) => void; validateCron: (expression: string) => Promise<any>; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string }) {
   const component = String(schema.component || "Input")
   const props = schema.componentProps || {}
   const label = schema.label || schema.field
   const help = schema.bottomHelpMessage || schema.helpMessage
   const options: any[] = props.options || []
-  const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend"
+  const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" || component === "GSelectGroup"
+  const forceAvatarKind = component === "GSelectFriend" ? "qq" : component === "GSelectGroup" ? "group" : undefined
   const textValue = typeof value === "string" ? value : value == null ? "" : String(value)
   return <div className="grid gap-3 md:grid-cols-[minmax(155px,250px)_minmax(220px,1fr)]">
     <div className="pt-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
@@ -1645,8 +1837,8 @@ function SchemaField({ schema, value, onChange, validateCron }: { schema: any; v
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" ? <div className="flex flex-wrap gap-2">{options.map((option: any) => { const optionValue = typeof option === "object" ? option.value : option; const optionLabel = typeof option === "object" ? option.label : option; return <button key={String(optionValue)} type="button" onClick={() => onChange(optionValue)} className={`rounded-lg border px-3 py-2 text-xs transition ${value === optionValue ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-border bg-white text-slate-600 hover:bg-slate-50"}`}>{optionLabel}</button> })}</div>
       : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />
-      : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} onChange={onChange} />
-      : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} onChange={onChange} forceItemType="string" />
+      : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
+      : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} forceItemType="string" forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />
       : component === "InputTextArea" || (multilineTextField(schema.field, value) && !secretField(schema.field)) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={textValue} rows={props.rows} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />
       : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : <Input type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
@@ -1756,6 +1948,52 @@ function MessageDebugger({ api }: { api: Api }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [history, setHistory] = useState<any[]>([])
+  const [splitPercent, setSplitPercent] = useState(42)
+  const splitGridRef = useRef<HTMLDivElement>(null)
+  const conversationEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    conversationEndRef.current?.scrollIntoView({ block: "end" })
+  }, [history])
+
+  function adjustSplit(amount: number) {
+    setSplitPercent(current => Math.min(65, Math.max(28, current + amount)))
+  }
+
+  function updateSplit(clientX: number) {
+    const bounds = splitGridRef.current?.getBoundingClientRect()
+    if (!bounds) return
+    const availableWidth = bounds.width - 8
+    const next = ((clientX - bounds.left - 4) / availableWidth) * 100
+    setSplitPercent(Math.min(65, Math.max(28, next)))
+  }
+
+  function renderReplySegment(segment: any, key: string): React.ReactNode {
+    if (segment.type === "chat-message") return <div key={key} className="my-1 max-w-full overflow-hidden rounded-lg border border-border/80 bg-slate-50/70">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border/70 px-3 py-2 text-[10px] font-medium text-slate-600"><Users className="size-3.5 shrink-0 text-indigo-500" /><span>{segment.nickname || "消息发送者"}</span>{segment.userId && <span className="font-mono text-muted-foreground">{segment.userId}</span>}</div>
+      <div className="max-h-[52dvh] space-y-2 overflow-y-auto p-3">{(segment.segments || []).map((child: any, index: number) => renderReplySegment(child, `${key}-${index}`))}</div>
+    </div>
+    if (segment.type === "object") return <div key={key} className="my-1 divide-y divide-border/70 overflow-hidden rounded-lg border border-border/80 bg-slate-50/70">
+      {segment.entries.map((entry: any, index: number) => <div key={`${key}-${index}`} className="grid gap-1 px-3 py-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:gap-3"><span className="text-[10px] font-medium text-slate-500">{entry.label}</span><pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words text-xs leading-5">{entry.value}</pre></div>)}
+    </div>
+    if (segment.type === "image") return <figure key={key} className="my-1 max-w-full">
+      {segment.src ? <img src={segment.src} alt={segment.alt || "插件回复图片"} loading="lazy" referrerPolicy="no-referrer" className="max-h-[min(60dvh,480px)] max-w-full rounded-lg border border-border/70 object-contain" /> : <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"><ImageIcon className="size-4 shrink-0" />图片无法预览{segment.alt && segment.alt !== "图片" ? `：${segment.alt}` : ""}</div>}
+      {(segment.width || segment.height || segment.size) && <figcaption className="mt-1 text-[10px] text-muted-foreground">{segment.width && segment.height ? `${segment.width} × ${segment.height}` : ""}{segment.size ? ` · ${formatBytes(segment.size)}` : ""}</figcaption>}
+    </figure>
+    if (segment.type === "audio") return <div key={key} className="my-1 flex min-w-0 flex-col items-start gap-1">
+      {segment.src ? <audio controls preload="none" src={segment.src} aria-label={segment.alt || "语音消息"} className="h-10 w-full max-w-[360px]" /> : <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground"><span aria-hidden="true">♫</span>{segment.alt || "语音格式无法在浏览器中播放"}</div>}
+      {segment.name && <span className="max-w-full truncate text-[10px] text-muted-foreground">{segment.name}</span>}
+    </div>
+    if (segment.type === "forward") return <div key={key} className="my-1 max-w-full overflow-hidden rounded-lg border border-border/80 bg-slate-50/70">
+      <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2 text-[10px] font-medium text-slate-600"><MessageSquareText className="size-3.5 shrink-0 text-indigo-500" /><span>{segment.title || "合并转发"}</span><span className="ml-auto shrink-0 text-muted-foreground">{segment.nodes?.length ? `${segment.nodes.length} 条` : ""}</span></div>
+      {segment.nodes?.length ? <div className="divide-y divide-border/70">{segment.nodes.map((node: any, index: number) => <div key={`${key}-${index}`} className="space-y-1.5 px-3 py-2">
+        <div className="text-[10px] font-medium text-slate-500">{node.nickname || node.userId || `消息 ${node.index || index + 1}`}</div>
+        <div className="space-y-2">{(node.segments || []).map((child: any, childIndex: number) => renderReplySegment(child, `${key}-${index}-${childIndex}`))}</div>
+      </div>)}</div> : <div className="px-3 py-2 text-xs text-muted-foreground">{segment.summary || "转发节点内容不可读取"}</div>}
+      {segment.summary && segment.nodes?.length > 0 && <div className="border-t border-border/70 px-3 py-1.5 text-[10px] text-muted-foreground">{segment.summary}</div>}
+    </div>
+    return <span key={key} className="whitespace-pre-wrap break-words">{segment.text ?? String(segment)}</span>
+  }
 
   async function sendMessage(event: React.FormEvent) {
     event.preventDefault()
@@ -1767,7 +2005,7 @@ function MessageDebugger({ api }: { api: Api }) {
         method: "POST",
         body: JSON.stringify({ message, userId, messageType, groupId }),
       })
-      setHistory(old => [{
+      setHistory(old => [...old, {
         id: `${Date.now()}-${Math.random()}`,
         sentAt: new Date(),
         message,
@@ -1776,7 +2014,7 @@ function MessageDebugger({ api }: { api: Api }) {
         groupId,
         replies: result.replies || [],
         summary: result.message,
-      }, ...old].slice(0, 20))
+      }].slice(-20))
       setMessage("")
     } catch (reason) {
       setError((reason as Error).message)
@@ -1786,8 +2024,9 @@ function MessageDebugger({ api }: { api: Api }) {
   }
 
   return <>
-    <div className="grid items-start gap-5 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)]">
-      <Card><CardHeader className="border-b border-border/70 pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></CardHeader><CardContent className="p-5">
+    <div ref={splitGridRef} style={{ "--debug-left-track": `${splitPercent}fr`, "--debug-right-track": `${100 - splitPercent}fr` } as React.CSSProperties} className="debug-workbench-grid grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
+      <section className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-b border-border bg-white px-5 py-5 sm:px-7 xl:border-b-0 xl:border-r-0 xl:px-8 xl:py-7">
+        <div className="mb-5 border-b border-border/70 pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></div>
         <form className="space-y-4" onSubmit={sendMessage}>
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1" role="group" aria-label="消息类型">
             {([["private", "私聊"], ["group", "群聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`rounded-lg px-3 py-2 text-xs font-medium transition ${messageType === type ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{label}</button>)}
@@ -1801,10 +2040,53 @@ function MessageDebugger({ api }: { api: Api }) {
           <Button className="w-full" disabled={busy || !message.trim() || !userId.trim() || (messageType === "group" && !groupId.trim())}>{busy ? <LoaderCircle className="animate-spin" /> : <Send />}送入插件处理链</Button>
         </form>
         <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-[10px] leading-5 text-amber-900"><div className="font-semibold">调试权限</div><p className="mt-1">模拟事件按标准输入方式以主人身份运行；群聊同时模拟群主/管理员。插件命令可能执行实际操作，请确认输入内容。</p><p className="mt-1">事件回复会在此捕获，不通过真实 QQ 会话发送；插件若自行调用真实 Bot 或外部服务，仍可能产生实际副作用。</p></div>
-      </CardContent></Card>
-      <Card className="min-h-96 overflow-hidden"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">调试记录</CardTitle><CardDescription className="mt-1">本次面板会话最近 20 条</CardDescription></div><Button variant="outline" size="sm" disabled={!history.length} onClick={() => setHistory([])}>清空</Button></CardHeader>
-        <CardContent className="space-y-4 p-4">{history.length ? history.map(item => <article key={item.id} className="overflow-hidden rounded-xl border border-border"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-slate-50/70 px-3 py-2 text-[10px]"><span className="font-medium text-slate-700">{item.messageType === "group" ? `群聊 ${item.groupId}` : "私聊"} · 发送方 {item.userId}</span><time className="text-muted-foreground">{item.sentAt.toLocaleTimeString("zh-CN")}</time></div><div className="space-y-3 p-3"><div><div className="mb-1 text-[10px] font-semibold text-slate-400">输入</div><pre className="whitespace-pre-wrap break-words text-xs leading-5">{item.message}</pre></div><div><div className="mb-1 text-[10px] font-semibold text-slate-400">处理结果</div>{item.replies.length ? <div className="space-y-2">{item.replies.map((reply: string, index: number) => <pre key={index} className="whitespace-pre-wrap break-words rounded-lg bg-indigo-50/70 p-2.5 text-xs leading-5 text-indigo-950">{reply}</pre>)}</div> : <p className="text-xs text-muted-foreground">{item.summary}</p>}</div></div></article>) : <div className="grid min-h-64 place-items-center text-center"><div><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><MessageSquareText className="size-5" /></div><p className="mt-3 text-sm font-medium">还没有调试记录</p><p className="mt-1 text-xs text-muted-foreground">发送消息后，插件回复会显示在这里。</p></div></div>}</CardContent>
-      </Card>
+      </section>
+      <div
+        role="separator"
+        tabIndex={0}
+        aria-label="调整左右分区宽度"
+        aria-orientation="vertical"
+        aria-valuemin={28}
+        aria-valuemax={65}
+        aria-valuenow={Math.round(splitPercent)}
+        aria-valuetext={`左侧 ${Math.round(splitPercent)}%`}
+        title="拖动调整宽度，也可使用左右方向键"
+        onPointerDown={event => {
+          if (event.button !== 0) return
+          event.preventDefault()
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={event => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX)
+        }}
+        onPointerUp={event => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+        }}
+        onKeyDown={event => {
+          if (event.key === "ArrowLeft") { event.preventDefault(); adjustSplit(-2) }
+          if (event.key === "ArrowRight") { event.preventDefault(); adjustSplit(2) }
+          if (event.key === "Home") { event.preventDefault(); setSplitPercent(28) }
+          if (event.key === "End") { event.preventDefault(); setSplitPercent(65) }
+        }}
+        className="group relative hidden cursor-col-resize touch-none items-center justify-center outline-none focus-visible:bg-indigo-50/70 xl:flex"
+      >
+        <span className="pointer-events-none absolute inset-y-0 w-px bg-border transition-colors group-hover:bg-indigo-300 group-focus-visible:bg-indigo-500" />
+        <span className="pointer-events-none z-10 h-10 w-1 rounded-full bg-slate-300 transition group-hover:h-14 group-hover:bg-indigo-500 group-focus-visible:bg-indigo-500" />
+      </div>
+      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-slate-50/40">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border/70 bg-white px-5 py-3 sm:px-7 sm:py-4 xl:px-8 xl:py-4"><div><CardTitle className="text-base">调试记录</CardTitle><CardDescription className="mt-1">本次面板会话最近 20 条</CardDescription></div><Button variant="outline" size="sm" disabled={!history.length} onClick={() => setHistory([])}>清空</Button></div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5 xl:p-6">{history.length ? <>{history.map(item => <article key={item.id} className="space-y-3">
+          <div className="flex justify-end"><div className="max-w-[98%]">
+            <div className="mb-1 flex items-center justify-end gap-2 text-[10px] text-muted-foreground"><span>面板 · {item.messageType === "group" ? `群聊 ${item.groupId}` : `私聊 · ${item.userId}`}</span><time>{item.sentAt.toLocaleTimeString("zh-CN")}</time></div>
+            <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-sm bg-indigo-600 px-4 py-3 text-xs leading-5 text-white shadow-sm">{item.message}</div>
+          </div></div>
+          {item.replies.length ? item.replies.map((reply: any, index: number) => <div key={index} className="flex justify-start"><div className="max-w-[92%]">
+            <div className="mb-1 flex min-w-0 items-center gap-2 text-[10px]"><span className="font-medium text-indigo-600">{reply?.plugin?.name ? `插件 · ${reply.plugin.name}` : "插件回复 · 来源未识别"}</span>{reply?.plugin?.handler && <span className="truncate text-muted-foreground">{reply.plugin.handler}</span>}</div>
+            {reply?.plugin?.path && <div className="mb-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground" title={`plugins/${reply.plugin.path}`}><FileCode2 className="size-3 shrink-0" /><span className="truncate font-mono">plugins/{reply.plugin.path}</span></div>}
+            <div className="space-y-2 whitespace-pre-wrap break-words rounded-2xl rounded-bl-sm border border-border bg-white px-4 py-3 text-xs leading-5 shadow-sm">{Array.isArray(reply?.segments) ? reply.segments.map((segment: any, segmentIndex: number) => renderReplySegment(segment, `${item.id}-${index}-${segmentIndex}`)) : reply?.text}</div>
+          </div></div>) : <div className="flex justify-start"><div className="max-w-[92%] rounded-xl border border-dashed border-border bg-white px-3 py-2 text-xs text-muted-foreground">{item.summary}</div></div>}
+        </article>)}<div ref={conversationEndRef} /> </> : <div className="grid min-h-full place-items-center text-center"><div><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><MessageSquareText className="size-5" /></div><p className="mt-3 text-sm font-medium">还没有调试记录</p><p className="mt-1 text-xs text-muted-foreground">发送消息后，插件回复会显示在这里。</p></div></div>}</div>
+      </section>
     </div>
   </>
 }

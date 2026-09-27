@@ -1,5 +1,5 @@
 import crypto from "node:crypto"
-import { watch as watchDirectory } from "node:fs"
+import { existsSync, watch as watchDirectory } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { createRequire } from "node:module"
@@ -27,6 +27,16 @@ const SESSION_STORE_FILE = path.join(DATA_DIR, "sessions.json")
 const STATIC_DIR = path.join(PANEL_DIR, "out")
 const MAX_TEXT_BYTES = 1_500_000
 const MAX_PREVIEW_IMAGE_BYTES = 20 * 1024 * 1024
+const MAX_PREVIEW_AUDIO_BYTES = 20 * 1024 * 1024
+const MAX_DEBUG_INLINE_IMAGE_BYTES = 2 * 1024 * 1024
+const MAX_DEBUG_INLINE_AUDIO_BYTES = 2 * 1024 * 1024
+const MAX_DEBUG_AUDIO_OUTPUT_BYTES = 8 * 1024 * 1024
+const MAX_DEBUG_AUDIO_TRANSCODES_PER_EVENT = 3
+const MAX_DEBUG_FORWARD_FETCHES_PER_EVENT = 3
+const MAX_DEBUG_FORWARD_NODES = 20
+const DEBUG_AUDIO_CACHE_TTL_MS = 10 * 60 * 1000
+const DEBUG_AUDIO_CACHE_MAX_BYTES = 32 * 1024 * 1024
+const FFMPEG_PATH = process.env.ELIA_FFMPEG_PATH || (process.platform === "win32" && existsSync("E:\\ffmpeg\\ffmpeg.exe") ? "E:\\ffmpeg\\ffmpeg.exe" : "ffmpeg")
 const MAX_LOG_TAIL_BYTES = 512 * 1024
 const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
@@ -42,11 +52,24 @@ const IMAGE_MIME_TYPES = new Map([
   [".gif", "image/gif"], [".webp", "image/webp"], [".bmp", "image/bmp"],
   [".avif", "image/avif"], [".ico", "image/x-icon"],
 ])
+const AUDIO_MIME_TYPES = new Map([
+  [".mp3", "audio/mpeg"], [".wav", "audio/wav"], [".ogg", "audio/ogg"],
+  [".oga", "audio/ogg"], [".opus", "audio/ogg"], [".m4a", "audio/mp4"],
+  [".aac", "audio/aac"], [".flac", "audio/flac"], [".amr", "audio/amr"],
+  [".webm", "audio/webm"],
+])
+const DEBUG_AUDIO_INPUT_FORMATS = new Map([
+  ["audio/mpeg", "mp3"], ["audio/wav", "wav"], ["audio/ogg", "ogg"],
+  ["audio/flac", "flac"], ["audio/amr", "amr"], ["audio/mp4", "mp4"],
+  ["audio/aac", "aac"], ["audio/webm", "webm"],
+])
 const PLUGIN_CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".properties"])
 const PLUGIN_SCAN_IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".next", "out", "dist", "build", "coverage", "data", "logs"])
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
+const debugAudioCache = new Map()
+let debugAudioCacheBytes = 0
 const pluginRuleSnapshotCache = new WeakMap()
 let sessionSecret = ""
 let sessionStoreWrite = Promise.resolve()
@@ -138,11 +161,320 @@ function formatDebugOutput(value) {
   }).join("")
 }
 
+function debugImageMime(buffer) {
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png"
+  if (buffer.length >= 3 && buffer[0] === 255 && buffer[1] === 216 && buffer[2] === 255) return "image/jpeg"
+  if (buffer.subarray(0, 3).toString() === "GIF") return "image/gif"
+  if (buffer.subarray(0, 4).toString() === "RIFF" && buffer.subarray(8, 12).toString() === "WEBP") return "image/webp"
+  if (buffer.subarray(0, 2).toString() === "BM") return "image/bmp"
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString() === "ftyp" && /^(avif|avis)$/.test(buffer.subarray(8, 12).toString())) return "image/avif"
+  return ""
+}
+
+function debugImageSource(source) {
+  if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
+    const buffer = Buffer.from(source)
+    const mime = debugImageMime(buffer)
+    return mime && buffer.length <= MAX_DEBUG_INLINE_IMAGE_BYTES ? `data:${mime};base64,${buffer.toString("base64")}` : ""
+  }
+  if (typeof source !== "string" || !source.trim()) return ""
+  const value = source.trim()
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value)
+      return ["http:", "https:"].includes(url.protocol) ? url.href : ""
+    } catch { return "" }
+  }
+  const base64 = value.match(/^(?:base64:\/\/|data:image\/[^;,]+;base64,)([\s\S]+)$/i)
+  if (base64) {
+    const buffer = Buffer.from(base64[1], "base64")
+    const mime = debugImageMime(buffer)
+    return mime && buffer.length <= MAX_DEBUG_INLINE_IMAGE_BYTES ? `data:${mime};base64,${buffer.toString("base64")}` : ""
+  }
+  try {
+    const absolute = value.startsWith("file:") ? fileURLToPath(value) : path.resolve(ROOT, value)
+    if (!isInside(ROOT, absolute)) return ""
+    const relative = path.relative(ROOT, absolute).split(path.sep).join("/")
+    if (!IMAGE_MIME_TYPES.has(path.extname(absolute).toLowerCase())) return ""
+    resolveWorkspacePath(relative)
+    return `/api/files/image?path=${encodeURIComponent(relative)}`
+  } catch { return "" }
+}
+
+function debugAudioMime(buffer) {
+  if (buffer.subarray(0, 3).toString() === "ID3" || (buffer[0] === 255 && [241, 242, 243, 249, 250, 251].includes(buffer[1]))) return "audio/mpeg"
+  if (buffer.subarray(0, 12).toString().startsWith("RIFF") && buffer.subarray(8, 12).toString() === "WAVE") return "audio/wav"
+  if (buffer.subarray(0, 4).toString() === "OggS") return "audio/ogg"
+  if (buffer.subarray(0, 4).toString() === "fLaC") return "audio/flac"
+  if (buffer.subarray(0, 6).toString() === "#!AMR\n") return "audio/amr"
+  if (buffer.length >= 12 && buffer.subarray(4, 8).toString() === "ftyp") return "audio/mp4"
+  if (buffer.length >= 2 && buffer[0] === 255 && [240, 241, 248, 249].includes(buffer[1])) return "audio/aac"
+  if (buffer.length >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) return "audio/webm"
+  return ""
+}
+
+function pruneDebugAudioCache(now = Date.now()) {
+  for (const [token, entry] of debugAudioCache) {
+    if (entry.expiresAt <= now) {
+      debugAudioCacheBytes -= entry.buffer.length
+      debugAudioCache.delete(token)
+    }
+  }
+}
+
+function cacheDebugAudio(buffer) {
+  if (!buffer.length || buffer.length > MAX_DEBUG_AUDIO_OUTPUT_BYTES) return ""
+  pruneDebugAudioCache()
+  while (debugAudioCacheBytes + buffer.length > DEBUG_AUDIO_CACHE_MAX_BYTES && debugAudioCache.size) {
+    const oldestToken = debugAudioCache.keys().next().value
+    const oldest = debugAudioCache.get(oldestToken)
+    debugAudioCacheBytes -= oldest.buffer.length
+    debugAudioCache.delete(oldestToken)
+  }
+  const token = crypto.randomBytes(24).toString("hex")
+  debugAudioCache.set(token, { buffer, expiresAt: Date.now() + DEBUG_AUDIO_CACHE_TTL_MS })
+  debugAudioCacheBytes += buffer.length
+  return `/api/debug/audio/${token}`
+}
+
+function transcodeDebugAudio({ inputPath, inputBuffer, inputFormat }) {
+  return new Promise((resolve, reject) => {
+    const args = ["-hide_banner", "-loglevel", "error", "-nostdin"]
+    if (inputBuffer) args.push("-f", inputFormat, "-i", "pipe:0")
+    else args.push("-i", inputPath)
+    args.push("-map", "0:a:0", "-vn", "-ac", "1", "-ar", "24000", "-t", "180", "-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1")
+
+    const child = spawn(FFMPEG_PATH, args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
+    const chunks = []
+    let outputBytes = 0
+    let stderr = ""
+    let timedOut = false
+    let outputTooLarge = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, 20_000)
+    child.stdout.on("data", chunk => {
+      outputBytes += chunk.length
+      if (outputBytes > MAX_DEBUG_AUDIO_OUTPUT_BYTES) {
+        outputTooLarge = true
+        child.kill()
+      } else chunks.push(chunk)
+    })
+    child.stderr.on("data", chunk => {
+      if (stderr.length < 8_000) stderr += chunk.toString().slice(0, 8_000 - stderr.length)
+    })
+    child.stdin.on("error", () => {})
+    child.on("error", error => {
+      clearTimeout(timeout)
+      reject(error)
+    })
+    child.on("close", code => {
+      clearTimeout(timeout)
+      if (timedOut) return reject(new Error("FFmpeg 转码超时"))
+      if (outputTooLarge) return reject(new Error("转码后的音频超过大小限制"))
+      if (code !== 0 || !outputBytes) return reject(new Error(stderr.trim() || "FFmpeg 无法解码此语音格式"))
+      resolve(Buffer.concat(chunks, outputBytes))
+    })
+    if (inputBuffer) child.stdin.end(inputBuffer)
+    else child.stdin.end()
+  })
+}
+
+async function normalizeDebugAudio(source) {
+  let inputBuffer = null
+  let inputPath = ""
+  let inputFormat = ""
+  let name = ""
+
+  if (Buffer.isBuffer(source) || source instanceof Uint8Array) {
+    inputBuffer = Buffer.from(source)
+    if (inputBuffer.length > MAX_PREVIEW_AUDIO_BYTES) return { src: "", name, alt: "语音超过 20 MB 限制，无法转码" }
+    inputFormat = DEBUG_AUDIO_INPUT_FORMATS.get(debugAudioMime(inputBuffer)) || ""
+  } else if (typeof source === "string" && source.trim()) {
+    const value = source.trim()
+    const base64 = value.match(/^(?:base64:\/\/|data:audio\/[^;,]+;base64,)([\s\S]+)$/i)
+    if (base64) {
+      inputBuffer = Buffer.from(base64[1], "base64")
+      if (inputBuffer.length > MAX_PREVIEW_AUDIO_BYTES) return { src: "", name, alt: "语音超过 20 MB 限制，无法转码" }
+      inputFormat = DEBUG_AUDIO_INPUT_FORMATS.get(debugAudioMime(inputBuffer)) || ""
+    } else if (/^https?:\/\//i.test(value)) {
+      try {
+        const url = new URL(value)
+        const ext = path.extname(url.pathname).toLowerCase()
+        const directTypes = new Set([".mp3", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".flac", ".webm"])
+        if (["http:", "https:"].includes(url.protocol) && directTypes.has(ext)) return { src: url.href, name, alt: "语音消息" }
+      } catch {}
+      return { src: "", name, alt: "远程语音格式无法安全检测或转码" }
+    } else {
+      try {
+        inputPath = value.startsWith("file:") ? fileURLToPath(value) : path.resolve(ROOT, value)
+        if (!isInside(ROOT, inputPath)) return { src: "", name, alt: "语音文件位于工作区外，无法转码" }
+        const relative = path.relative(ROOT, inputPath).split(path.sep).join("/")
+        inputPath = resolveWorkspacePath(relative)
+        await rejectSymlinkPath(inputPath)
+        const stat = await fs.stat(inputPath)
+        if (!stat.isFile()) return { src: "", name, alt: "语音文件不存在" }
+        if (stat.size > MAX_PREVIEW_AUDIO_BYTES) return { src: "", name: path.basename(inputPath), alt: "语音超过 20 MB 限制，无法转码" }
+        const extension = path.extname(inputPath).toLowerCase()
+        if (!AUDIO_MIME_TYPES.has(extension) && ![".silk", ".slk", ".sil"].includes(extension)) {
+          return { src: "", name: path.basename(inputPath), alt: "不支持的语音文件类型" }
+        }
+        name = path.basename(inputPath)
+      } catch {
+        return { src: "", name, alt: "语音文件无法安全读取" }
+      }
+    }
+  } else {
+    return { src: "", name, alt: "语音数据格式无法识别" }
+  }
+
+  if (inputBuffer && !inputFormat) return { src: "", name, alt: "FFmpeg 无法识别此语音编码" }
+  try {
+    const converted = await transcodeDebugAudio({ inputPath, inputBuffer, inputFormat })
+    return { src: cacheDebugAudio(converted), name, alt: "语音消息（已转为 MP3）" }
+  } catch (error) {
+    const message = error?.message || String(error)
+    const alt = /ENOENT/.test(message) ? "找不到 FFmpeg，无法播放此语音" : /timed out|超时/i.test(message) ? "语音转码超时，无法播放" : "当前 FFmpeg 不支持解码此语音格式"
+    return { src: "", name, alt }
+  }
+}
+
+async function normalizeDebugSegments(value, depth = 0, audioBudget = { count: 0 }, forwardContext = { count: 0, contact: null }) {
+  if (depth > 6) return [{ type: "text", text: "[消息嵌套过深]" }]
+  if (value == null) return []
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    const src = debugImageSource(value)
+    return src ? [{ type: "image", src, alt: "图片" }] : [{ type: "text", text: `[图片数据 ${value.byteLength} bytes，无法预览]` }]
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (trimmed.length <= 200_000 && ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]")))) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (parsed && typeof parsed === "object") return normalizeDebugSegments(parsed, depth + 1, audioBudget, forwardContext)
+      } catch {}
+    }
+    return [{ type: "text", text: value }]
+  }
+  if (Array.isArray(value)) {
+    if (value.length && value.every(part => part?.type === "node")) return [{ type: "forward", title: "合并转发", nodes: await Promise.all(value.slice(0, MAX_DEBUG_FORWARD_NODES).map((node, index) => normalizeDebugNode(node, index, depth + 1, audioBudget, forwardContext))) }]
+    return (await Promise.all(value.map(part => normalizeDebugSegments(part, depth + 1, audioBudget, forwardContext)))).flat()
+  }
+  if (typeof value !== "object") return [{ type: "text", text: String(value) }]
+
+  const type = value.type
+  if (!type && value.message !== undefined && (value.user_id !== undefined || value.userId !== undefined || value.nickname || value.sender)) {
+    const sender = value.sender || {}
+    return [{
+      type: "chat-message",
+      nickname: String(value.nickname || sender.nickname || sender.card || ""),
+      userId: String(value.user_id || value.userId || sender.user_id || ""),
+      segments: await normalizeDebugSegments(value.message, depth + 1, audioBudget, forwardContext),
+    }]
+  }
+  if (type === "text") return [{ type: "text", text: String(value.text || "") }]
+  if (type === "image" || type === "flash") {
+    const src = debugImageSource(value.file ?? value.url ?? value.data?.file ?? value.data?.url)
+    return [{ type: "image", src, alt: value.summary || (type === "flash" ? "闪照" : "图片"), width: value.width, height: value.height, size: value.size }]
+  }
+  if (type === "node") return [{ type: "forward", title: "合并转发", nodes: [await normalizeDebugNode(value, 0, depth + 1, audioBudget, forwardContext)] }]
+  if (type === "forward") {
+    const nodes = value.nodes || value.data?.nodes || value.content || value.data?.content || []
+    return [{ type: "forward", title: value.title || "合并转发", summary: value.summary || "", nodes: Array.isArray(nodes) ? await Promise.all(nodes.slice(0, MAX_DEBUG_FORWARD_NODES).map((node, index) => normalizeDebugNode(node, index, depth + 1, audioBudget, forwardContext))) : [] }]
+  }
+  if (type === "json") {
+    let data = value.data
+    if (typeof data === "string") { try { data = JSON.parse(data) } catch {} }
+    if (data?.app === "com.tencent.multimsg") {
+      const detail = data.meta?.detail || {}
+      const previews = Array.isArray(detail.news) ? detail.news : []
+      let summary = detail.summary || "转发节点内容由 QQ 封装，当前仅显示预览摘要"
+      let nodes = await Promise.all(previews.map(async (node, index) => ({ nickname: "", userId: "", segments: await normalizeDebugSegments(node.text || node, depth + 1, audioBudget, forwardContext), index })))
+      const resid = detail.resid
+      const fileName = detail.uniseq || "MultiMsg"
+      if (resid && forwardContext.contact?.getForwardMsg && forwardContext.count < MAX_DEBUG_FORWARD_FETCHES_PER_EVENT) {
+        forwardContext.count++
+        let timeout
+        try {
+          const messages = await Promise.race([
+            forwardContext.contact.getForwardMsg(String(resid), String(fileName)),
+            new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("转发内容获取超时")), 10_000) }),
+          ])
+          if (Array.isArray(messages) && messages.length) {
+            const selected = messages.slice(0, MAX_DEBUG_FORWARD_NODES)
+            nodes = await Promise.all(selected.map((node, index) => normalizeDebugNode(node, index, depth + 1, audioBudget, forwardContext)))
+            summary = `已展开 ${selected.length} 条转发消息${messages.length > selected.length ? `（共 ${messages.length} 条）` : ""}`
+          }
+        } catch {
+          summary = `${summary}（完整内容获取失败）`
+        } finally {
+          clearTimeout(timeout)
+        }
+      }
+      return [{
+        type: "forward",
+        title: data.prompt || data.desc || "合并转发",
+        summary,
+        nodes,
+      }]
+    }
+    return normalizeDebugSegments(data, depth + 1, audioBudget, forwardContext)
+  }
+  if (type === "at") return [{ type: "text", text: `@${value.text || value.qq || value.id || "全体成员"}` }]
+  if (type === "face" || type === "bface" || type === "rps" || type === "dice") return [{ type: "text", text: value.text || `[${type === "face" || type === "bface" ? "表情" : type}]` }]
+  if (type === "record" || type === "audio") {
+    if (audioBudget.count >= MAX_DEBUG_AUDIO_TRANSCODES_PER_EVENT) return [{ type: "audio", src: "", name: "", alt: `每条调试事件最多转码 ${MAX_DEBUG_AUDIO_TRANSCODES_PER_EVENT} 段语音` }]
+    audioBudget.count++
+    const file = value.file ?? value.url ?? value.data?.file ?? value.data?.url
+    return [{ type: "audio", ...await normalizeDebugAudio(file) }]
+  }
+  if (type === "video" || type === "file") {
+    const label = type === "video" ? "视频" : "文件"
+    return [{ type: "text", text: `[${label}${value.name ? `：${value.name}` : ""}]` }]
+  }
+  if (type === "xml") return [{ type: "text", text: typeof value.data === "string" ? value.data : JSON.stringify(value.data, null, 2) }]
+  const entries = Object.entries(value).slice(0, 40).map(([label, item]) => ({
+    label,
+    value: typeof item === "string" ? item : JSON.stringify(item, null, 2),
+  }))
+  return [{ type: "object", entries }]
+}
+
+async function normalizeDebugNode(node, index, depth, audioBudget, forwardContext) {
+  return {
+    nickname: String(node?.nickname || node?.sender?.nickname || ""),
+    userId: String(node?.user_id || node?.userId || ""),
+    index: index + 1,
+    segments: await normalizeDebugSegments(node?.message ?? node?.content ?? "", depth + 1, audioBudget, forwardContext),
+  }
+}
+
 function createPanelDebugEvent({ message, userId, messageType, groupId, replies }) {
   const bot = global.Bot
   if (!bot) throw Object.assign(new Error("Yunzai Bot 尚未初始化"), { status: 503 })
+  let event
+  const audioBudget = { count: 0 }
+  const client = bot[bot.uin] || bot
+  let forwardContact = null
+  try {
+    if (messageType === "group" && /^\d+$/.test(groupId)) forwardContact = client.pickGroup(Number(groupId))
+    else if (messageType === "private" && /^\d+$/.test(userId)) forwardContact = client.pickFriend(Number(userId))
+  } catch {}
+  const forwardContext = { count: 0, contact: forwardContact }
   const sendDebugReply = async reply => {
-    if (replies.length < 20) replies.push(formatDebugOutput(reply).slice(0, 5000))
+    if (replies.length < 20) {
+      const [, pluginName, handler] = event?.logFnc?.match(/^\[(.*?)\]\[(.*?)\]$/) || []
+      const pluginEntry = pluginName && pluginsLoader.priority.find(entry => entry.name === pluginName && entry.class?.prototype?.[handler])
+      replies.push({
+        plugin: pluginName ? {
+          name: pluginName,
+          path: pluginEntry?.key || null,
+          handler: handler || null,
+        } : null,
+        segments: await normalizeDebugSegments(reply, 0, audioBudget, forwardContext),
+      })
+    }
     return { message_id: `panel-debug-${Date.now()}` }
   }
   const logStdinReply = async reply => {
@@ -169,7 +501,7 @@ function createPanelDebugEvent({ message, userId, messageType, groupId, replies 
   }
 
   const now = Date.now()
-  const event = {
+  event = {
     adapter: "stdin",
     message_id: `panel-debug-${now}`,
     message_type: messageType,
@@ -1530,6 +1862,46 @@ export async function startAdminPanel() {
       .sort((left, right) => left.localeCompare(right, "zh-CN"))
     res.json({ groupId, groupName, pluginNames })
   }))
+  app.get("/api/config/friends", asyncRoute(async (req, res) => {
+    const friendCache = global.Bot?.fl
+    const entries = friendCache instanceof Map ? [...friendCache.entries()] : Object.entries(friendCache || {})
+    const friends = entries.map(([key, friend]) => {
+      const id = String(friend?.user_id ?? friend?.uin ?? key)
+      if (!/^\d+$/.test(id)) return null
+      let avatar = ""
+      try {
+        avatar = typeof friend?.getAvatarUrl === "function" ? String(friend.getAvatarUrl() || "") : String(friend?.avatar || "")
+      } catch {}
+      return {
+        id,
+        name: String(friend?.remark || friend?.nickname || id),
+        avatar: avatar || `https://q1.qlogo.cn/g?b=qq&s=100&nk=${encodeURIComponent(id)}`,
+      }
+    }).filter(Boolean).sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+    res.json({ friends })
+  }))
+  app.get("/api/config/groups", asyncRoute(async (req, res) => {
+    const groupCache = global.Bot?.gl
+    const groupIds = new Set(Object.keys(cfg.getConfig("group") || {}).filter(id => /^\d+$/.test(id)))
+    try {
+      for (const id of groupCache?.keys?.() || []) if (/^\d+$/.test(String(id))) groupIds.add(String(id))
+    } catch {}
+    const groups = [...groupIds].map(id => {
+      let group
+      try { group = global.Bot?.pickGroup?.(Number(id)) } catch {}
+      if (!group) {
+        try { group = groupCache?.get?.(Number(id)) || groupCache?.get?.(id) } catch {}
+      }
+      let avatar = ""
+      try { avatar = typeof group?.getAvatarUrl === "function" ? String(group.getAvatarUrl() || "") : String(group?.avatar || "") } catch {}
+      return {
+        id,
+        name: String(group?.name || group?.group_name || id),
+        avatar: avatar || `https://p.qlogo.cn/gh/${encodeURIComponent(id)}/${encodeURIComponent(id)}/100/`,
+      }
+    }).sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+    res.json({ groups })
+  }))
   app.get("/api/config/:name", asyncRoute(async (req, res) => {
     if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
     const filePath = path.join(ROOT, "config", "config", req.params.name)
@@ -1728,6 +2100,51 @@ export async function startAdminPanel() {
     if (stat.size > MAX_PREVIEW_IMAGE_BYTES) return res.status(413).json({ error: "图片超过 20 MB 预览上限" })
     res.set({ "Content-Type": mime, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" })
     res.send(await fs.readFile(absolute))
+  }))
+  app.get("/api/files/audio", asyncRoute(async (req, res) => {
+    const relative = String(req.query.path || "")
+    const absolute = resolveWorkspacePath(relative)
+    await rejectSymlinkPath(absolute)
+    const stat = await fs.stat(absolute)
+    if (!stat.isFile()) return res.status(400).json({ error: "音频文件不存在" })
+    const extension = path.extname(absolute).toLowerCase()
+    const mime = AUDIO_MIME_TYPES.get(extension)
+    if (!mime) return res.status(415).json({ error: "该音频格式不受支持" })
+    if (stat.size > MAX_PREVIEW_AUDIO_BYTES) return res.status(413).json({ error: "音频超过 20 MB 预览上限" })
+    res.set({ "Content-Type": mime, "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" })
+    res.send(await fs.readFile(absolute))
+  }))
+  app.get("/api/debug/audio/:token", asyncRoute(async (req, res) => {
+    pruneDebugAudioCache()
+    const entry = debugAudioCache.get(req.params.token)
+    if (!entry) return res.status(404).json({ error: "语音预览已过期，请重新发送调试消息" })
+    const { buffer } = entry
+    const range = req.headers.range?.match(/^bytes=(\d*)-(\d*)$/)
+    if (range) {
+      const start = range[1] ? Number(range[1]) : 0
+      const end = range[2] ? Math.min(Number(range[2]), buffer.length - 1) : buffer.length - 1
+      if (start >= buffer.length || end < start) {
+        res.set("Content-Range", `bytes */${buffer.length}`)
+        return res.status(416).end()
+      }
+      res.status(206).set({
+        "Content-Type": "audio/mpeg",
+        "Content-Range": `bytes ${start}-${end}/${buffer.length}`,
+        "Content-Length": String(end - start + 1),
+        "Accept-Ranges": "bytes",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      })
+      return res.end(buffer.subarray(start, end + 1))
+    }
+    res.set({
+      "Content-Type": "audio/mpeg",
+      "Content-Length": String(buffer.length),
+      "Accept-Ranges": "bytes",
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, no-store",
+    })
+    res.send(buffer)
   }))
   app.put("/api/files/write", asyncRoute(async (req, res) => {
     const relative = String(req.body?.path || "")
