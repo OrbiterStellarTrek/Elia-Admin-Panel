@@ -854,8 +854,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
       <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
-          : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea spellCheck={false} disabled={busy} aria-label={`${selected.title} 插件源码`} className="min-h-[545px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={sourceContent} onChange={event => { setSourceContent(event.target.value); setSourceDirty(true) }} />}</div>
-          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div>
+          : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
+          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} /> : null)}</div>
             : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前大插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
               : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或为大插件添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
@@ -864,7 +864,78 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   </>
 }
 
-function SchemaField({ schema, value, onChange }: { schema: any; value: any; onChange: (value: any) => void }) {
+function CronExpressionField({ value, onChange, validate }: { value: string; onChange: (value: string) => void; validate: (expression: string) => Promise<any> }) {
+  const [quickEdit, setQuickEdit] = useState(false)
+  const [mode, setMode] = useState<5 | 6>(value.trim().split(/\s+/).length === 5 ? 5 : 6)
+  const [validation, setValidation] = useState<any>(null)
+  const expression = value.trim()
+  const tokens = expression ? expression.split(/\s+/) : []
+  const hasSupportedShape = tokens.length === 5 || tokens.length === 6
+
+  useEffect(() => {
+    if (tokens.length === 5 || tokens.length === 6) setMode(tokens.length)
+  }, [expression])
+
+  useEffect(() => {
+    let cancelled = false
+    setValidation(null)
+    if (!expression || !hasSupportedShape) return
+    const timer = window.setTimeout(() => {
+      void validate(expression).then(result => { if (!cancelled) setValidation(result) })
+        .catch(reason => { if (!cancelled) setValidation({ valid: false, message: (reason as Error).message }) })
+    }, 350)
+    return () => { cancelled = true; window.clearTimeout(timer) }
+  }, [expression, hasSupportedShape, validate])
+
+  const segments = hasSupportedShape
+    ? tokens.length === 6 ? tokens : ["0", ...tokens]
+    : ["0", "0", "1", "*", "*", "?"]
+  const fieldNames = mode === 6
+    ? ["秒", "分", "时", "日", "月", "星期"]
+    : ["分", "时", "日", "月", "星期"]
+
+  function changeSegment(index: number, next: string) {
+    const updated = [...segments]
+    updated[index] = next.trim() || "*"
+    onChange((mode === 6 ? updated : updated.slice(1)).join(" "))
+  }
+
+  function applyPreset(preset: "daily" | "weekdays" | "hourly" | "minute") {
+    const fields = preset === "daily" ? ["0", "20", "1", "*", "*", "?"]
+      : preset === "weekdays" ? ["0", "20", "1", "*", "*", "1-5"]
+        : preset === "hourly" ? ["0", "0", "*", "*", "*", "?"]
+          : ["0", "*", "*", "*", "*", "?"]
+    onChange((mode === 6 ? fields : preset === "minute" ? ["*", "*", "*", "*", "*"] : fields.slice(1, 6)).join(" "))
+  }
+
+  function changeMode(next: 5 | 6) {
+    if (next === mode) return
+    if (next === 6) {
+      onChange(`0 ${expression}`)
+      setMode(6)
+      return
+    }
+    if (segments[0] !== "0") {
+      setValidation({ valid: false, message: "当前秒字段不是 0；切换到 5 段格式会丢失秒级设置" })
+      return
+    }
+    onChange(segments.slice(1).join(" "))
+    setMode(5)
+  }
+
+  return <div className="space-y-2">
+    <div className="flex gap-2"><Input aria-label="Cron 表达式" className="font-mono text-sm" value={value} placeholder="分 时 日 月 星期（或在前面增加秒字段）" onChange={event => onChange(event.target.value)} /><Button type="button" variant="outline" className="shrink-0" aria-expanded={quickEdit} onClick={() => setQuickEdit(open => !open)}>{quickEdit ? "收起快速编辑" : "快速编辑"}<ChevronDown className={`transition-transform ${quickEdit ? "rotate-180" : ""}`} /></Button></div>
+    <p className="text-[10px] leading-4 text-muted-foreground">支持 Node 定时器常见的 5 段格式与含秒的 6 段格式；保存前会使用当前 Yunzai 的 cron-parser 实际校验。</p>
+    {validation && <p className={`text-[10px] ${validation.valid ? "text-emerald-700" : "text-rose-600"}`}>{validation.message}{validation.valid && validation.nextRun ? ` · 下次执行：${new Date(validation.nextRun).toLocaleString("zh-CN")}` : ""}</p>}
+    {quickEdit && <div className="space-y-3 rounded-xl border border-border bg-slate-50/70 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex gap-1.5">{([[5, "5 段"], [6, "6 段（含秒）"]] as const).map(([fieldCount, title]) => <Button key={fieldCount} type="button" size="sm" variant={mode === fieldCount ? "default" : "outline"} className="h-7 px-2.5 text-[10px]" onClick={() => changeMode(fieldCount)}>{title}</Button>)}</div><div className="flex flex-wrap gap-1.5">{[["每天 1:20", "daily"], ["工作日 1:20", "weekdays"], ["每小时", "hourly"], ["每分钟", "minute"]].map(([title, preset]) => <Button key={preset} type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => applyPreset(preset as "daily" | "weekdays" | "hourly" | "minute")}>{title}</Button>)}</div></div>
+      {hasSupportedShape ? <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${mode === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}>{fieldNames.map((name, index) => { const segmentIndex = mode === 6 ? index : index + 1; return <label key={name} className="space-y-1 text-[10px] text-muted-foreground">{name}<Input aria-label={`Cron ${name}`} className="h-9 bg-white font-mono text-xs" value={segments[segmentIndex]} placeholder={name === "星期" ? "* / 1-5 / ?" : "* / 数字 / 范围"} onChange={event => changeSegment(segmentIndex, event.target.value)} /></label> })}</div> : <p className="text-[10px] text-amber-700">原表达式字段数异常。选择上方快捷模板可生成标准格式，或手动修正表达式。</p>}
+      <p className="text-[10px] leading-4 text-muted-foreground">字段顺序：{mode === 6 ? "秒 分 时 日 月 星期" : "分 时 日 月 星期"}。支持 `*`、`?`、范围（`1-5`）、步长（`*/5`）与列表（`1,3,5`）；最终格式以此 Yunzai 实际安装版本校验为准。</p>
+    </div>}
+  </div>
+}
+
+function SchemaField({ schema, value, onChange, validateCron }: { schema: any; value: any; onChange: (value: any) => void; validateCron: (expression: string) => Promise<any> }) {
   const component = String(schema.component || "Input")
   const props = schema.componentProps || {}
   const label = schema.label || schema.field
@@ -877,6 +948,7 @@ function SchemaField({ schema, value, onChange }: { schema: any; value: any; onC
     <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" ? <div className="flex flex-wrap gap-2">{options.map((option: any) => { const optionValue = typeof option === "object" ? option.value : option; const optionLabel = typeof option === "object" ? option.label : option; return <button key={String(optionValue)} type="button" onClick={() => onChange(optionValue)} className={`rounded-lg border px-3 py-2 text-xs transition ${value === optionValue ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-border bg-white text-slate-600 hover:bg-slate-50"}`}>{optionLabel}</button> })}</div>
+      : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />
       : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} onChange={onChange} />
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} onChange={onChange} forceItemType="string" />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />

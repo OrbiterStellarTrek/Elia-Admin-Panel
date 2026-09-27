@@ -27,10 +27,12 @@ export function MonacoCodeEditor({
   path,
   value,
   onChange,
+  readOnly = false,
 }: {
   path: string
   value: string
   onChange: (value: string) => void
+  readOnly?: boolean
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -48,6 +50,7 @@ export function MonacoCodeEditor({
     const editor = monaco.editor.create(host, {
       model,
       automaticLayout: true,
+      readOnly,
       ariaLabel: `${path} 文件内容编辑器`,
       fontSize: 13,
       lineHeight: 22,
@@ -74,6 +77,10 @@ export function MonacoCodeEditor({
     // A new file receives its own model and undo history.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, language])
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly })
+  }, [readOnly])
 
   useEffect(() => {
     const model = editorRef.current?.getModel()

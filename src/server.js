@@ -2,6 +2,7 @@ import crypto from "node:crypto"
 import { watch as watchDirectory } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { createRequire } from "node:module"
 import { spawn } from "node:child_process"
 import net from "node:net"
 import os from "node:os"
@@ -12,6 +13,7 @@ import YAML from "yaml"
 import cfg from "../../../lib/config/config.js"
 
 const ROOT = process.cwd()
+const requireFromRoot = createRequire(path.join(ROOT, "package.json"))
 const PLUGINS = path.join(ROOT, "plugins")
 const PANEL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DATA_DIR = path.join(ROOT, "data", "elia-admin-panel")
@@ -923,6 +925,37 @@ function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
 }
 
+async function validateCronWithRuntime(expression) {
+  const schedulerEntry = requireFromRoot.resolve("node-schedule")
+  const requireFromScheduler = createRequire(schedulerEntry)
+  let cronParser
+  try {
+    cronParser = requireFromScheduler("cron-parser")
+  } catch (error) {
+    if (error.code !== "ERR_REQUIRE_ESM") throw error
+    cronParser = await import(pathToFileURL(requireFromScheduler.resolve("cron-parser")).href)
+  }
+  let parse
+  let parserApi
+  if (typeof cronParser.parseExpression === "function") {
+    parse = cronParser.parseExpression.bind(cronParser)
+    parserApi = "parseExpression"
+  } else if (typeof cronParser.CronExpressionParser?.parse === "function") {
+    parse = cronParser.CronExpressionParser.parse.bind(cronParser.CronExpressionParser)
+    parserApi = "CronExpressionParser.parse"
+  } else if (typeof cronParser.default?.parseExpression === "function") {
+    parse = cronParser.default.parseExpression.bind(cronParser.default)
+    parserApi = "default.parseExpression"
+  } else if (typeof cronParser.default?.CronExpressionParser?.parse === "function") {
+    parse = cronParser.default.CronExpressionParser.parse.bind(cronParser.default.CronExpressionParser)
+    parserApi = "default.CronExpressionParser.parse"
+  }
+  if (!parse) throw new Error("当前 node-schedule 所依赖的 cron-parser 暂不支持已识别的解析 API")
+  const schedule = parse(expression, { currentDate: new Date() })
+  const nextRun = schedule.next()
+  return { parserApi, nextRun: nextRun?.toString?.() || String(nextRun || "") }
+}
+
 export async function startAdminPanel() {
   if (expressServer) return
   const settings = await readPanelSettings()
@@ -1014,6 +1047,20 @@ export async function startAdminPanel() {
 
   app.use("/api", requireAuth)
   app.use("/api", checkOrigin)
+
+  app.post("/api/cron/validate", asyncRoute(async (req, res) => {
+    const expression = String(req.body?.expression || "").trim()
+    const fields = expression ? expression.split(/\s+/) : []
+    if (!expression || expression.length > 120 || ![5, 6].includes(fields.length)) {
+      return res.json({ valid: false, fieldCount: fields.length, message: "请输入 5 段或 6 段 Cron 表达式（6 段格式含秒）" })
+    }
+    try {
+      const result = await validateCronWithRuntime(expression)
+      res.json({ valid: true, fieldCount: fields.length, ...result, message: "符合当前 Yunzai 定时任务解析器" })
+    } catch (error) {
+      res.json({ valid: false, fieldCount: fields.length, message: error.message || "当前 Yunzai 无法解析该 Cron 表达式" })
+    }
+  }))
 
   app.get("/api/status", (req, res) => {
     const accounts = getAccountSummary()
