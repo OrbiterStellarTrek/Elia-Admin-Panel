@@ -147,7 +147,7 @@ const configFieldLabels: Record<string, string> = {
   logging: "记录 SQL 日志",
   groupGlobalCD: "群全局冷却时间",
   singleCD: "单人冷却时间",
-  isInheritDefault: "继承默认群组配置",
+  isInheritDefault: "继承全局配置",
   disable: "禁用的功能名称",
   onlyReplyAt: "群聊触发方式",
   botAlias: "机器人别名与触发前缀",
@@ -235,7 +235,7 @@ function ConfigFileIcon({ file, className = "" }: { file: string; className?: st
 }
 
 function configFieldLabel(name: string) {
-  if (name === "default") return "默认群组配置"
+  if (name === "default") return "全局配置"
   if (/^\d{5,}$/.test(name)) return `群组 ${name}`
   return configFieldLabels[name] || name.replace(/([A-Z])/g, " $1").replace(/[_-]/g, " ")
 }
@@ -263,6 +263,10 @@ function formatBytes(value = 0) {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(0)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatCount(value: number | null | undefined) {
+  return value == null ? "—" : new Intl.NumberFormat("zh-CN").format(value)
 }
 
 function formatUptime(seconds = 0) {
@@ -522,7 +526,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className="mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32">
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}
@@ -576,8 +580,8 @@ function PageIntro({ actions }: { actions: PageAction[] }) {
 function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
   const [open, setOpen] = useState(false)
   const [groupId, setGroupId] = useState("default")
-  const [groups, setGroups] = useState<{ id: string; name: string }[]>([{ id: "default", name: "默认群组" }])
-  const [groupName, setGroupName] = useState("默认群组")
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([{ id: "default", name: "全局" }])
+  const [groupName, setGroupName] = useState("全局")
   const [rules, setRules] = useState<any[]>([])
   const [blockedPluginNames, setBlockedPluginNames] = useState<string[]>([])
   const [search, setSearch] = useState("")
@@ -593,8 +597,8 @@ function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
     setError("")
     try {
       const result = await api(`/api/diagnostics/plugin-rules?groupId=${encodeURIComponent(groupId)}`)
-      setGroups(Array.isArray(result.groups) ? result.groups : [{ id: "default", name: "默认群组" }])
-      setGroupName(String(result.groupName || groupId))
+      setGroups(Array.isArray(result.groups) ? result.groups : [{ id: "default", name: "全局" }])
+      setGroupName(groupId === "default" ? "全局" : String(result.groupName || groupId))
       setRules(Array.isArray(result.rules) ? result.rules : [])
       setBlockedPluginNames(Array.isArray(result.blockedPluginNames) ? result.blockedPluginNames : [])
       setScanErrors(Array.isArray(result.scanErrors) ? result.scanErrors : [])
@@ -657,20 +661,19 @@ function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
-        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex h-[min(88dvh,820px)] w-[calc(100%-1.5rem)] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white shadow-2xl focus:outline-none sm:w-[calc(100%-3rem)]">
-          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
-            <div><Dialog.Title className="text-base font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">查找当前是哪个傻逼给你匹配的正则，可以直接快速屏蔽这个插件</Dialog.Description></div>
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex h-[min(88dvh,820px)] w-[calc(100%-1.5rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white shadow-2xl focus:outline-none sm:w-[calc(100%-3rem)]">
+          <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5">
+            <div><Dialog.Title className="text-lg font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">查找当前是哪个傻逼给你匹配的正则，可以直接快速屏蔽这个插件</Dialog.Description></div>
             <div className="flex shrink-0 items-center gap-1"><Button type="button" size="icon" variant="ghost" aria-label="刷新插件规则" title="刷新插件规则" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭插件正则排查"><X className="size-4" /></Button></Dialog.Close></div>
           </div>
-          <div className="grid shrink-0 gap-3 border-b border-border px-5 py-4 md:grid-cols-[minmax(180px,260px)_minmax(0,1fr)]">
-            <div className="space-y-2"><Label className="text-xs">屏蔽作用范围</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-9 text-xs"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent>{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? group.name : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select><div className="text-[10px] text-muted-foreground">当前目标：{groupName}</div></div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2"><Label htmlFor="plugin-rule-search" className="text-xs">搜索插件、子插件或正则</Label><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input id="plugin-rule-search" className="h-9 pl-9 text-xs" placeholder="名称、处理方法、正则内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
-              <div className="space-y-2"><div className="flex items-center justify-between gap-2"><Label htmlFor="plugin-rule-message" className="text-xs">测试消息（可选）</Label><div role="group" aria-label="消息类型" className="flex rounded-md border border-border p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`rounded px-2 py-0.5 text-[10px] transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div></div><Input id="plugin-rule-message" className="h-9 text-xs" maxLength={512} placeholder="粘贴触发的原始消息（最多 512 字）" value={testMessage} onChange={event => setTestMessage(event.target.value)} /></div>
-            </div>
+          <div className="grid shrink-0 gap-4 border-b border-border bg-slate-50/60 px-6 py-4 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(180px,1fr)_minmax(210px,1.2fr)_auto]">
+            <div className="min-w-0 space-y-2"><Label className="text-xs">屏蔽作用范围</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-10 bg-white text-sm"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent className="z-[70]">{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? "全局" : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select></div>
+            <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-search" className="text-xs">搜索插件、子插件或正则</Label><div className="relative"><Search className="absolute left-3 top-3 size-4 text-slate-400" /><Input id="plugin-rule-search" className="h-10 pl-9 text-sm" placeholder="名称、处理方法、正则内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
+            <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-message" className="text-xs">测试消息（可选）</Label><Input id="plugin-rule-message" className="h-10 text-sm" maxLength={512} placeholder="粘贴触发的原始消息（最多 512 字）" value={testMessage} onChange={event => setTestMessage(event.target.value)} /></div>
+            <div className="space-y-2"><Label className="text-xs">消息类型</Label><div role="group" aria-label="消息类型" className="flex h-10 items-center rounded-md border border-border bg-white p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`flex-1 rounded px-2.5 py-1 text-xs transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div></div>
           </div>
-          <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-2.5 text-[10px] text-muted-foreground"><span>{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>禁用按 Yunzai 实际匹配的插件名称写入 group.yaml</span></div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+          <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border bg-white px-6 py-2 text-[11px] text-muted-foreground"><span className="font-medium text-slate-600">{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>禁用按 Yunzai 实际匹配的插件名称写入 group.yaml</span></div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
             {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs text-rose-700">{error}</p>}
             {loading ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-5 animate-spin" />正在读取当前已加载插件</div>
               : !error && !filteredRules.length ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground">{hasTestMessage ? "没有规则匹配这条消息" : "没有找到匹配规则"}</div>
@@ -679,16 +682,16 @@ function PluginMatchHelper({ api, notify }: { api: Api; notify: any }) {
                   const sourceNames = Array.isArray(rule.sourcePluginNames) ? rule.sourcePluginNames : [rule.pluginName]
                   const sourceNeedsBlock = sourceNames.some((name: string) => !blockedPluginNames.includes(name))
                   return <div key={`${rule.id}:${ruleIndex}`} className="border-b border-border/70 py-3 last:border-0">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-slate-800">{rule.pluginName}</span>{rule.enabled ? <Badge className="border-0 bg-emerald-50 text-emerald-700">当前启用</Badge> : <Badge className="border-0 bg-slate-100 text-slate-600">当前未启用</Badge>}{hasTestMessage && <Badge className="border-0 bg-amber-50 text-amber-800">命中测试消息</Badge>}</div>
-                        <code className="mt-1.5 block break-all rounded-md bg-slate-50 px-2.5 py-2 font-mono text-[11px] leading-5 text-slate-700">/{rule.pattern}/{rule.flags}</code>
-                        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground"><span>处理：{rule.fnc}</span><span>来源：{rule.sourceKey || rule.sourcePlugin}</span><span>事件：{rule.event || rule.pluginEvent || "未限制"}</span><span>权限：{rule.permission}</span>{Array.isArray(rule.nameSources) && rule.nameSources.length > 1 && <span className="text-amber-700">同名来源：{rule.nameSources.join("、")}（屏蔽将全部生效）</span>}{rule.regexError && <span className="text-rose-600">正则无效：{rule.regexError}</span>}</div>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-sm font-semibold text-slate-800">{rule.pluginName}</span>{rule.enabled ? <Badge className="border-0 bg-emerald-50 text-emerald-700">当前启用</Badge> : <Badge className="border-0 bg-slate-100 text-slate-600">当前未启用</Badge>}{hasTestMessage && <Badge className="border-0 bg-amber-50 text-amber-800">命中测试消息</Badge>}</div>
+                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        {sourceNames.length > 1 && <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || nameBlocked} onClick={() => void quickDisable(rule, "name")}>屏蔽此子插件</Button>}
+                        <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || !sourceNeedsBlock} onClick={() => void quickDisable(rule, sourceNames.length > 1 ? "source" : "name")}>{sourceNames.length > 1 ? "屏蔽整个插件" : "屏蔽插件"}</Button>
+                        </div>
                       </div>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                        {sourceNames.length > 1 && <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={busy || nameBlocked} onClick={() => void quickDisable(rule, "name")}>屏蔽此子插件</Button>}
-                        <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" disabled={busy || !sourceNeedsBlock} onClick={() => void quickDisable(rule, sourceNames.length > 1 ? "source" : "name")}>{sourceNames.length > 1 ? "屏蔽整个插件" : "屏蔽插件"}</Button>
-                      </div>
+                      <code className="block w-full break-all rounded-md bg-slate-50 px-3 py-2.5 font-mono text-xs leading-5 text-slate-700">/{rule.pattern}/{rule.flags}</code>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span>处理：{rule.fnc}</span><span>来源：{rule.sourceKey || rule.sourcePlugin}</span><span>事件：{rule.event || rule.pluginEvent || "未限制"}</span><span>权限：{rule.permission}</span>{Array.isArray(rule.nameSources) && rule.nameSources.length > 1 && <span className="text-amber-700">同名来源：{rule.nameSources.join("、")}（屏蔽将全部生效）</span>}{rule.regexError && <span className="text-rose-600">正则无效：{rule.regexError}</span>}</div>
                     </div>
                   </div>
                 })}
@@ -730,6 +733,13 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
       <Metric icon={Clock3} label="持续运行" value={status ? formatUptime(status.uptime) : "—"} detail={status?.startedAt ? `启动于 ${new Date(status.startedAt).toLocaleString("zh-CN")}` : "等待运行信息"} tone="indigo" />
       <Metric icon={Cpu} label="内存占用" value={status ? formatBytes(status.memory.rss) : "—"} detail={status ? `堆内存 ${formatBytes(status.memory.heapUsed)} / ${formatBytes(status.memory.heapTotal)}` : "Node.js 进程 RSS"} tone="blue" />
       <Metric icon={Users} label="群组缓存" value={status ? String(status.groupCount) : "—"} detail={status ? `${status.accounts.length} 个机器人账号` : "当前 Bot 群组数量"} tone="violet" />
+    </div>
+    <div className="mb-2 text-xs font-semibold text-slate-700">消息统计</div>
+    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric icon={Send} label="今日发送" value={formatCount(status?.messages?.sentToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} tone="blue" />
+      <Metric icon={Clock3} label="本月发送" value={formatCount(status?.messages?.sentThisMonth)} detail={status?.messages?.redisAvailable ? "Redis 月度计数" : "Redis 未连接"} tone="indigo" />
+      <Metric icon={MessageSquareText} label="运行期间接收" value={formatCount(status?.messages?.receivedSinceStart)} detail={status?.messages?.receivedSinceStart == null ? "适配器未提供接收计数" : "机器人账号运行时计数"} tone="green" />
+      <Metric icon={ImageIcon} label="今日截图" value={formatCount(status?.messages?.screenshotsToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} tone="violet" />
     </div>
     <div className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
       <Card className="overflow-hidden"><CardHeader className="flex-row items-start justify-between"><div><CardTitle>Bot 实例</CardTitle><CardDescription className="mt-1">Yunzai 运行环境与连接信息</CardDescription></div><Badge className="border-emerald-100 bg-emerald-50 text-emerald-700"><span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />{status ? "运行正常" : "连接中"}</Badge></CardHeader><CardContent>
@@ -946,12 +956,12 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
           {groupSectionKeys.map(groupId => {
             const active = groupId === activeGroupSection
             return <div key={groupId} className={`flex shrink-0 items-center border-b-2 transition-colors ${active ? "border-primary" : "border-transparent"}`}>
-              <button type="button" aria-pressed={active} title={groupId === "default" ? "默认群组配置" : `群 ${groupId}`} onClick={() => setActiveGroupId(groupId)} className={`flex shrink-0 items-center gap-2 py-2 pl-3 text-xs font-medium ${groupId === "default" ? "pr-3" : "pr-1"} ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              <button type="button" aria-pressed={active} title={groupId === "default" ? "全局配置" : `群 ${groupId}`} onClick={() => setActiveGroupId(groupId)} className={`flex shrink-0 items-center gap-2 py-2 pl-3 text-xs font-medium ${groupId === "default" ? "pr-3" : "pr-1"} ${active ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}>
                 <span className="relative grid size-6 shrink-0 place-items-center overflow-hidden rounded-full bg-muted">
                   <Users className="size-3.5 text-muted-foreground" />
                   {groupId !== "default" && <img src={`https://p.qlogo.cn/gh/${encodeURIComponent(groupId)}/${encodeURIComponent(groupId)}/100`} alt="" loading="lazy" className="absolute inset-0 size-full object-cover" onError={event => { event.currentTarget.style.display = "none" }} />}
                 </span>
-                {groupId === "default" ? "默认群组" : `群 ${groupId}`}
+                {groupId === "default" ? "全局" : `群 ${groupId}`}
               </button>
               {groupId !== "default" && <button type="button" aria-label={`删除群 ${groupId}`} title="删除此群配置" onClick={() => removeGroup(groupId)} className="mr-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground/60 transition hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3.5" /></button>}
             </div>
@@ -978,7 +988,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
         <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
         <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
           <Dialog.Title className="text-base font-semibold">新增群配置</Dialog.Title>
-          <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">新群默认继承默认群组配置，可在创建后单独调整。</Dialog.Description>
+          <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">新群默认继承全局配置，可在创建后单独调整。</Dialog.Description>
           <form onSubmit={addGroup} className="mt-4 space-y-3">
             <div className="space-y-1.5"><Label htmlFor="new-group-id" className="text-xs">群号</Label><Input id="new-group-id" autoFocus inputMode="numeric" pattern="[0-9]+" value={newGroupId} onChange={event => { setNewGroupId(event.target.value); setGroupActionError("") }} placeholder="输入纯数字群号" required /></div>
             {groupActionError && <p role="alert" className="text-xs text-rose-600">{groupActionError}</p>}

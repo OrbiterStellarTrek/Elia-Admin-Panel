@@ -206,3 +206,49 @@ button, input, textarea { font: inherit; }
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: #d4d6e2 transparent; }
 .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d6e2; border-radius: 999px; }
+
+.file-manager-fullscreen {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.file-manager-fullscreen > .rounded-2xl {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 4rem; }
+.file-manager-fullscreen > .rounded-2xl > .grid {
+  min-height: 0;
+  flex: 1 1 0%;
+  grid-template-rows: minmax(150px, 32vh) minmax(0, 1fr);
+}
+.file-manager-fullscreen > .rounded-2xl > .grid > div:first-child {
+  display: flex;
+  flex-direction: column;
+}
+.file-manager-fullscreen > .rounded-2xl > .grid > div:first-child > div[class~="max-h-[550px]"] {
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  flex: 1 1 0%;
+}
+.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(2) { min-height: 0; }
+.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(2) > div.flex-1 { min-height: 0; }
+
+@media (min-width: 640px) {
+  .file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 1rem; }
+}
+
+@media (min-width: 1280px) {
+  .file-manager-fullscreen > .rounded-2xl > .grid { grid-template-rows: minmax(0, 1fr); }
+}

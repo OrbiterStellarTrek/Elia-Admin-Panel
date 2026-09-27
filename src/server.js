@@ -793,6 +793,42 @@ function getAccountSummary() {
   })
 }
 
+async function getMessageMetrics() {
+  const receivedCounts = getAccountSummary().map(({ id }) => {
+    const account = global.Bot?.[id] || (String(global.Bot?.uin) === id ? global.Bot : null)
+    const count = Number(account?.stat?.recv_msg_cnt)
+    return Number.isSafeInteger(count) && count >= 0 ? count : null
+  }).filter(count => count !== null)
+  const receivedSinceStart = receivedCounts.length ? receivedCounts.reduce((total, count) => total + count, 0) : null
+  const unavailable = { redisAvailable: false, sentToday: null, sentThisMonth: null, screenshotsToday: null, receivedSinceStart }
+  const redis = global.redis
+  if (!redis?.isReady || typeof redis.mGet !== "function") return unavailable
+
+  const now = new Date()
+  const day = `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`
+  const month = now.getMonth() + 1
+  try {
+    const values = await redis.mGet([
+      `Yz:count:sendMsg:day:${day}`,
+      `Yz:count:sendMsg:month:${month}`,
+      `Yz:count:screenshot:day:${day}`,
+    ])
+    const toCount = value => {
+      const count = Number(value)
+      return Number.isSafeInteger(count) && count >= 0 ? count : 0
+    }
+    return {
+      redisAvailable: true,
+      sentToday: toCount(values?.[0]),
+      sentThisMonth: toCount(values?.[1]),
+      screenshotsToday: toCount(values?.[2]),
+      receivedSinceStart,
+    }
+  } catch {
+    return unavailable
+  }
+}
+
 function parseLogBuffer(buffer, startOffset) {
   const entries = []
   let lineStart = 0
@@ -1387,11 +1423,12 @@ export async function startAdminPanel() {
     }
   }))
 
-  app.get("/api/status", (req, res) => {
+  app.get("/api/status", asyncRoute(async (req, res) => {
     const accounts = getAccountSummary()
     let groupCount = 0
     try { groupCount = global.Bot?.gl?.size || 0 } catch {}
     const memory = process.memoryUsage()
+    const messages = await getMessageMetrics()
     res.json({
       name: "Yunzai",
       version: cfg.package?.version || "未知",
@@ -1403,10 +1440,11 @@ export async function startAdminPanel() {
       memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal },
       accounts,
       groupCount,
+      messages,
       restartAvailable: Boolean(process.env.KSR_RESTART_TOKEN || process.env.pm_id !== undefined),
       panel: settings,
     })
-  })
+  }))
 
   app.get("/api/config", asyncRoute(async (req, res) => {
     const directory = path.join(ROOT, "config", "config")
@@ -1434,7 +1472,7 @@ export async function startAdminPanel() {
       } catch { return String(global.Bot?.gl?.get?.(Number(id))?.group_name || id) }
     }
     const groups = [
-      { id: "default", name: "默认群组" },
+      { id: "default", name: "全局" },
       ...[...groupIds].sort((left, right) => left.localeCompare(right, "zh-CN")).map(id => ({ id, name: getGroupName(id) })),
     ]
     const targetGroupConfig = groupId === "default" ? defaultGroupConfig : cfg.getGroup(Number(groupId)) || {}
@@ -1470,14 +1508,14 @@ export async function startAdminPanel() {
         ...rule,
       }))
     })
-    res.json({ groupId, groupName: groupId === "default" ? "默认群组" : getGroupName(groupId), groups, blockedPluginNames, rules, scanErrors })
+    res.json({ groupId, groupName: groupId === "default" ? "全局" : getGroupName(groupId), groups, blockedPluginNames, rules, scanErrors })
   }))
   app.get("/api/config/group-plugin-names/:groupId", asyncRoute(async (req, res) => {
     const groupId = String(req.params.groupId || "")
     if (groupId !== "default" && (!/^\d+$/.test(groupId) || !Number.isSafeInteger(Number(groupId)))) {
       return res.status(400).json({ error: "群号无效" })
     }
-    let groupName = "默认群组"
+    let groupName = "全局"
     if (groupId !== "default") {
       if (typeof global.Bot?.pickGroup !== "function") return res.status(503).json({ error: "当前 Yunzai 暂不支持获取群信息" })
       let group

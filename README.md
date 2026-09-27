@@ -4,7 +4,7 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 ## 能力
 
-- 运行概览：Bot 版本、进程、运行时间、内存、账号和群组缓存状态。
+- 运行概览：Bot 版本、进程、运行时间、内存、账号和群组缓存状态，以及 Redis 中的发送/截图统计和适配器接收量。
 - 配置中心：以表单编辑 `config/config/*.yaml`，也能切换到 YAML 源码；保存后更新 Yunzai 配置缓存。
 - 插件控制：列表分为大插件目录和小插件单文件；大插件优先读取 `*.support.js` 提供图形化配置，小插件可直接编辑源码。大插件没有 support 入口时，会预览插件 `config/` 或 `configs/` 目录中的配置文件。可从 HTTPS 仓库安装插件，并选择安装依赖或在安装成功后重启 Bot；依赖安装不会执行第三方生命周期脚本。
 - 文件管理：在工作区中浏览并编辑 YAML、JSON、JS/TS、Markdown、CSS、HTML 等文本文件。单个文件限制 1.5 MB，保存前自动备份到 `data/elia-admin-panel/backups/`。
