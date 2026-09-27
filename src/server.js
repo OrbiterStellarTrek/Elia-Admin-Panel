@@ -31,6 +31,8 @@ const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
   ".sh", ".bat", ".ps1", ".properties", ".env", ".gitignore", ".editorconfig",
 ])
+const PLUGIN_CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".properties"])
+const PLUGIN_SCAN_IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".next", "out", "dist", "build", "coverage", "data", "logs"])
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
@@ -369,7 +371,7 @@ async function readPluginIcon(iconPath, directory) {
   }
 }
 
-async function formatPluginEntry(name, title, directory, support = null) {
+async function formatPluginEntry(name, title, directory, support = null, metadata = {}) {
   const info = support?.pluginInfo || {}
   const configInfo = support?.configInfo || {}
   return {
@@ -382,7 +384,11 @@ async function formatPluginEntry(name, title, directory, support = null) {
     icon: info.icon || "",
     iconColor: info.iconColor || "",
     iconData: await readPluginIcon(info.iconPath, directory),
+    kind: metadata.kind || "large",
     directory,
+    sourcePath: metadata.sourcePath || "",
+    hasSupport: Boolean(support),
+    configFiles: metadata.configFiles || [],
     hasConfig: typeof configInfo.getConfigData === "function" && Array.isArray(configInfo.schemas),
     schemas: Array.isArray(configInfo.schemas) ? JSON.parse(JSON.stringify(configInfo.schemas)) : [],
     actions: Object.entries(configInfo.actions || {}).map(([key, action]) => ({ key, available: typeof action === "function" })),
@@ -390,31 +396,85 @@ async function formatPluginEntry(name, title, directory, support = null) {
   }
 }
 
-async function loadPluginSupport(pluginDirectory) {
-  // Elia 专属入口优先；没有时读取标准 Guoba 入口。
-  let selected
-  for (const candidate of PLUGIN_SUPPORT_ENTRIES) {
-    const supportPath = path.join(pluginDirectory, candidate.fileName)
+async function listPluginConfigFiles(pluginDirectory) {
+  const files = new Map()
+  const addFile = async filePath => {
     try {
-      const stat = await fs.stat(supportPath)
-      if (stat.isFile()) {
-        selected = { ...candidate, path: supportPath, stat }
-        break
-      }
+      const stat = await fs.lstat(filePath)
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_TEXT_BYTES) return
+      const relativeToPlugin = path.relative(pluginDirectory, filePath)
+      const relativeToWorkspace = path.relative(ROOT, filePath).split(path.sep).join("/")
+      files.set(relativeToPlugin, { name: relativeToPlugin.split(path.sep).join("/"), path: relativeToWorkspace, size: stat.size })
     } catch (error) {
       if (error.code !== "ENOENT") throw error
     }
   }
+
+  let rootEntries = []
+  try { rootEntries = await fs.readdir(pluginDirectory, { withFileTypes: true }) } catch { return [] }
+  const rootConfigName = new RegExp(`^config(?:[._-].*)?\\.(?:${[...PLUGIN_CONFIG_EXTENSIONS].map(extension => extension.slice(1)).join("|")})$`, "i")
+  for (const entry of rootEntries) {
+    if (entry.isFile() && rootConfigName.test(entry.name)) await addFile(path.join(pluginDirectory, entry.name))
+  }
+
+  async function walkConfigDirectory(directory, depth = 0) {
+    if (depth > 5) return
+    let entries
+    try { entries = await fs.readdir(directory, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.isSymbolicLink()) continue
+      const child = path.join(directory, entry.name)
+      if (entry.isDirectory()) {
+        if (!PLUGIN_SCAN_IGNORED_DIRECTORIES.has(entry.name.toLowerCase())) await walkConfigDirectory(child, depth + 1)
+      } else if (entry.isFile() && PLUGIN_CONFIG_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        await addFile(child)
+      }
+    }
+  }
+
+  for (const entry of rootEntries) {
+    if (entry.isDirectory() && !entry.isSymbolicLink() && ["config", "configs"].includes(entry.name.toLowerCase())) {
+      await walkConfigDirectory(path.join(pluginDirectory, entry.name))
+    }
+  }
+  return [...files.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-CN"))
+}
+
+async function loadPluginSupport(pluginDirectory) {
+  // Elia 专属入口优先，其次是 Guoba 入口，最后兼容其他 *.support.js。
+  const supportEntries = await fs.readdir(pluginDirectory, { withFileTypes: true })
+  const supportFiles = supportEntries.filter(entry => entry.isFile() && entry.name.endsWith(".support.js")).map(entry => entry.name)
+  const orderedNames = [
+    ...PLUGIN_SUPPORT_ENTRIES.map(entry => entry.fileName),
+    ...supportFiles.filter(name => !PLUGIN_SUPPORT_ENTRIES.some(entry => entry.fileName === name)).sort((a, b) => a.localeCompare(b)),
+  ]
+  let selected
+  for (const fileName of orderedNames) {
+    if (!supportFiles.includes(fileName)) continue
+    const supportPath = path.join(pluginDirectory, fileName)
+    const stat = await fs.stat(supportPath)
+    if (stat.isFile()) {
+      selected = { fileName, path: supportPath, stat }
+      break
+    }
+  }
   if (!selected) return null
 
-  const { path: supportPath, factoryName, stat } = selected
+  const { path: supportPath, fileName, stat } = selected
   const key = supportPath
   const cached = supportCache.get(key)
   if (cached?.mtimeMs === stat.mtimeMs) return cached.support
   const url = `${pathToFileURL(supportPath).href}?panel=${stat.mtimeMs}`
   const module = await import(url)
+  const genericName = path.basename(fileName, ".support.js")
+  const upperName = genericName.charAt(0).toUpperCase() + genericName.slice(1)
+  const factoryName = fileName === "elia.support.js"
+    ? "supportPanel"
+    : fileName === "guoba.support.js"
+      ? "supportGuoba"
+      : [`support${upperName}`, "supportPanel", "supportGuoba"].find(name => typeof module[name] === "function")
   if (typeof module[factoryName] !== "function") {
-    throw new Error(`${path.basename(supportPath)} 必须导出 ${factoryName}()`)
+    throw new Error(`${path.basename(supportPath)} 必须导出 supportPanel()、supportGuoba() 或与文件名对应的工厂`)
   }
   const support = await module[factoryName]()
   supportCache.set(key, { mtimeMs: stat.mtimeMs, support })
@@ -433,9 +493,10 @@ async function listPlugins() {
     } catch {
       continue
     }
-    const isFolderPlugin = children.some(child => child.isFile() && child.name === "index.js")
+    const isFolderPlugin = entry.name.toLowerCase() !== "example" && (children.some(child => child.isFile() && child.name === "index.js")
       || children.some(child => child.isFile() && PLUGIN_SUPPORT_ENTRIES.some(supportEntry => supportEntry.fileName === child.name))
-      || children.some(child => child.isDirectory() && child.name === ".git")
+      || children.some(child => child.isFile() && child.name.endsWith(".support.js"))
+      || children.some(child => child.name === ".git" && (child.isDirectory() || child.isFile())))
     if (isFolderPlugin) {
       let support = null
       try {
@@ -444,17 +505,25 @@ async function listPlugins() {
         safeLogger("warn", `[AdminPanel] ${entry.name} support 加载失败：${error.message}`)
       }
       const title = entry.name.replace(/[-_]/g, " ")
-      result.push(await formatPluginEntry(entry.name, title, entry.name, support))
+      const configFiles = support ? [] : await listPluginConfigFiles(directory)
+      result.push(await formatPluginEntry(entry.name, title, entry.name, support, {
+        kind: "large",
+        sourcePath: `plugins/${entry.name}`,
+        configFiles,
+      }))
       continue
     }
     for (const child of children) {
       if (child.isFile() && child.name.endsWith(".js")) {
         const id = `${entry.name}/${child.name}`
-        result.push(await formatPluginEntry(id, path.basename(child.name, ".js"), id))
+        result.push(await formatPluginEntry(id, path.basename(child.name, ".js"), id, null, {
+          kind: "small",
+          sourcePath: `plugins/${id}`,
+        }))
       }
     }
   }
-  return result.sort((a, b) => a.title.localeCompare(b.title, "zh-CN"))
+  return result.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "large" ? -1 : 1) || a.title.localeCompare(b.title, "zh-CN"))
 }
 
 async function findPluginSupport(id) {

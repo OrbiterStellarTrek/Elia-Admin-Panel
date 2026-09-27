@@ -6,7 +6,7 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 - 运行概览：Bot 版本、进程、运行时间、内存、账号和群组缓存状态。
 - 配置中心：以表单编辑 `config/config/*.yaml`，也能切换到 YAML 源码；保存后更新 Yunzai 配置缓存。
-- 插件控制：优先读取 `elia.support.js` 并调用 `supportPanel()`；没有该文件时兼容 `guoba.support.js` 的 `supportGuoba()`。本面板专属入口使用 `elia.support.js`，避免和 Guoba 入口冲突。
+- 插件控制：列表分为大插件目录和小插件单文件；大插件优先读取 `*.support.js` 提供图形化配置，小插件可直接编辑源码。大插件没有 support 入口时，会预览插件 `config/` 或 `configs/` 目录中的配置文件。
 - 文件管理：在工作区中浏览并编辑 YAML、JSON、JS/TS、Markdown、CSS、HTML 等文本文件。单个文件限制 1.5 MB，保存前自动备份到 `data/elia-admin-panel/backups/`。
 - 运行日志：查看 command 和 error 日志末尾内容。
 - 进程操作：仅在检测到 ksr 重启令牌或 PM2 托管时提供重启按钮。
@@ -47,6 +47,8 @@ pnpm --filter elia-admin-panel build
 ## Guoba 兼容
 
 EliaAdminPanel 自身的原生配置入口为 `elia.support.js`，导出 `supportPanel()`；`guoba.support.js` 保持独立，并复用同一份配置实现。扫描第三方插件时，优先读取 `elia.support.js`；没有时再读取 `guoba.support.js`。普通 Guoba 插件无需迁移现有配置。
+
+插件列表将含 `index.js`、Git 仓库或 `*.support.js` 的插件目录归为大插件；`example` 目录及未识别为独立插件目录下的 `.js` 文件归为小插件。小插件可直接在插件页编辑源码，保存前自动备份，Ctrl+S 可保存，重启 Bot 后加载新代码。大插件按 `elia.support.js`、`guoba.support.js`、其他 `*.support.js` 的顺序查找配置工厂；没有 support 入口时，面板预览其 `config/` 或 `configs/` 中的 YAML、JSON、TOML、INI、CONF 和 properties 文件，并可跳转文件管理器编辑。
 
 原生 `supportPanel()` 可同步或异步返回 `pluginInfo` 和 `configInfo`。标准 Guoba 的 `supportGuoba()` 需要同步返回对象，以匹配 Guoba 加载器的调用方式；其中配置读写方法仍可异步。插件列表中的 Logo 读取 `pluginInfo.iconPath`，支持插件目录内的 PNG、JPG、WebP、GIF 或 ICO 图片。示例：
 

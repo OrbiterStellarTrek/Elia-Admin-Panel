@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bot, Braces, Check, ChevronDown, ChevronLeft,
+  Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
   FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Menu, MessageSquareText, Monitor, Pencil, Plug, Plus, RefreshCw, Search,
@@ -38,6 +38,39 @@ const configFileLabels: Record<string, string> = {
   "qq.yaml": "QQ 账号设置",
   "redis.yaml": "Redis 设置",
   "renderer.yaml": "渲染服务设置",
+}
+
+const configFileCompactLabels: Record<string, string> = {
+  "bot.yaml": "机器人",
+  "db.yaml": "数据库",
+  "group.yaml": "群组",
+  "notice.yaml": "通知",
+  "other.yaml": "其他",
+  "qq.yaml": "QQ 账号",
+  "redis.yaml": "Redis",
+  "renderer.yaml": "渲染",
+}
+
+const configFileIcons: Record<string, typeof Bot> = {
+  "bot.yaml": Bot,
+  "db.yaml": Database,
+  "group.yaml": Users,
+  "notice.yaml": Bell,
+  "other.yaml": Settings2,
+  "qq.yaml": MessageSquareText,
+  "redis.yaml": Server,
+  "renderer.yaml": Monitor,
+}
+
+const configFileIconColors: Record<string, string> = {
+  "bot.yaml": "text-sky-700",
+  "db.yaml": "text-violet-700",
+  "group.yaml": "text-blue-700",
+  "notice.yaml": "text-amber-700",
+  "other.yaml": "text-slate-600",
+  "qq.yaml": "text-emerald-700",
+  "redis.yaml": "text-rose-700",
+  "renderer.yaml": "text-cyan-700",
 }
 
 const configFieldLabels: Record<string, string> = {
@@ -102,6 +135,11 @@ const configFieldLabels: Record<string, string> = {
 
 function configFileLabel(file: string) {
   return configFileLabels[file] || file
+}
+
+function ConfigFileIcon({ file, className = "" }: { file: string; className?: string }) {
+  const Icon = configFileIcons[file] || FileCog
+  return <Icon className={`${configFileIconColors[file] || "text-slate-500"} ${className}`} aria-hidden="true" />
 }
 
 function configFieldLabel(name: string) {
@@ -478,18 +516,24 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   }
   return <>
     <PageIntro eyebrow="运行配置" title="配置中心" description="图形化编辑 YAML 配置；群组规则、黑白名单与运行参数统一管理。" action={<Button onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button>} />
-    <div className={`grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "xl:grid-cols-[60px_minmax(0,1fr)]" : "xl:grid-cols-[245px_minmax(0,1fr)]"}`}>
-      <Card className="h-fit overflow-hidden">
+    <div className={`grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "xl:grid-cols-[72px_minmax(0,1fr)]" : "xl:grid-cols-[245px_minmax(0,1fr)]"}`}>
+      <Card className={`relative h-fit ${fileSidebarCollapsed ? "z-20 overflow-visible" : "overflow-hidden"}`}>
         {fileSidebarCollapsed && <div className="hidden gap-1 p-2 xl:grid">
           <Button size="icon" variant="ghost" className="mx-auto mb-1" aria-label="展开配置文件侧栏" title="展开配置文件侧栏" onClick={() => setFileSidebarCollapsed(false)}><ChevronRight /></Button>
-          {files.map(file => <button key={file} title={configFileLabel(file)} aria-label={configFileLabel(file)} onClick={() => load(file)} className={`grid size-10 place-items-center rounded-lg transition ${selected === file ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}><FileCog className="size-4" /></button>)}
+          {files.map(file => <button key={file} type="button" aria-label={`${configFileLabel(file)}，${file}`} aria-describedby={`config-file-tooltip-${file.replace(/\W/g, "-")}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`group relative flex h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${selected === file ? "bg-indigo-50 ring-1 ring-indigo-100" : "hover:bg-slate-50"}`}>
+            <ConfigFileIcon file={file} className="size-4" />
+            <span className={`text-[8px] leading-3 ${selected === file ? "font-medium text-indigo-700" : "text-slate-500"}`}>{configFileCompactLabels[file] || configFileLabel(file)}</span>
+            <span id={`config-file-tooltip-${file.replace(/\W/g, "-")}`} role="tooltip" className="pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-50 w-max max-w-56 -translate-y-1/2 translate-x-1 rounded-lg bg-[#202124] px-3 py-2 text-left text-xs font-medium text-white opacity-0 shadow-xl transition duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100">
+              {configFileLabel(file)}<span className="mt-0.5 block text-[10px] font-normal text-slate-300">{file}</span>
+            </span>
+          </button>)}
         </div>}
         <div className={fileSidebarCollapsed ? "xl:hidden" : ""}>
           <div className="p-4 pb-3">
             <div className="mb-3 flex items-center justify-between gap-2 text-xs font-semibold"><span>配置文件 <Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{files.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起配置文件侧栏" title="收起配置文件侧栏" onClick={() => setFileSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选配置…" value={search} onChange={event => setSearch(event.target.value)} /></div>
           </div>
-          <div className="max-h-[560px] space-y-1 overflow-y-auto px-2 pb-3">{visible.map(file => <button key={file} title={file} onClick={() => load(file)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition ${selected === file ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><FileCog className="size-4 shrink-0 text-slate-400" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span><span className="text-[10px] text-slate-400">YAML</span></button>)}</div>
+          <div className="max-h-[560px] space-y-1 overflow-y-auto px-2 pb-3">{visible.map(file => <button key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected === file ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span><span className="text-[10px] text-slate-400">YAML</span></button>)}</div>
         </div>
       </Card>
       <Card className="min-w-0"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div><div className="flex items-center gap-2"><Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={() => { if (!rawMode) { if (dirty && !window.confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return; setRaw(stringifyYaml(data || {})); setRawMode(true); return } try { const parsed = parseYaml(raw); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("YAML 内容必须是对象"); setData(parsed); setDirty(true); setRawMode(false) } catch (reason) { notify("error", `YAML 无法解析：${(reason as Error).message}`) } }}><Braces />{rawMode ? "图形化编辑" : "YAML 源码"}</Button><Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button></div></CardHeader><CardContent className="p-5">
@@ -512,19 +556,103 @@ function setNested(value: any, path: string[], next: any): any {
 function getNested(value: any, path: string) { return path.split(".").reduce((current, key) => current?.[key], value) }
 function isObject(value: any) { return value !== null && typeof value === "object" && !Array.isArray(value) }
 function secretField(name: string) { return /(password|passwd|secret|token|cookie|private.?key|\bpwd\b)/i.test(name) }
+function listField(name: string) {
+  return /^(enable|disable|botAlias|otherBotQQ|masterQQ|disableAdopt|white(?:Group|QQ)?|black(?:Group|QQ)?)$/i.test(name)
+    || /(?:whitelist|blacklist|allowlist|denylist|(?:qq|group|user)?ids?)$/i.test(name)
+}
+function multilineTextField(name: string, value: unknown) {
+  if (typeof value !== "string") return false
+  return value.includes("\n") || value.length > 120 || /(msg|message|content|notice|template|prompt|description|rule|expression|text)$/i.test(name)
+}
+function inferredListItemType(name: string) {
+  return /qq|group|(?:^|[_-])ids?$/i.test(name) ? "number" : "string"
+}
+function listValueText(value: any) {
+  return Array.isArray(value) ? value.map(item => typeof item === "string" ? item : String(item)).join("\n") : ""
+}
+
+function StructuredConfigField({ value, label, onChange, arrayOnly = false }: { value: any; label: string; onChange: (value: any) => void; arrayOnly?: boolean }) {
+  const serialized = stringifyYaml(value) || ""
+  const [draft, setDraft] = useState(serialized)
+  useEffect(() => setDraft(serialized), [serialized])
+  return <Textarea
+    aria-label={`${label}，YAML 多行编辑`}
+    className="min-h-32 resize-y font-mono text-xs leading-6"
+    spellCheck={false}
+    value={draft}
+    onChange={event => {
+      const next = event.target.value
+      setDraft(next)
+      try {
+        const parsed = parseYaml(next)
+        if (arrayOnly ? Array.isArray(parsed) : isObject(parsed) || Array.isArray(parsed)) onChange(parsed)
+      } catch {}
+    }}
+  />
+}
+
+function ConfigListField({ name, label, value, defaultValue, onChange, forceItemType }: { name: string; label: string; value: any; defaultValue?: any; onChange: (value: any) => void; forceItemType?: "string" | "number" | "boolean" }) {
+  const values = Array.isArray(value) ? value : []
+  const defaults = Array.isArray(defaultValue) ? defaultValue : []
+  const sampleValues = values.length ? values : defaults
+  const complex = sampleValues.some(item => isObject(item) || Array.isArray(item))
+  const primitiveTypes = new Set(sampleValues.filter(item => item !== null && item !== undefined).map(item => typeof item))
+  const structured = complex || primitiveTypes.size > 1
+  const detectedType = sampleValues.find(item => item !== null && item !== undefined)
+  const itemType = forceItemType || (detectedType ? typeof detectedType : inferredListItemType(name))
+  const serialized = listValueText(value)
+  const [draft, setDraft] = useState(serialized)
+  useEffect(() => setDraft(serialized), [serialized])
+  if (structured) return <StructuredConfigField value={values} label={label} onChange={onChange} arrayOnly />
+
+  function updateFromText(text: string) {
+    setDraft(text)
+    const lines = text.split(/\r?\n/).filter(line => line.trim() !== "")
+    if (!lines.length) {
+      onChange(value === null || value === undefined ? null : [])
+      return
+    }
+    if (itemType === "number") {
+      const numbers = lines.map(line => Number(line.trim()))
+      if (numbers.some(number => !Number.isFinite(number))) return
+      onChange(numbers)
+    } else if (itemType === "boolean") {
+      const booleans: boolean[] = []
+      for (const line of lines) {
+        if (/^(true|1|yes)$/i.test(line.trim())) booleans.push(true)
+        else if (/^(false|0|no)$/i.test(line.trim())) booleans.push(false)
+        else return
+      }
+      onChange(booleans)
+    } else {
+      onChange(lines)
+    }
+  }
+
+  return <Textarea
+    aria-label={`${label}，每行一项`}
+    className="min-h-24 resize-y font-mono text-xs leading-6"
+    placeholder={itemType === "number" ? "每行一个数字" : itemType === "boolean" ? "每行 true 或 false" : "每行一项"}
+    value={draft}
+    onChange={event => updateFromText(event.target.value)}
+  />
+}
 
 function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: { name: string; value: any; defaultValue?: any; path: string[]; onChange: (path: string[], value: any) => void; depth?: number }) {
   const label = configFieldLabel(name)
   if (isObject(value)) return <div className={`${depth ? "ml-3 border-l border-border pl-4" : ""}`}><div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-2"><span className="grid size-6 place-items-center rounded-md bg-indigo-50 text-indigo-600"><Braces className="size-3.5" /></span><span className="text-sm font-semibold">{label}</span></div><div className="space-y-4">{Object.entries(value).map(([child, current]) => <ConfigField key={child} name={child} value={current} defaultValue={defaultValue?.[child]} path={[...path, child]} onChange={onChange} depth={depth + 1} />)}</div></div>
-  const hint = defaultValue !== undefined && JSON.stringify(value) !== JSON.stringify(defaultValue) ? `默认值：${Array.isArray(defaultValue) ? defaultValue.join(", ") : String(defaultValue)}` : ""
-  const multiline = /disable|enable|white|black|alias|adopt|list|path|address|msg/i.test(name)
+  const hintValue = Array.isArray(defaultValue) ? defaultValue.join(", ") : isObject(defaultValue) ? stringifyYaml(defaultValue).replace(/\s+/g, " ").trim() : String(defaultValue)
+  const hint = defaultValue !== undefined && JSON.stringify(value) !== JSON.stringify(defaultValue) ? `默认值：${hintValue}` : ""
+  const nullableList = (value === null || value === undefined) && listField(name)
+  const multilineText = multilineTextField(name, value)
   return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
     <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
     <div className="min-w-0">{typeof value === "boolean" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={value} onCheckedChange={next => onChange(path, next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
-      : Array.isArray(value) ? <Textarea className="min-h-20 font-mono text-xs" value={value.every(item => !isObject(item)) ? value.join("\n") : JSON.stringify(value, null, 2)} onChange={event => { try { onChange(path, value.every(item => !isObject(item)) ? event.target.value.split("\n").filter(Boolean) : JSON.parse(event.target.value)) } catch {} }} />
+      : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
       : value === null || value === undefined ? <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
-      : <Input type={secretField(name) ? "password" : "text"} value={String(value)} className={multiline ? "font-mono text-xs" : ""} onChange={event => onChange(path, event.target.value)} />}</div>
+      : multilineText && !secretField(name) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={String(value)} onChange={event => onChange(path, event.target.value)} />
+      : <Input type={secretField(name) ? "password" : "text"} value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
   </div>
 }
 
@@ -533,8 +661,13 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [archives, setArchives] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [data, setData] = useState<any>({})
+  const [sourceContent, setSourceContent] = useState("")
+  const [sourceDirty, setSourceDirty] = useState(false)
+  const [selectedConfigFile, setSelectedConfigFile] = useState("")
+  const [configPreview, setConfigPreview] = useState("")
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState("")
@@ -552,14 +685,46 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     finally { setLoading(false) }
   }, [api, selected])
   useEffect(() => { refresh() }, []) // initial discovery
-  const loadConfig = useCallback(async (plugin: any) => {
-    setSelected(plugin); setData({})
-    if (!plugin?.hasConfig) return
-    try { const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/config`); setData(result.data || {}) }
-    catch (reason) { setError((reason as Error).message) }
-  }, [api])
-  useEffect(() => { if (selected) loadConfig(selected) }, [selected?.id])
+  const activeConfigFile = selected?.configFiles?.find((file: any) => file.path === selectedConfigFile) || selected?.configFiles?.[0]
+  useEffect(() => {
+    if (!selected) return
+    let cancelled = false
+    setError("")
+    setDetailLoading(true)
+    const loadSelected = async () => {
+      try {
+        if (selected.kind === "small") {
+          const result = await api(`/api/files/read?path=${encodeURIComponent(selected.sourcePath)}`)
+          if (!cancelled) { setSourceContent(result.content); setSourceDirty(false) }
+        } else if (selected.hasConfig) {
+          const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`)
+          if (!cancelled) setData(result.data || {})
+        } else if (activeConfigFile) {
+          const result = await api(`/api/files/read?path=${encodeURIComponent(activeConfigFile.path)}`)
+          if (!cancelled) setConfigPreview(result.content)
+        }
+      } catch (reason) {
+        if (!cancelled) setError((reason as Error).message)
+      } finally {
+        if (!cancelled) setDetailLoading(false)
+      }
+    }
+    void loadSelected()
+    return () => { cancelled = true }
+  }, [api, selected?.id, selected?.kind, selected?.hasConfig, selected?.sourcePath, activeConfigFile?.path])
+  function selectPlugin(plugin: any) {
+    if (selected?.id === plugin.id) return
+    setSelected(plugin)
+    setData({})
+    setSourceContent("")
+    setSourceDirty(false)
+    setSelectedConfigFile(plugin.configFiles?.[0]?.path || "")
+    setConfigPreview("")
+    setError("")
+  }
   const shown = plugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(search.toLowerCase()))
+  const largePlugins = shown.filter(plugin => plugin.kind === "large")
+  const smallPlugins = shown.filter(plugin => plugin.kind === "small")
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
   async function save() {
     if (!selected) return
@@ -570,7 +735,18 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
       const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`, { method: "PUT", body: JSON.stringify(values) })
       if (result.code !== undefined && result.code !== 0) throw new Error(result.message || "保存失败")
       notify("success", result.message || `${selected.title} 配置已保存`)
-      await loadConfig(selected)
+      const saved = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`)
+      setData(saved.data || {})
+    } catch (reason) { notify("error", (reason as Error).message) }
+    finally { setBusy(false) }
+  }
+  async function saveSource() {
+    if (!selected?.sourcePath || !sourceDirty || busy) return
+    setBusy(true)
+    try {
+      const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: selected.sourcePath, content: sourceContent }) })
+      setSourceDirty(false)
+      notify("success", result.message || "小插件源码已保存")
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
   }
@@ -614,14 +790,48 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
   }
+  function openFileManager(path: string) {
+    window.dispatchEvent(new CustomEvent("panel:navigate-files", { detail: path }))
+  }
+  function renderPlugin(plugin: any) {
+    const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
+    const subtitle = plugin.kind === "small"
+      ? `小插件 · ${plugin.sourcePath.replace(/^plugins\//, "")}`
+      : plugin.hasConfig
+        ? "大插件 · support 配置入口"
+        : plugin.hasSupport
+          ? "大插件 · support 操作入口"
+        : plugin.configFiles?.length
+          ? `大插件 · 可查看 ${plugin.configFiles.length} 个配置文件`
+          : "大插件 · 未发现配置入口"
+    const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
+    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}>
+      <span className={`grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
+        {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
+      </span>
+      <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{plugin.title}</span><span className="mt-1 block truncate text-[10px] text-muted-foreground">{subtitle}</span></span>
+      {canOpen && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />}
+    </button>
+  }
   return <>
-    <PageIntro eyebrow="Plugin control" title="插件控制" description="管理本地插件、安装仓库插件，并兼容 Guoba 的 schema、配置和操作接口。" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
+    <PageIntro eyebrow="Plugin control" title="插件控制" description="大插件优先使用 *.support.js 配置入口；小插件可直接编辑源码，没有入口的大插件可查看目录内的配置文件。" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <div className="grid min-h-[640px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <Card className="h-fit overflow-hidden"><div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold">本地插件<Badge className="border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}<div className="max-h-[470px] space-y-1 overflow-y-auto px-2 pb-3">{shown.map(plugin => <button key={plugin.id} onClick={() => loadConfig(plugin)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}><span className={`grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl ${plugin.hasConfig ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>{plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <Plug className="size-4" style={plugin.iconColor ? { color: plugin.iconColor } : undefined} />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{plugin.title}</span><span className="mt-1 block truncate text-[10px] text-muted-foreground">{plugin.hasConfig ? "支持可视化配置" : plugin.directory}</span></span>{plugin.hasConfig && <span className="size-1.5 rounded-full bg-emerald-500" />}</button>)}{!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}</div>{archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}</Card>
-      <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.directory || "选择左侧插件查看其配置接口"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected && !selected.directory.includes("/") && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
+      <Card className="h-fit overflow-hidden"><div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold">本地插件<Badge className="border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
+        <div className="max-h-[470px] overflow-y-auto px-2 pb-3">
+          {largePlugins.length > 0 && <section aria-label="大插件" className="space-y-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>大插件 · 独立目录</span><span>{largePlugins.length}</span></div>{largePlugins.map(renderPlugin)}</section>}
+          {smallPlugins.length > 0 && <section aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>小插件 · 单文件源码</span><span>{smallPlugins.length}</span></div>{smallPlugins.map(renderPlugin)}</section>}
+          {!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
+        </div>
+        {archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}
+      </Card>
+      <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
-        {selected?.hasConfig ? <div className="space-y-5">{selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div> : selected ? <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center overflow-hidden rounded-2xl bg-white text-slate-500 shadow-sm">{selected.iconData ? <img src={selected.iconData} alt="" className="size-full object-contain" /> : <Plug className="size-5" style={selected.iconColor ? { color: selected.iconColor } : undefined} />}</div><div className="mt-3 text-sm font-medium">此插件没有兼容配置入口</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">可通过文件管理器编辑插件目录。插件配置页支持 elia.support.js（导出 supportPanel()），也兼容 guoba.support.js（导出 supportGuoba()）。</p><Button variant="outline" size="sm" className="mt-4" onClick={() => window.dispatchEvent(new CustomEvent("panel:navigate-files"))}><FileCode2 />打开文件管理</Button></div> : <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>}
+        {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
+          : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea spellCheck={false} disabled={busy} aria-label={`${selected.title} 插件源码`} className="min-h-[545px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={sourceContent} onChange={event => { setSourceContent(event.target.value); setSourceDirty(true) }} onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") { event.preventDefault(); void saveSource() } }} />}</div>
+          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div>
+            : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前大插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
+              : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或为大插件添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
       </CardContent></Card>
     </div>
@@ -634,15 +844,18 @@ function SchemaField({ schema, value, onChange }: { schema: any; value: any; onC
   const label = schema.label || schema.field
   const help = schema.bottomHelpMessage || schema.helpMessage
   const options: any[] = props.options || []
-  const multiline = component === "InputTextArea" || component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend"
-  const textValue = Array.isArray(value) ? value.join("\n") : value == null ? "" : String(value)
+  const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend"
+  const textValue = typeof value === "string" ? value : value == null ? "" : String(value)
   return <div className="grid gap-3 md:grid-cols-[minmax(155px,250px)_minmax(220px,1fr)]">
     <div className="pt-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
     <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" ? <div className="flex flex-wrap gap-2">{options.map((option: any) => { const optionValue = typeof option === "object" ? option.value : option; const optionLabel = typeof option === "object" ? option.label : option; return <button key={String(optionValue)} type="button" onClick={() => onChange(optionValue)} className={`rounded-lg border px-3 py-2 text-xs transition ${value === optionValue ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-border bg-white text-slate-600 hover:bg-slate-50"}`}>{optionLabel}</button> })}</div>
-      : component === "InputTextArea" || component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" || component === "GSubForm" || (Array.isArray(value) && value.length > 1) ? <Textarea className="min-h-20 text-xs" value={textValue} placeholder={props.placeholder || "每行一项"} onChange={event => onChange(Array.isArray(value) || component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" ? event.target.value.split("\n").filter(Boolean) : event.target.value)} />
-      : <Input type={secretField(schema.field) ? "password" : "text"} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
+      : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} onChange={onChange} />
+      : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} onChange={onChange} forceItemType="string" />
+      : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />
+      : component === "InputTextArea" || (multilineTextField(schema.field, value) && !secretField(schema.field)) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={textValue} rows={props.rows} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />
+      : <Input type={secretField(schema.field) || props.type === "password" ? "password" : "text"} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
   </div>
 }
 
