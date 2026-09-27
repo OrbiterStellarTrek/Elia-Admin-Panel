@@ -596,6 +596,35 @@ function listValueText(value: any) {
   return Array.isArray(value) ? value.map(item => typeof item === "string" ? item : String(item)).join("\n") : ""
 }
 
+function isSimpleRecord(value: any) {
+  return isObject(value) && Object.values(value).every(item => item === null || typeof item !== "object")
+}
+
+function RecordListField({ rows, template, label, onChange }: { rows: any[]; template: Record<string, any>; label: string; onChange: (value: any[]) => void }) {
+  function updateField(index: number, field: string, value: any) {
+    onChange(rows.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: value } : row))
+  }
+
+  const keyValueLabels = label.includes("替换")
+    ? { key: "匹配规则", value: "替换文本" }
+    : { key: "键", value: "值" }
+
+  return <div className="space-y-2.5">
+    {rows.map((row, index) => <div key={index} className="rounded-xl border border-border/80 bg-white p-3.5">
+      <div className="mb-3 flex items-center justify-between"><span className="text-[11px] font-medium text-slate-500">{label} {index + 1}</span><Button type="button" size="icon" variant="ghost" className="size-7 text-slate-400 hover:text-rose-600" aria-label={`删除${label} ${index + 1}`} title="删除此项" onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}><X className="size-3.5" /></Button></div>
+      <div className="grid gap-3 sm:grid-cols-2">{Object.entries(row).map(([field, current]) => <div key={field} className="min-w-0 space-y-1.5">
+        <Label className="text-[10px] text-muted-foreground">{keyValueLabels[field as "key" | "value"] || configFieldLabel(field)}</Label>
+        {typeof current === "boolean"
+          ? <div className="flex h-9 items-center justify-between rounded-lg border border-border/80 px-3"><span className="text-[10px] text-muted-foreground">{current ? "是" : "否"}</span><Switch checked={current} onCheckedChange={next => updateField(index, field, next)} /></div>
+          : typeof current === "number"
+            ? <Input type="number" className="h-9 text-xs" value={current} onChange={event => updateField(index, field, event.target.value === "" ? "" : Number(event.target.value))} />
+            : <Input className="h-9 text-xs" value={current == null ? "" : String(current)} placeholder="可留空" onChange={event => updateField(index, field, event.target.value)} />}
+      </div>)}</div>
+    </div>)}
+    <Button type="button" size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => onChange([...rows, { ...template }])}><Plus className="size-3.5" />添加{label.includes("规则") ? "规则" : "项目"}</Button>
+  </div>
+}
+
 function StructuredConfigField({ value, label, onChange, arrayOnly = false }: { value: any; label: string; onChange: (value: any) => void; arrayOnly?: boolean }) {
   const serialized = stringifyYaml(value) || ""
   const [draft, setDraft] = useState(serialized)
@@ -623,11 +652,16 @@ function ConfigListField({ name, label, value, defaultValue, onChange, forceItem
   const complex = sampleValues.some(item => isObject(item) || Array.isArray(item))
   const primitiveTypes = new Set(sampleValues.filter(item => item !== null && item !== undefined).map(item => typeof item))
   const structured = complex || primitiveTypes.size > 1
+  const recordList = structured && sampleValues.length > 0 && sampleValues.every(isSimpleRecord)
   const detectedType = sampleValues.find(item => item !== null && item !== undefined)
   const itemType = forceItemType || (detectedType ? typeof detectedType : inferredListItemType(name))
   const serialized = listValueText(value)
   const [draft, setDraft] = useState(serialized)
   useEffect(() => setDraft(serialized), [serialized])
+  if (recordList) {
+    const template = sampleValues.find(isSimpleRecord) || { key: "", value: "" }
+    return <RecordListField rows={values} template={template} label={label} onChange={onChange} />
+  }
   if (structured) return <StructuredConfigField value={values} label={label} onChange={onChange} arrayOnly />
 
   function updateFromText(text: string) {
@@ -683,6 +717,7 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
 
 function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   const [plugins, setPlugins] = useState<any[]>([])
+  const [pluginSidebarCollapsed, setPluginSidebarCollapsed] = useState(false)
   const [archives, setArchives] = useState<any[]>([])
   const [selected, setSelected] = useState<any>(null)
   const [data, setData] = useState<any>({})
@@ -843,17 +878,38 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
       {canOpen && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" />}
     </button>
   }
+  function renderCompactPlugin(plugin: any) {
+    const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
+    const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
+    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-label={`${plugin.title}，${plugin.kind === "small" ? "小插件" : "大插件"}`} title={`${plugin.title} · ${plugin.kind === "small" ? "小插件" : "大插件"}`} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`relative mx-auto flex size-11 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+      <span className={`grid size-8 place-items-center overflow-hidden rounded-lg ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
+        {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
+      </span>
+      {canOpen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-emerald-500 ring-2 ring-white" />}
+    </button>
+  }
   return <>
     <PageIntro eyebrow="Plugin control" title="插件控制" description="大插件优先使用 *.support.js 配置入口；小插件可直接编辑源码，没有入口的大插件可查看目录内的配置文件。" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <div className="grid min-h-[640px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <Card className="h-fit overflow-hidden"><div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold">本地插件<Badge className="border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
+    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`}>
+      <Card className="relative h-fit overflow-visible">
+        <div className={`absolute inset-x-0 top-0 z-20 hidden gap-1 p-2 transition-opacity duration-200 xl:block ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+          <Button size="icon" variant="ghost" className="mx-auto mb-1 flex" aria-label="展开插件列表侧栏" title="展开插件列表侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
+          <div className="max-h-[570px] space-y-1 overflow-y-auto scrollbar-thin">
+            {largePlugins.length > 0 && <div className="space-y-1">{largePlugins.map(renderCompactPlugin)}</div>}
+            {smallPlugins.length > 0 && <div className={`${largePlugins.length ? "mt-2 border-t border-border/70 pt-2" : ""} space-y-1`}>{smallPlugins.map(renderCompactPlugin)}</div>}
+            {!shown.length && !loading && <p className="px-1 py-3 text-center text-[9px] text-muted-foreground">无插件</p>}
+          </div>
+        </div>
+        <div className={`transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+        <div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold"><span>本地插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件列表侧栏" title="收起插件列表侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
         <div className="max-h-[470px] overflow-y-auto px-2 pb-3">
           {largePlugins.length > 0 && <section aria-label="大插件" className="space-y-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>大插件 · 独立目录</span><span>{largePlugins.length}</span></div>{largePlugins.map(renderPlugin)}</section>}
           {smallPlugins.length > 0 && <section aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-1"><div className="sticky top-0 z-10 flex items-center justify-between bg-white px-2 py-2 text-[10px] font-semibold text-slate-500"><span>小插件 · 单文件源码</span><span>{smallPlugins.length}</span></div>{smallPlugins.map(renderPlugin)}</section>}
           {!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
         </div>
         {archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}
+        </div>
       </Card>
       <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}

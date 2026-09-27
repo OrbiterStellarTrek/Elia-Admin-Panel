@@ -60,6 +60,13 @@ button, input, textarea { font: inherit; }
   .config-center-grid.is-collapsed {
     grid-template-columns: 72px minmax(0, 1fr);
   }
+  .plugin-center-grid {
+    grid-template-columns: 280px minmax(0, 1fr);
+    transition: grid-template-columns 300ms cubic-bezier(.2,.8,.2,1);
+  }
+  .plugin-center-grid.is-collapsed {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
 }
 
 .admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1); }
