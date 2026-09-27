@@ -6,7 +6,7 @@ import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
   FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
-  LogOut, Menu, MessageSquareText, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
+  LogOut, Maximize2, Menu, MessageSquareText, Minimize2, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
   Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, Users, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -81,7 +81,7 @@ const configFileIconColors: Record<string, string> = {
 }
 
 const configFieldLabels: Record<string, string> = {
-  log_level: "日志等级",
+  log_level: "日志输出等级",
   ignore_self: "过滤机器人自身消息",
   resend: "风控时尝试分片发送",
   sendmsg_error: "发送失败时通知主人",
@@ -90,10 +90,11 @@ const configFieldLabels: Record<string, string> = {
   ffprobe_path: "FFprobe 路径",
   chromium_path: "Chromium 路径",
   puppeteer_ws: "Puppeteer 连接地址",
-  puppeteer_timeout: "Puppeteer 超时时间",
+  puppeteer_timeout: "Puppeteer 超时时间（毫秒）",
+  puppeteer_idle: "Puppeteer 空闲关闭时间（毫秒）",
   proxyAddress: "代理地址",
-  online_msg: "上线通知内容",
-  online_msg_exp: "上线通知匹配规则",
+  online_msg: "上线时发送帮助",
+  online_msg_exp: "上线帮助冷却时间（秒）",
   skip_login: "跳过自动登录",
   serial_load: "按顺序加载插件",
   sign_api_addr: "签名服务地址",
@@ -105,32 +106,32 @@ const configFieldLabels: Record<string, string> = {
   groupGlobalCD: "群全局冷却时间",
   singleCD: "单人冷却时间",
   isInheritDefault: "继承默认群组配置",
-  disable: "禁用列表",
-  onlyReplyAt: "仅响应 @ 消息",
-  botAlias: "机器人别名",
+  disable: "禁用的功能名称",
+  onlyReplyAt: "群聊触发方式",
+  botAlias: "机器人别名与触发前缀",
   ignoreOtherBotAt: "忽略对其他机器人的 @",
   otherBotQQ: "其他机器人 QQ 号",
-  imgAddLimit: "图片添加频率限制",
-  imgMaxSize: "图片最大体积",
-  addPrivate: "允许私聊配置",
-  enable: "启用列表",
+  imgAddLimit: "添加表情权限",
+  imgMaxSize: "表情图片大小上限（MB）",
+  addPrivate: "允许私聊添加表情",
+  enable: "仅启用的功能名称",
   iyuu: "IYUU 推送密钥",
   sct: "Server 酱 SendKey",
   feishu_webhook: "飞书机器人 Webhook",
-  autoFriend: "自动处理好友申请",
-  autoQuit: "自动退群",
+  autoFriend: "自动同意好友申请",
+  autoQuit: "自动退群人数阈值",
   masterQQ: "主人 QQ 号",
   disableGuildMsg: "禁用频道消息",
-  disablePrivate: "禁用私聊消息",
-  disableMsg: "禁用消息规则",
-  disableAdopt: "禁用群组接入",
+  disablePrivate: "限制普通私聊",
+  disableMsg: "私聊限制提示内容",
+  disableAdopt: "私聊放行正则",
   whiteGroup: "群组白名单",
   whiteQQ: "用户白名单",
   blackGroup: "群组黑名单",
   blackQQ: "用户黑名单",
   qq: "QQ 账号",
   pwd: "登录密码",
-  platform: "登录平台",
+  platform: "QQ 登录设备类型",
   path: "数据路径",
   host: "Redis 主机地址",
   port: "Redis 端口",
@@ -138,6 +139,47 @@ const configFieldLabels: Record<string, string> = {
   password: "Redis 密码",
   db: "Redis 数据库编号",
   name: "渲染引擎名称",
+}
+
+const configFieldDescriptions: Record<string, string> = {
+  log_level: "日志等级：trace、debug、info、warn、fatal、mark、error、off。mark 只显示命令日志。",
+  online_msg: "Bot 上线后，向配置中的首个主人 QQ 发送帮助内容。",
+  online_msg_exp: "同一 Bot 再次发送上线帮助前的等待时间，单位为秒。",
+  onlyReplyAt: "0：群消息无需前缀；1：仅响应 @ 机器人或别名前缀；2：主人无需前缀，其他人仍需 @ 或别名前缀。仅在配置了机器人别名时生效。",
+  imgAddLimit: "0：所有群员；1：群管理员；2：仅主人可添加表情。",
+  addPrivate: "控制是否允许通过私聊添加表情，0 禁止，1 允许。",
+  autoFriend: "开启后自动同意添加好友请求；关闭时不自动处理。",
+  autoQuit: "Bot 加入群后，人数达到此值或更少时自动退群；群内有主人或 Bot 是群主时不会退群，0 关闭。",
+  platform: "ICQQ 登录时使用的设备类型。",
+  restart_port: "重启 API 使用的端口，仅在启用 ksr.js 时生效。",
+  imgMaxSize: "添加表情时允许的图片大小上限，单位 MB。",
+  puppeteer_timeout: "Puppeteer 截图超时时间，单位毫秒；留空或 0 使用默认行为。",
+  puppeteer_idle: "浏览器空闲达到此时间后自动关闭以释放资源；单位毫秒，0 表示不自动关闭。",
+  skip_login: "开启后不登录 ICQQ，但仍会加载 Yunzai 插件，Bot 使用占位 QQ 号运行。",
+  serial_load: "逐个等待插件加载完成后再加载下一个；关闭时并行加载。",
+}
+
+const configSelectOptions: Record<string, { value: string; label: string }[]> = {
+  log_level: ["trace", "debug", "info", "warn", "fatal", "mark", "error", "off"].map(value => ({ value, label: value })),
+  dialect: ["mysql", "postgres", "sqlite", "db2", "mariadb", "mssql"].map(value => ({ value, label: value })),
+  platform: [
+    { value: "1", label: "Android 手机" },
+    { value: "2", label: "Android 平板" },
+    { value: "3", label: "Android 手表" },
+    { value: "4", label: "macOS" },
+    { value: "5", label: "iPad" },
+    { value: "6", label: "Tim" },
+  ],
+  onlyReplyAt: [
+    { value: "0", label: "不要求 @ 或前缀" },
+    { value: "1", label: "所有人需 @ 机器人或使用别名前缀" },
+    { value: "2", label: "主人免前缀，其他人需 @ 或使用别名前缀" },
+  ],
+  imgAddLimit: [
+    { value: "0", label: "所有群员" },
+    { value: "1", label: "群管理员" },
+    { value: "2", label: "仅主人" },
+  ],
 }
 
 function configFileLabel(file: string) {
@@ -372,36 +414,43 @@ export default function Dashboard() {
 
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px" } as React.CSSProperties}>
-      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[#373737] bg-[#202124] px-4 pb-0 pt-5 text-slate-100 shadow-xl transition-transform duration-200 md:translate-x-0 ${sidebarCollapsed ? "md:px-1.5" : "md:px-3"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className="admin-sidebar-brand flex items-center gap-3 overflow-hidden px-2 pb-7">
-          <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-          <div className="min-w-0"><div className="truncate font-semibold tracking-tight">EliaAdminPanel</div></div>
-          <button className="ml-auto text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></button>
-        </div>
-        <div className="admin-sidebar-group overflow-hidden px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500">控制台</div>
-        <nav className="space-y-1">
-          {navigation.map(item => {
-            const Icon = item.icon
-            const selected = section === item.id
-            return <button key={item.id} title={sidebarCollapsed ? item.label : undefined} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
-              <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
-              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label min-w-0 flex-1"><span className="block text-[13px] font-medium">{item.label}</span></span>
-              {selected && <span aria-hidden="true" className="admin-sidebar-selected size-1.5 rounded-full bg-blue-300" />}
-            </button>
-          })}
-        </nav>
-        <div className="mt-auto space-y-3 px-1 pb-3">
-          <div title={sidebarCollapsed ? "本机会话已加密" : undefined} className="admin-sidebar-session-card rounded-xl bg-white/5 p-3.5">
-            <div className="admin-sidebar-session-heading flex items-center text-xs font-medium text-slate-200"><ShieldCheck className="size-4 shrink-0 text-emerald-400" /><span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">本机会话已加密</span></div>
-            <p aria-hidden={sidebarCollapsed} className="admin-sidebar-copy text-[10px] leading-4 text-slate-500">工作区修改会自动留存备份，可从面板文件管理中查看。</p>
+      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-[#373737] bg-[#202124] text-slate-100 shadow-xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0 pt-5">
+          <div className="flex items-center gap-3 px-2 pb-7">
+            <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+            <div className="min-w-0 truncate font-semibold tracking-tight">EliaAdminPanel</div>
+            <button className="ml-auto text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></button>
           </div>
-          <button title={sidebarCollapsed ? "退出登录" : undefined} aria-label="退出登录" onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4 shrink-0" /><span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">退出登录</span></button>
-          <div aria-hidden={sidebarCollapsed} className="admin-sidebar-version px-3 text-[10px] text-slate-600">ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
-          <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block">
-            <button title={sidebarCollapsed ? "展开侧边栏" : undefined} aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200">
-              <ChevronLeft className={`size-4 shrink-0 transition-transform duration-200 ${sidebarCollapsed ? "rotate-180" : ""}`} />
-              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">{sidebarCollapsed ? "展开" : "收起"}</span>
-            </button>
+          <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500">控制台</div>
+          <nav className="space-y-1">
+            {navigation.map(item => {
+              const Icon = item.icon
+              const selected = section === item.id
+              return <button key={item.id} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
+                <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
+                <span className="min-w-0 flex-1 text-[13px] font-medium">{item.label}</span>
+                {selected && <span aria-hidden="true" className="size-1.5 rounded-full bg-blue-300" />}
+              </button>
+            })}
+          </nav>
+          <div className="mt-auto space-y-3 px-1 pb-3">
+            <button aria-label="退出登录" onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4 shrink-0" />退出登录</button>
+            <div className="px-3 text-[10px] text-slate-600">ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
+            <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronLeft className="size-4" />收起</button></div>
+          </div>
+        </div>
+        <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3 pt-5">
+          <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+          <nav className="w-full space-y-1" aria-label="主导航">
+            {navigation.map(item => {
+              const Icon = item.icon
+              const selected = section === item.id
+              return <button key={item.id} title={item.label} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group grid h-10 w-full place-items-center rounded-lg transition ${selected ? "bg-[#2c3448] text-blue-300" : "text-slate-500 hover:bg-white/5 hover:text-slate-200"}`}><Icon className="size-[18px]" /></button>
+            })}
+          </nav>
+          <div className="mt-auto w-full space-y-2 border-t border-white/10 pt-2">
+            <button title="退出登录" aria-label="退出登录" onClick={logout} className="grid h-10 w-full place-items-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4" /></button>
+            <button title="展开侧边栏" aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(false)} className="grid h-10 w-full place-items-center rounded-lg text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronRight className="size-4" /></button>
           </div>
         </div>
       </aside>
@@ -667,6 +716,15 @@ function ConfigListField({ name, label, value, defaultValue, onChange, forceItem
   }
   if (structured) return <StructuredConfigField value={values} label={label} onChange={onChange} arrayOnly />
 
+  if (name === "disableAdopt") return <div className="space-y-2.5">
+    <p className="text-[11px] leading-5 text-muted-foreground">{configFieldDescriptions.disableAdopt}</p>
+    {values.map((item, index) => <div key={index} className="flex items-center gap-2">
+      <Input aria-label={`${label} ${index + 1}`} className="h-9 font-mono text-xs" value={String(item ?? "")} placeholder="例如：stoken" onChange={event => onChange(values.map((current, currentIndex) => currentIndex === index ? event.target.value : current))} />
+      <Button type="button" size="icon" variant="ghost" className="size-9 shrink-0 text-slate-400 hover:text-rose-600" aria-label={`删除${label} ${index + 1}`} title="删除此规则" onClick={() => onChange(values.filter((_, currentIndex) => currentIndex !== index))}><X className="size-4" /></Button>
+    </div>)}
+    <Button type="button" size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => onChange([...values, ""])}><Plus className="size-3.5" />添加放行规则</Button>
+  </div>
+
   function updateFromText(text: string) {
     setDraft(text)
     const lines = text.split(/\r?\n/).filter(line => line.trim() !== "")
@@ -708,9 +766,11 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
   const nullableList = (value === null || value === undefined) && listField(name)
   const multilineText = multilineTextField(name, value)
   const numericToggle = numericBooleanField(name, value)
+  const selectOptions = configSelectOptions[name]
   return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
-    <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
-    <div className="min-w-0">{typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
+    <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
+    <div className="min-w-0">{selectOptions ? <select aria-label={label} className="h-10 w-full rounded-xl border border-border/80 bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" value={String(value)} onChange={event => { const option = selectOptions.find(item => item.value === event.target.value); onChange(path, typeof value === "number" ? Number(option?.value) : option?.value) }}>{selectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+      : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
       : value === null || value === undefined ? <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
@@ -918,7 +978,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
           </Card>
         </div>
       </div>
-      <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.sourcePath || "选择左侧插件查看其配置或源码"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
+      <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle>{(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 truncate">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}</div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><span className="shrink-0 text-[10px] text-muted-foreground">Ctrl+S 保存 · 重启后加载</span></div>{detailLoading ? <div className="grid min-h-[545px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
@@ -1025,6 +1085,7 @@ function SchemaField({ schema, value, onChange, validateCron }: { schema: any; v
 }
 
 function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any; initialPath?: string }) {
+  const [editorFullscreen, setEditorFullscreen] = useState(false)
   const [directory, setDirectory] = useState(".")
   const [entries, setEntries] = useState<any[]>([])
   const [current, setCurrent] = useState<any>(null)
@@ -1042,6 +1103,19 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
     finally { setLoading(false) }
   }, [api])
   useEffect(() => { browse(initialPath) }, [browse, initialPath])
+  useEffect(() => {
+    if (!editorFullscreen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setEditorFullscreen(false)
+    }
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [editorFullscreen])
   async function openFile(entry: any) {
     if (dirty && !window.confirm("当前文件有未保存修改，继续切换吗？")) return
     setLoading(true); setError("")
@@ -1063,10 +1137,10 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   return <>
     <PageIntro eyebrow="Workspace files" title="文件管理" description="浏览 Yunzai 工作区中的可读文本文件；每次保存都会创建时间戳备份。按 Ctrl+S / ⌘+S 保存当前文件。" action={<Button onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".")} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="relative w-full sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
-      <div className="grid min-h-[600px] xl:grid-cols-[320px_minmax(0,1fr)]"><div className="border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>文件浏览器</span><span>{entries.length} 项</span></div><div className="max-h-[550px] overflow-y-auto px-2 pb-3 scrollbar-thin">{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{loading && <div className="grid h-24 place-items-center"><LoaderCircle className="size-5 animate-spin text-indigo-500" /></div>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
-        <div className="flex min-w-0 flex-col"><div className="flex h-11 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs"><FileCode2 className="size-4 text-indigo-500" /><span className="truncate font-medium">{current?.path || "选择一个文本文件"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div>{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{formatBytes(new Blob([content]).size)} · UTF-8</span>}</div>{current ? <MonacoCodeEditor key={current.path} path={current.path} value={content} onChange={value => { setContent(value); setDirty(true) }} /> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
-      </div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-slate-50/70 px-4 py-2.5 text-[10px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" />写入前自动备份 · 自动忽略 node_modules / .git / 构建产物</span>{current?.modifiedAt && <span>上次修改：{new Date(current.modifiedAt).toLocaleString("zh-CN")}</span>}</div></Card>
+    <Card className={editorFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0" : "overflow-hidden"}><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".")} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="flex w-full items-center gap-2 sm:w-auto"><div className="relative min-w-0 flex-1 sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div>{editorFullscreen && <Button size="sm" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}</div></div>
+      <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>文件浏览器</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{loading && <div className="grid h-24 place-items-center"><LoaderCircle className="size-5 animate-spin text-indigo-500" /></div>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
+        <div className={`flex min-w-0 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs"><FileCode2 className="size-4 text-indigo-500" /><span className="truncate font-medium">{current?.path || "选择一个文本文件"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{formatBytes(new Blob([content]).size)} · UTF-8</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current ? <div className={`flex flex-1 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><MonacoCodeEditor key={current.path} path={current.path} value={content} className={editorFullscreen ? "h-full min-h-0 flex-1" : undefined} onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
+      </div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-slate-50/70 px-4 py-2.5 text-[10px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" />写入前自动备份 · 自动忽略 node_modules / .git / 构建产物</span><div className="flex items-center gap-3">{current?.modifiedAt && <span>上次修改：{new Date(current.modifiedAt).toLocaleString("zh-CN")}</span>}{editorFullscreen && <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setEditorFullscreen(false)}>退出全屏 <Minimize2 className="size-3" /></Button>}</div></div></Card>
   </>
 }
 

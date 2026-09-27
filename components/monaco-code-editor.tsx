@@ -28,11 +28,13 @@ export function MonacoCodeEditor({
   value,
   onChange,
   readOnly = false,
+  className,
 }: {
   path: string
   value: string
   onChange: (value: string) => void
   readOnly?: boolean
+  className?: string
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -87,5 +89,5 @@ export function MonacoCodeEditor({
     if (model && model.getValue() !== value) model.setValue(value)
   }, [value])
 
-  return <div ref={hostRef} className="min-h-[545px] flex-1" />
+  return <div ref={hostRef} className={className || "min-h-[545px] flex-1"} />
 }
