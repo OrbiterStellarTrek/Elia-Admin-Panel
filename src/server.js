@@ -1,4 +1,5 @@
 import crypto from "node:crypto"
+import { watch as watchDirectory } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { spawn } from "node:child_process"
@@ -6,6 +7,7 @@ import net from "node:net"
 import os from "node:os"
 import { pathToFileURL, fileURLToPath } from "node:url"
 import express from "express"
+import { WebSocketServer } from "ws"
 import YAML from "yaml"
 import cfg from "../../../lib/config/config.js"
 
@@ -14,9 +16,16 @@ const PLUGINS = path.join(ROOT, "plugins")
 const PANEL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const PANEL_CONFIG = path.join(PANEL_DIR, "config.yaml")
 const DATA_DIR = path.join(ROOT, "data", "elia-admin-panel")
+const LOGS_DIR = path.join(ROOT, "logs")
 const PASSWORD_FILE = path.join(DATA_DIR, "access-password.txt")
+const SESSION_SECRET_FILE = path.join(DATA_DIR, "session-secret.txt")
+const SESSION_STORE_FILE = path.join(DATA_DIR, "sessions.json")
 const STATIC_DIR = path.join(PANEL_DIR, "out")
 const MAX_TEXT_BYTES = 1_500_000
+const MAX_LOG_TAIL_BYTES = 512 * 1024
+const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
+const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000
 const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
@@ -25,6 +34,8 @@ const ALLOWED_TEXT_EXTENSIONS = new Set([
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
+let sessionSecret = ""
+let sessionStoreWrite = Promise.resolve()
 const loginAttempts = new Map()
 const codeRequestAttempts = new Map()
 const codeCheckAttempts = new Map()
@@ -36,10 +47,14 @@ const PLUGIN_SUPPORT_ENTRIES = [
   { fileName: "guoba.support.js", factoryName: "supportGuoba" },
 ]
 let expressServer
+let logWebSocketServer
+let logDirectoryWatcher
+let logHeartbeatTimer
 let generatedPassword = ""
 let loginCode
 let activeSettings
 let warnedInvalidPublicUrl = false
+const logWatchTimers = new Map()
 
 const safeLogger = (level, message) => {
   try {
@@ -61,6 +76,7 @@ function resolveWorkspacePath(relativePath = ".") {
   }
   const absolute = path.resolve(ROOT, relativePath || ".")
   if (!isInside(ROOT, absolute)) throw Object.assign(new Error("不能访问工作区以外的路径"), { status: 403 })
+  if (isInside(DATA_DIR, absolute)) throw Object.assign(new Error("面板凭据与会话数据由面板保护，不能通过文件管理器访问"), { status: 403 })
   const segments = path.relative(ROOT, absolute).split(path.sep).filter(Boolean)
   if (segments.some(segment => BLOCKED_SEGMENTS.has(segment.toLowerCase()))) {
     throw Object.assign(new Error("该目录由面板保护，不能通过文件管理器访问"), { status: 403 })
@@ -115,13 +131,137 @@ function hashSecret(value) {
   return crypto.createHash("sha256").update(String(value)).digest()
 }
 
+async function loadSessionSecret() {
+  const envSecret = process.env.YUNZAI_PANEL_SECRET
+  if (envSecret) {
+    if (Buffer.byteLength(envSecret, "utf8") < 32) {
+      throw new Error("YUNZAI_PANEL_SECRET 至少需要 32 个 UTF-8 字节")
+    }
+    return envSecret
+  }
+
+  try {
+    const savedSecret = (await fs.readFile(SESSION_SECRET_FILE, "utf8")).trim()
+    if (Buffer.byteLength(savedSecret, "utf8") < 32) {
+      throw new Error(`${path.relative(ROOT, SESSION_SECRET_FILE)} 中的 Secret 无效，至少需要 32 个 UTF-8 字节`)
+    }
+    return savedSecret
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error
+  }
+
+  const generatedSecret = crypto.randomBytes(32).toString("base64url")
+  try {
+    await fs.writeFile(SESSION_SECRET_FILE, `${generatedSecret}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    safeLogger("mark", `[AdminPanel] 已生成并保存浏览器会话 Secret：${path.relative(ROOT, SESSION_SECRET_FILE)}`)
+    return generatedSecret
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error
+    const savedSecret = (await fs.readFile(SESSION_SECRET_FILE, "utf8")).trim()
+    if (Buffer.byteLength(savedSecret, "utf8") < 32) {
+      throw new Error(`${path.relative(ROOT, SESSION_SECRET_FILE)} 中的 Secret 无效，至少需要 32 个 UTF-8 字节`)
+    }
+    return savedSecret
+  }
+}
+
+async function loadPersistedSessions() {
+  const now = Date.now()
+  try {
+    const saved = JSON.parse(await fs.readFile(SESSION_STORE_FILE, "utf8"))
+    if (!saved || typeof saved !== "object" || !Array.isArray(saved.sessions)) throw new Error("会话文件格式无效")
+    const secretFingerprint = hashSecret(sessionSecret).toString("hex")
+    if (saved.secretFingerprint !== secretFingerprint) {
+      safeLogger("mark", "[AdminPanel] 登录 Secret 已更改，已撤销全部旧浏览器会话")
+      await persistSessions()
+      return
+    }
+    for (const record of saved.sessions) {
+      if (!Array.isArray(record) || record.length !== 2) continue
+      const [sessionIdHash, expiresAt] = record
+      if (typeof sessionIdHash !== "string" || !/^[a-f0-9]{64}$/.test(sessionIdHash)) continue
+      if (!Number.isSafeInteger(expiresAt) || expiresAt <= now || expiresAt > now + SESSION_TTL_MS + 60_000) continue
+      sessions.set(sessionIdHash, expiresAt)
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      safeLogger("warn", `[AdminPanel] 无法读取已保存的浏览器会话，将要求重新登录：${error.message}`)
+    }
+  }
+}
+
+function persistSessions() {
+  const write = sessionStoreWrite.catch(() => {}).then(async () => {
+    const now = Date.now()
+    for (const [sessionIdHash, expiresAt] of sessions) {
+      if (expiresAt <= now) sessions.delete(sessionIdHash)
+    }
+    const snapshot = JSON.stringify({
+      secretFingerprint: hashSecret(sessionSecret).toString("hex"),
+      sessions: [...sessions.entries()],
+    })
+    const temporaryFile = `${SESSION_STORE_FILE}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`
+    await fs.writeFile(temporaryFile, `${snapshot}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" })
+    try {
+      await fs.rename(temporaryFile, SESSION_STORE_FILE)
+    } catch (error) {
+      await fs.rm(temporaryFile, { force: true }).catch(() => {})
+      throw error
+    }
+  })
+  sessionStoreWrite = write
+  return write
+}
+
+function signSessionToken(sessionId, expiresAt) {
+  const payload = Buffer.from(JSON.stringify({ sid: sessionId, exp: Math.floor(expiresAt / 1000) })).toString("base64url")
+  const signature = crypto.createHmac("sha256", sessionSecret).update(payload).digest("base64url")
+  return `${payload}.${signature}`
+}
+
+function verifySessionToken(token) {
+  if (typeof token !== "string" || token.length > 2048) return null
+  const [payload, signature, extra] = token.split(".")
+  if (!payload || !signature || extra !== undefined || !/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null
+  const expectedSignature = crypto.createHmac("sha256", sessionSecret).update(payload).digest()
+  const actualSignature = Buffer.from(signature, "base64url")
+  if (actualSignature.length !== expectedSignature.length || !crypto.timingSafeEqual(actualSignature, expectedSignature)) return null
+
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))
+    if (typeof decoded.sid !== "string" || !decoded.sid || !Number.isSafeInteger(decoded.exp)) return null
+    const expiresAt = decoded.exp * 1000
+    if (expiresAt <= Date.now()) return null
+    const sessionIdHash = hashSecret(decoded.sid).toString("hex")
+    if (sessions.get(sessionIdHash) !== expiresAt) return null
+    return { sessionIdHash, expiresAt }
+  } catch {
+    return null
+  }
+}
+
 function parseCookies(header = "") {
   const cookies = new Map()
   for (const part of header.split(";")) {
     const index = part.indexOf("=")
-    if (index > 0) cookies.set(part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim()))
+    if (index > 0) {
+      const rawValue = part.slice(index + 1).trim()
+      let value = rawValue
+      try { value = decodeURIComponent(rawValue) } catch {}
+      cookies.set(part.slice(0, index).trim(), value)
+    }
   }
   return cookies
+}
+
+function setSessionCookie(req, res, token) {
+  const secure = req.secure ? "; Secure" : ""
+  res.setHeader("Set-Cookie", `elia_panel_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`)
+}
+
+function clearSessionCookie(req, res) {
+  const secure = req.secure ? "; Secure" : ""
+  res.setHeader("Set-Cookie", `elia_panel_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`)
 }
 
 function checkOrigin(req, res, next) {
@@ -138,19 +278,28 @@ function checkOrigin(req, res, next) {
 
 function requireAuth(req, res, next) {
   const token = parseCookies(req.headers.cookie).get("elia_panel_session")
-  const expiresAt = token && sessions.get(token)
-  if (!expiresAt || expiresAt < Date.now()) {
-    if (token) sessions.delete(token)
+  const session = token && verifySessionToken(token)
+  if (!session) {
+    clearSessionCookie(req, res)
     return res.status(401).json({ error: "登录已失效，请重新登录" })
   }
-  sessions.set(token, Date.now() + 12 * 60 * 60 * 1000)
+  req.panelSession = session
   next()
 }
 
-function issueSession(req, res) {
-  const token = crypto.randomBytes(32).toString("base64url")
-  sessions.set(token, Date.now() + 12 * 60 * 60 * 1000)
-  res.setHeader("Set-Cookie", `elia_panel_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${req.secure ? "; Secure" : ""}`)
+async function issueSession(req, res) {
+  const sessionId = crypto.randomBytes(32).toString("base64url")
+  const expiresAt = Math.floor((Date.now() + SESSION_TTL_MS) / 1000) * 1000
+  const sessionIdHash = hashSecret(sessionId).toString("hex")
+  sessions.set(sessionIdHash, expiresAt)
+  try {
+    await persistSessions()
+  } catch (error) {
+    sessions.delete(sessionIdHash)
+    throw error
+  }
+  setSessionCookie(req, res, signSessionToken(sessionId, expiresAt))
+  return expiresAt
 }
 
 function allowAttempt(bucket, key, limit, windowMs) {
@@ -196,7 +345,31 @@ function panelAddresses() {
   return [...new Set(hosts)].map(value => `http://${net.isIP(value) === 6 && !value.startsWith("[") ? `[${value}]` : value}:${port}`)
 }
 
-function formatPluginEntry(name, title, directory, support = null) {
+async function readPluginIcon(iconPath, directory) {
+  if (typeof iconPath !== "string" || !iconPath.trim()) return ""
+  const pluginRoot = path.resolve(PLUGINS, directory)
+  const mimeTypes = new Map([
+    [".png", "image/png"],
+    [".jpg", "image/jpeg"],
+    [".jpeg", "image/jpeg"],
+    [".webp", "image/webp"],
+    [".gif", "image/gif"],
+    [".ico", "image/x-icon"],
+  ])
+  try {
+    const iconFile = await fs.realpath(iconPath)
+    if (!isInside(pluginRoot, iconFile)) return ""
+    const mime = mimeTypes.get(path.extname(iconFile).toLowerCase())
+    if (!mime) return ""
+    const stat = await fs.stat(iconFile)
+    if (!stat.isFile() || stat.size > 2 * 1024 * 1024) return ""
+    return `data:${mime};base64,${(await fs.readFile(iconFile)).toString("base64")}`
+  } catch {
+    return ""
+  }
+}
+
+async function formatPluginEntry(name, title, directory, support = null) {
   const info = support?.pluginInfo || {}
   const configInfo = support?.configInfo || {}
   return {
@@ -207,6 +380,8 @@ function formatPluginEntry(name, title, directory, support = null) {
     author: info.author || "",
     link: info.link || "",
     icon: info.icon || "",
+    iconColor: info.iconColor || "",
+    iconData: await readPluginIcon(info.iconPath, directory),
     directory,
     hasConfig: typeof configInfo.getConfigData === "function" && Array.isArray(configInfo.schemas),
     schemas: Array.isArray(configInfo.schemas) ? JSON.parse(JSON.stringify(configInfo.schemas)) : [],
@@ -269,13 +444,13 @@ async function listPlugins() {
         safeLogger("warn", `[AdminPanel] ${entry.name} support 加载失败：${error.message}`)
       }
       const title = entry.name.replace(/[-_]/g, " ")
-      result.push(formatPluginEntry(entry.name, title, entry.name, support))
+      result.push(await formatPluginEntry(entry.name, title, entry.name, support))
       continue
     }
     for (const child of children) {
       if (child.isFile() && child.name.endsWith(".js")) {
         const id = `${entry.name}/${child.name}`
-        result.push(formatPluginEntry(id, path.basename(child.name, ".js"), id))
+        result.push(await formatPluginEntry(id, path.basename(child.name, ".js"), id))
       }
     }
   }
@@ -334,23 +509,242 @@ function getAccountSummary() {
   })
 }
 
+function parseLogBuffer(buffer, startOffset) {
+  const entries = []
+  let lineStart = 0
+  for (let index = 0; index < buffer.length; index += 1) {
+    if (buffer[index] !== 0x0a) continue
+    const lineEnd = index > lineStart && buffer[index - 1] === 0x0d ? index - 1 : index
+    entries.push({ id: startOffset + lineStart, text: buffer.subarray(lineStart, lineEnd).toString("utf8") })
+    lineStart = index + 1
+  }
+  if (lineStart < buffer.length) {
+    entries.push({ id: startOffset + lineStart, text: buffer.subarray(lineStart).toString("utf8") })
+  }
+  return {
+    entries,
+    cursor: lineStart < buffer.length ? startOffset + lineStart : startOffset + buffer.length,
+  }
+}
+
+function logFileIdentity(stat) {
+  return `${stat.dev}:${stat.ino}`
+}
+
 async function readLogTail(filePath, maxLines = 600) {
   try {
     const stat = await fs.stat(filePath)
-    const length = Math.min(stat.size, 512 * 1024)
+    const length = Math.min(stat.size, MAX_LOG_TAIL_BYTES)
+    const fileStart = stat.size - length
     const file = await fs.open(filePath, "r")
     try {
       const buffer = Buffer.alloc(length)
-      await file.read(buffer, 0, length, stat.size - length)
-      const content = buffer.toString("utf8")
-      return content.split(/\r?\n/).slice(-maxLines).join("\n")
+      const { bytesRead } = await file.read(buffer, 0, length, fileStart)
+      const data = buffer.subarray(0, bytesRead)
+      let firstLineOffset = 0
+      if (fileStart > 0) {
+        const firstNewline = data.indexOf(0x0a)
+        if (firstNewline >= 0) firstLineOffset = firstNewline + 1
+      }
+      const parsed = parseLogBuffer(data.subarray(firstLineOffset), fileStart + firstLineOffset)
+      return { entries: parsed.entries.slice(-maxLines), cursor: parsed.cursor, size: stat.size, identity: logFileIdentity(stat) }
     } finally {
       await file.close()
     }
   } catch (error) {
-    if (error.code === "ENOENT") return ""
+    if (error.code === "ENOENT") return { entries: [], cursor: 0, size: 0, identity: "" }
     throw error
   }
+}
+
+async function readLogSince(filePath, cursor, maxLines = 50, expectedIdentity = "") {
+  try {
+    const stat = await fs.stat(filePath)
+    const identity = logFileIdentity(stat)
+    if (expectedIdentity && expectedIdentity !== identity) {
+      return { ...(await readLogTail(filePath, maxLines)), replace: true }
+    }
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || cursor > stat.size || stat.size - cursor > MAX_LOG_DELTA_BYTES) {
+      return { ...(await readLogTail(filePath, maxLines)), replace: true }
+    }
+    const length = stat.size - cursor
+    if (!length) return { entries: [], cursor, size: stat.size, identity, replace: false }
+    const file = await fs.open(filePath, "r")
+    try {
+      const buffer = Buffer.alloc(length)
+      const { bytesRead } = await file.read(buffer, 0, length, cursor)
+      const parsed = parseLogBuffer(buffer.subarray(0, bytesRead), cursor)
+      return { entries: parsed.entries.slice(-maxLines), cursor: parsed.cursor, size: stat.size, identity, replace: false }
+    } finally {
+      await file.close()
+    }
+  } catch (error) {
+    if (error.code === "ENOENT") return { entries: [], cursor: 0, size: 0, identity: "", replace: true }
+    throw error
+  }
+}
+
+function sendLogPacket(socket, packet) {
+  if (socket.readyState === 1) socket.send(JSON.stringify(packet))
+}
+
+async function sendLogCatchup(socket, recent = false) {
+  const subscription = socket.logSubscription
+  if (!subscription || subscription.busy || socket.readyState !== 1) return
+  subscription.busy = true
+  try {
+    const filePath = path.join(LOGS_DIR, subscription.file)
+    const previousCursor = subscription.cursor
+    const previousIdentity = subscription.identity
+    const result = recent
+      ? await readLogTail(filePath, 50)
+      : await readLogSince(filePath, subscription.cursor, 600, subscription.identity)
+    subscription.cursor = result.cursor
+    subscription.identity = result.identity
+    sendLogPacket(socket, {
+      type: "logs",
+      file: subscription.file,
+      entries: result.entries,
+      cursor: result.cursor,
+      identity: result.identity,
+      replace: Boolean(result.replace) || (recent && (result.size < previousCursor || (previousIdentity && result.identity !== previousIdentity))),
+    })
+  } catch (error) {
+    safeLogger("warn", `[AdminPanel] 读取日志增量失败：${error.message}`)
+  } finally {
+    subscription.busy = false
+  }
+}
+
+function scheduleLogBroadcast(file) {
+  const previous = logWatchTimers.get(file)
+  if (previous) clearTimeout(previous)
+  const timer = setTimeout(() => {
+    logWatchTimers.delete(file)
+    if (!logWebSocketServer) return
+    for (const socket of logWebSocketServer.clients) {
+      if (socket.logSubscription?.file === file) void sendLogCatchup(socket)
+    }
+  }, 60)
+  timer.unref?.()
+  logWatchTimers.set(file, timer)
+}
+
+function startLogDirectoryWatcher() {
+  if (logDirectoryWatcher) return
+  try {
+    logDirectoryWatcher = watchDirectory(LOGS_DIR, (_event, filename) => {
+      if (filename == null) {
+        for (const socket of logWebSocketServer?.clients || []) {
+          const file = socket.logSubscription?.file
+          if (file) scheduleLogBroadcast(file)
+        }
+        return
+      }
+      const file = String(filename)
+      if (LOG_FILE_PATTERN.test(file)) scheduleLogBroadcast(file)
+    })
+    logDirectoryWatcher.on("error", error => {
+      safeLogger("warn", `[AdminPanel] 日志目录监听异常：${error.message}`)
+      logDirectoryWatcher?.close()
+      logDirectoryWatcher = null
+    })
+  } catch (error) {
+    safeLogger("warn", `[AdminPanel] 无法监听日志目录，将依靠 WebSocket 定时补取：${error.message}`)
+  }
+}
+
+function attachLogWebSocket(server) {
+  logWebSocketServer = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 })
+  logHeartbeatTimer = setInterval(() => {
+    for (const socket of logWebSocketServer.clients) {
+      if (socket.readyState !== 1) continue
+      if (socket.isAlive === false) {
+        socket.terminate()
+        continue
+      }
+      socket.isAlive = false
+      socket.ping()
+    }
+  }, 30_000)
+  logHeartbeatTimer.unref?.()
+  server.once("close", () => clearInterval(logHeartbeatTimer))
+  logWebSocketServer.on("connection", socket => {
+    const token = socket.logSessionToken
+    socket.isAlive = true
+    socket.on("pong", () => { socket.isAlive = true })
+    socket.on("error", () => socket.terminate())
+    const sessionTimer = setInterval(() => {
+      if (!verifySessionToken(token)) socket.close(4401, "登录已失效")
+    }, 15_000)
+    sessionTimer.unref?.()
+    socket.on("close", () => clearInterval(sessionTimer))
+    socket.on("message", raw => {
+      if (!verifySessionToken(token)) {
+        socket.close(4401, "登录已失效")
+        return
+      }
+      let message
+      try { message = JSON.parse(raw.toString()) } catch { return }
+      if (message?.type === "subscribe") {
+        const file = String(message.file || "")
+        if (!LOG_FILE_PATTERN.test(file)) {
+          sendLogPacket(socket, { type: "error", message: "日志文件无效" })
+          return
+        }
+        const cursor = Number(message.cursor)
+        socket.logSubscription = {
+          file,
+          cursor: Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : 0,
+          identity: typeof message.identity === "string" ? message.identity : "",
+          busy: false,
+        }
+        void sendLogCatchup(socket, true)
+      } else if (message?.type === "catchup" && socket.logSubscription) {
+        void sendLogCatchup(socket, true)
+      }
+    })
+  })
+  server.on("upgrade", (request, socket, head) => {
+    let pathname
+    try { pathname = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname } catch {
+      socket.destroy()
+      return
+    }
+    if (pathname !== "/api/logs/ws") {
+      socket.destroy()
+      return
+    }
+    const origin = request.headers.origin
+    if (origin) {
+      try {
+        if (new URL(origin).host !== request.headers.host) {
+          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
+          socket.destroy()
+          return
+        }
+      } catch {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
+        socket.destroy()
+        return
+      }
+    }
+    let token
+    try { token = parseCookies(request.headers.cookie).get("elia_panel_session") } catch {
+      socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
+      socket.destroy()
+      return
+    }
+    if (!token || !verifySessionToken(token)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
+      socket.destroy()
+      return
+    }
+    logWebSocketServer.handleUpgrade(request, socket, head, webSocket => {
+      webSocket.logSessionToken = token
+      logWebSocketServer.emit("connection", webSocket, request)
+    })
+  })
 }
 
 async function restartBot() {
@@ -428,6 +822,9 @@ export async function startAdminPanel() {
   const settings = await readPanelSettings()
   activeSettings = settings
   await fs.mkdir(DATA_DIR, { recursive: true })
+  await fs.mkdir(LOGS_DIR, { recursive: true })
+  sessionSecret = await loadSessionSecret()
+  await loadPersistedSessions()
   const password = await getPassword()
   const app = express()
   app.disable("x-powered-by")
@@ -442,10 +839,14 @@ export async function startAdminPanel() {
 
   app.get("/api/auth/status", (req, res) => {
     const token = parseCookies(req.headers.cookie).get("elia_panel_session")
-    const expiresAt = token && sessions.get(token)
-    res.json({ authenticated: Boolean(expiresAt && expiresAt > Date.now()) })
+    const session = token && verifySessionToken(token)
+    const authenticated = Boolean(session)
+    if (!authenticated && token) {
+      clearSessionCookie(req, res)
+    }
+    res.json({ authenticated, expiresAt: authenticated ? session.expiresAt : null })
   })
-  app.post("/api/auth/login", checkOrigin, (req, res) => {
+  app.post("/api/auth/login", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     const attempt = loginAttempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 }
     if (attempt.resetAt < Date.now()) {
@@ -456,13 +857,13 @@ export async function startAdminPanel() {
     const submitted = String(req.body?.password || "")
     if (crypto.timingSafeEqual(hashSecret(submitted), hashSecret(password))) {
       loginAttempts.delete(ip)
-      issueSession(req, res)
-      return res.json({ authenticated: true })
+      const expiresAt = await issueSession(req, res)
+      return res.json({ authenticated: true, expiresAt })
     }
     attempt.count += 1
     loginAttempts.set(ip, attempt)
     res.status(401).json({ error: "密码不正确" })
-  })
+  }))
   app.post("/api/auth/code/request", checkOrigin, (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请查看 Bot 控制台日志" })
@@ -472,39 +873,39 @@ export async function startAdminPanel() {
     safeLogger("warn", `[AdminPanel] 验证码登录请求：验证码 ${code}，5 分钟内有效且只能使用一次。若非本人操作请忽略。`)
     res.json({ ok: true, expiresIn: 300, message: "验证码已输出到 Bot 控制台日志，有效期 5 分钟" })
   })
-  app.post("/api/auth/code/check", checkOrigin, (req, res) => {
+  app.post("/api/auth/code/check", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (!allowAttempt(codeCheckAttempts, ip, 12, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码尝试次数过多，请稍后再试" })
     const submitted = String(req.body?.code || "").trim()
     if (loginCode && loginCode.expiresAt > Date.now() && crypto.timingSafeEqual(hashSecret(submitted), hashSecret(loginCode.value))) {
       loginCode = null
-      issueSession(req, res)
+      const expiresAt = await issueSession(req, res)
       safeLogger("mark", "[AdminPanel] 验证码登录成功")
-      return res.json({ authenticated: true })
+      return res.json({ authenticated: true, expiresAt })
     }
     if (loginCode && ++loginCode.attempts >= 10) loginCode = null
     res.status(401).json({ error: "验证码错误或已过期" })
-  })
-  app.post("/api/auth/quick", checkOrigin, (req, res) => {
+  }))
+  app.post("/api/auth/quick", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (!allowAttempt(quickLoginAttempts, ip, 20, 15 * 60 * 1000)) return res.status(429).json({ error: "快捷登录尝试过于频繁，请稍后再试" })
     const code = String(req.body?.code || "")
-    const expiresAt = quickLogins.get(code)
-    if (!expiresAt || expiresAt <= Date.now()) {
+    const quickLoginExpiresAt = quickLogins.get(code)
+    if (!quickLoginExpiresAt || quickLoginExpiresAt <= Date.now()) {
       if (code) quickLogins.delete(code)
       return res.status(401).json({ error: "主人快捷地址已使用或超过 3 分钟，请重新向 Bot 获取" })
     }
     quickLogins.delete(code)
-    issueSession(req, res)
+    const expiresAt = await issueSession(req, res)
     safeLogger("mark", "[AdminPanel] 主人快捷地址登录成功")
-    res.json({ authenticated: true })
-  })
-  app.post("/api/auth/logout", checkOrigin, requireAuth, (req, res) => {
-    const token = parseCookies(req.headers.cookie).get("elia_panel_session")
-    sessions.delete(token)
-    res.setHeader("Set-Cookie", "elia_panel_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0")
+    res.json({ authenticated: true, expiresAt })
+  }))
+  app.post("/api/auth/logout", checkOrigin, requireAuth, asyncRoute(async (req, res) => {
+    sessions.delete(req.panelSession.sessionIdHash)
+    await persistSessions()
+    clearSessionCookie(req, res)
     res.json({ ok: true })
-  })
+  }))
 
   app.use("/api", requireAuth)
   app.use("/api", checkOrigin)
@@ -679,8 +1080,8 @@ export async function startAdminPanel() {
   app.get("/api/logs", asyncRoute(async (req, res) => {
     const files = []
     try {
-      for (const entry of await fs.readdir(path.join(ROOT, "logs"), { withFileTypes: true })) {
-        if (entry.isFile() && /^(error|command)(\.\d{4}-\d{2}-\d{2})?\.log$/.test(entry.name)) files.push(entry.name)
+      for (const entry of await fs.readdir(LOGS_DIR, { withFileTypes: true })) {
+        if (entry.isFile() && LOG_FILE_PATTERN.test(entry.name)) files.push(entry.name)
       }
     } catch {}
     files.sort((left, right) => {
@@ -695,8 +1096,8 @@ export async function startAdminPanel() {
     const defaultFile = files.includes(todayCommandLog) ? todayCommandLog : latestCommandLog || files[0] || ""
     const selected = String(req.query.file || defaultFile)
     if (!files.includes(selected)) return res.status(400).json({ error: "日志文件无效", files })
-    const content = await readLogTail(path.join(ROOT, "logs", selected))
-    res.json({ files, selected, content })
+    const log = await readLogTail(path.join(LOGS_DIR, selected))
+    res.json({ files, selected, content: log.entries.map(entry => entry.text).join("\n"), entries: log.entries, cursor: log.cursor, identity: log.identity })
   }))
   app.post("/api/runtime/restart", asyncRoute(async (req, res) => {
     const message = await restartBot()
@@ -721,6 +1122,8 @@ export async function startAdminPanel() {
     server.once("listening", () => resolve(server))
     server.once("error", reject)
   })
+  attachLogWebSocket(expressServer)
+  startLogDirectoryWatcher()
   const address = expressServer.address()
   const shownHost = settings.host === "0.0.0.0" || settings.host === "::" ? "127.0.0.1" : settings.host
   safeLogger("mark", `[EliaAdminPanel] Web 管理面板已启动：http://${shownHost}:${address.port}`)

@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+@property --admin-sidebar-size {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 220px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -45,6 +51,79 @@ html, body { min-height: 100%; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, "Microsoft YaHei", sans-serif; }
 button, input, textarea { font: inherit; }
 ::selection { background: #dfe2ff; }
+
+.admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1); }
+.admin-sidebar-brand,
+.admin-sidebar-group,
+.admin-sidebar-label,
+.admin-sidebar-copy,
+.admin-sidebar-version,
+.admin-sidebar-selected {
+  overflow: hidden;
+  transition: max-width 200ms cubic-bezier(.2,.8,.2,1), max-height 200ms cubic-bezier(.2,.8,.2,1),
+    padding 200ms cubic-bezier(.2,.8,.2,1), margin 200ms cubic-bezier(.2,.8,.2,1),
+    opacity 140ms ease, transform 200ms cubic-bezier(.2,.8,.2,1);
+}
+.admin-sidebar-brand { max-height: 80px; }
+.admin-sidebar-group { max-height: 28px; }
+.admin-sidebar-label { max-width: 220px; white-space: nowrap; }
+.admin-sidebar-copy { max-height: 48px; }
+.admin-sidebar-version { max-width: 220px; max-height: 20px; white-space: nowrap; }
+.admin-sidebar-selected { width: 6px; max-width: 6px; flex: 0 0 auto; }
+.admin-sidebar-session-card { transition: padding 200ms cubic-bezier(.2,.8,.2,1); }
+.admin-sidebar-session-heading { gap: 8px; margin-bottom: 8px; transition: gap 200ms cubic-bezier(.2,.8,.2,1), margin 200ms cubic-bezier(.2,.8,.2,1); }
+
+@media (min-width: 768px) {
+  .admin-panel-shell {
+    padding-left: var(--admin-sidebar-size);
+    transition: --admin-sidebar-size 220ms cubic-bezier(.2,.8,.2,1);
+  }
+  .admin-panel-sidebar {
+    width: var(--admin-sidebar-size);
+    transition: transform 220ms cubic-bezier(.2,.8,.2,1), padding 220ms cubic-bezier(.2,.8,.2,1);
+  }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-brand,
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-group {
+    max-height: 0;
+    padding-bottom: 0;
+    opacity: 0;
+  }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-label,
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-version {
+    max-width: 0;
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-copy {
+    max-height: 0;
+    margin: 0;
+    opacity: 0;
+  }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-selected {
+    width: 0;
+    max-width: 0;
+    opacity: 0;
+  }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-session-card { display: flex; padding: 8px; }
+  .admin-panel-sidebar[data-collapsed="true"] .admin-sidebar-session-heading { gap: 0; margin-bottom: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-panel-shell,
+  .admin-panel-sidebar,
+  .admin-sidebar-brand,
+  .admin-sidebar-group,
+  .admin-sidebar-label,
+  .admin-sidebar-copy,
+  .admin-sidebar-version,
+  .admin-sidebar-selected {
+    transition-duration: 1ms !important;
+  }
+  .admin-sidebar-session-card,
+  .admin-sidebar-session-heading {
+    transition-duration: 1ms !important;
+  }
+}
 
 .scrollbar-thin { scrollbar-width: thin; scrollbar-color: #d4d6e2 transparent; }
 .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }

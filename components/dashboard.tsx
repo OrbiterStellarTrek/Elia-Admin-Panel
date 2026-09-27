@@ -119,6 +119,9 @@ async function request(url: string, init: RequestInit = {}) {
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
+    if (response.status === 401 && !url.startsWith("/api/auth/")) {
+      window.dispatchEvent(new Event("panel:auth-expired"))
+    }
     const error = new Error(body.error || `请求失败 (${response.status})`)
     ;(error as any).status = response.status
     throw error
@@ -143,7 +146,7 @@ function ErrorState({ message }: { message: string }) {
   return <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><CircleHelp className="mt-0.5 size-4 shrink-0" />{message}</div>
 }
 
-function Login({ onLogin, initialError = "" }: { onLogin: () => void; initialError?: string }) {
+function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) => void; initialError?: string }) {
   const [mode, setMode] = useState<"code" | "password">("code")
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
@@ -178,12 +181,13 @@ function Login({ onLogin, initialError = "" }: { onLogin: () => void; initialErr
     setBusy(true)
     setError("")
     try {
+      let session: any
       if (mode === "code") {
-        await request("/api/auth/code/check", { method: "POST", body: JSON.stringify({ code }) })
+        session = await request("/api/auth/code/check", { method: "POST", body: JSON.stringify({ code }) })
       } else {
-        await request("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) })
+        session = await request("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) })
       }
-      onLogin()
+      onLogin(session.expiresAt)
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
@@ -212,13 +216,13 @@ function Login({ onLogin, initialError = "" }: { onLogin: () => void; initialErr
                 {remaining > 0 ? `验证码已输出到 Bot 日志（${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}）` : "获取验证码"}
               </Button>
               <p className="text-xs leading-5 text-muted-foreground">点击获取后，到运行 Bot 的控制台查看验证码。验证码 5 分钟有效且只能使用一次。</p>
-            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="首次启动生成的密码或 YUNZAI_PANEL_PASSWORD" /></div>}
+            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="首次启动生成的密码或 YUNZAI_PANEL_PASSWORD" /></div>}
             {error && <ErrorState message={error} />}
             <Button className="w-full" disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : <KeyRound />}进入控制台</Button>
           </form>
           <div className="mt-5 space-y-2 border-t pt-4 text-xs leading-5 text-muted-foreground">
             <p>主人也可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#面板登录</code> 获取快捷登录地址，地址 3 分钟有效且只能打开一次。</p>
-            <p>面板密码保存在 <code className="rounded bg-muted px-1.5 py-0.5">data/elia-admin-panel/access-password.txt</code>，也可通过 <code className="rounded bg-muted px-1.5 py-0.5">YUNZAI_PANEL_PASSWORD</code> 设置。</p>
+            <p>面板密码只用于登录校验，不会保存在浏览器。登录后浏览器仅保留 12 小时有效的 HttpOnly 临时令牌。</p>
           </div>
         </CardContent>
       </Card>
@@ -228,6 +232,7 @@ function Login({ onLogin, initialError = "" }: { onLogin: () => void; initialErr
 
 export default function Dashboard() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null)
   const [loginError, setLoginError] = useState("")
   const [section, setSection] = useState<Section>("overview")
   const [fileManagerPath, setFileManagerPath] = useState(".")
@@ -257,12 +262,26 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
+    const handleExpiredSession = () => {
+      setLoginError("登录令牌已失效，请重新登录")
+      setSessionExpiresAt(null)
+      setAuthenticated(false)
+    }
+    window.addEventListener("panel:auth-expired", handleExpiredSession)
+    return () => window.removeEventListener("panel:auth-expired", handleExpiredSession)
+  }, [])
+
+  useEffect(() => {
     let active = true
     const quickCode = window.location.hash.match(/^#\/(?:ml|quick)\/([^/?#]+)/)?.[1]
     if (quickCode) {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`)
       request("/api/auth/quick", { method: "POST", body: JSON.stringify({ code: quickCode }) })
-        .then(() => { if (active) setAuthenticated(true) })
+        .then(result => {
+          if (!active) return
+          setSessionExpiresAt(result.expiresAt)
+          setAuthenticated(true)
+        })
         .catch(reason => {
           if (!active) return
           setLoginError((reason as Error).message)
@@ -270,16 +289,36 @@ export default function Dashboard() {
         })
     } else {
       request("/api/auth/status")
-        .then(result => { if (active) setAuthenticated(result.authenticated) })
+        .then(result => {
+          if (!active) return
+          setSessionExpiresAt(result.authenticated ? result.expiresAt : null)
+          setAuthenticated(result.authenticated)
+        })
         .catch(() => { if (active) setAuthenticated(false) })
     }
     return () => { active = false }
   }, [])
 
+  useEffect(() => {
+    if (!authenticated || !sessionExpiresAt) return
+    const remaining = sessionExpiresAt - Date.now()
+    if (remaining <= 0) {
+      setLoginError("登录令牌已过期，请重新登录")
+      setAuthenticated(false)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setLoginError("登录令牌已过期，请重新登录")
+      setSessionExpiresAt(null)
+      setAuthenticated(false)
+    }, remaining)
+    return () => window.clearTimeout(timer)
+  }, [authenticated, sessionExpiresAt])
+
   const active = navigation.find(item => item.id === section)!
   const ActiveIcon = active.icon
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
-  if (!authenticated) return <Login initialError={loginError} onLogin={() => { setLoginError(""); setAuthenticated(true) }} />
+  if (!authenticated) return <Login initialError={loginError} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); setAuthenticated(true) }} />
 
   async function logout() {
     try { await api("/api/auth/logout", { method: "POST" }) } catch {}
@@ -287,36 +326,36 @@ export default function Dashboard() {
   }
 
   return (
-    <div className={`min-h-screen transition-[padding] duration-200 ${sidebarCollapsed ? "md:pl-[56px]" : "md:pl-[220px]"}`}>
-      <aside className={`fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col border-r border-[#373737] bg-[#202124] px-4 pb-0 pt-5 text-slate-100 shadow-xl transition-[width,transform,padding] duration-200 md:translate-x-0 ${sidebarCollapsed ? "md:w-[56px] md:px-1.5" : "md:w-[220px] md:px-3"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
-        <div className={`flex items-center gap-3 px-2 pb-7 ${sidebarCollapsed ? "md:hidden" : ""}`}>
+      <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px" } as React.CSSProperties}>
+      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 flex flex-col border-r border-[#373737] bg-[#202124] px-4 pb-0 pt-5 text-slate-100 shadow-xl transition-transform duration-200 md:translate-x-0 ${sidebarCollapsed ? "md:px-1.5" : "md:px-3"} ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        <div className="admin-sidebar-brand flex items-center gap-3 overflow-hidden px-2 pb-7">
           <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-          <div className="min-w-0"><div className="truncate font-semibold tracking-tight">EliaAdminPanel</div><div className="mt-0.5 text-[10px] text-slate-500">YUNZAI · WEB CONSOLE</div></div>
+          <div className="min-w-0"><div className="truncate font-semibold tracking-tight">EliaAdminPanel</div></div>
           <button className="ml-auto text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></button>
         </div>
-        <div className={`px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>控制台</div>
+        <div className="admin-sidebar-group overflow-hidden px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500">控制台</div>
         <nav className="space-y-1">
           {navigation.map(item => {
             const Icon = item.icon
             const selected = section === item.id
-            return <button key={item.id} title={sidebarCollapsed ? item.label : undefined} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${sidebarCollapsed ? "md:justify-center md:px-0" : ""} ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
+            return <button key={item.id} title={sidebarCollapsed ? item.label : undefined} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
               <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
-              <span className={`min-w-0 flex-1 ${sidebarCollapsed ? "md:hidden" : ""}`}><span className="block text-[13px] font-medium">{item.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{item.description}</span></span>
-              {selected && <span className={`size-1.5 rounded-full bg-blue-300 ${sidebarCollapsed ? "md:hidden" : ""}`} />}
+              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label min-w-0 flex-1"><span className="block text-[13px] font-medium">{item.label}</span><span className="mt-0.5 block truncate text-[10px] text-slate-500">{item.description}</span></span>
+              {selected && <span aria-hidden="true" className="admin-sidebar-selected size-1.5 rounded-full bg-blue-300" />}
             </button>
           })}
         </nav>
         <div className="mt-auto space-y-3 px-1 pb-3">
-          <div title={sidebarCollapsed ? "本机会话已加密" : undefined} className={`rounded-xl bg-white/5 p-3.5 ${sidebarCollapsed ? "md:flex md:justify-center md:p-2" : ""}`}>
-            <div className={`mb-2 flex items-center gap-2 text-xs font-medium text-slate-200 ${sidebarCollapsed ? "md:mb-0" : ""}`}><ShieldCheck className="size-4 shrink-0 text-emerald-400" /><span className={sidebarCollapsed ? "md:hidden" : ""}>本机会话已加密</span></div>
-            <p className={`text-[10px] leading-4 text-slate-500 ${sidebarCollapsed ? "md:hidden" : ""}`}>工作区修改会自动留存备份，可从面板文件管理中查看。</p>
+          <div title={sidebarCollapsed ? "本机会话已加密" : undefined} className="admin-sidebar-session-card rounded-xl bg-white/5 p-3.5">
+            <div className="admin-sidebar-session-heading flex items-center text-xs font-medium text-slate-200"><ShieldCheck className="size-4 shrink-0 text-emerald-400" /><span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">本机会话已加密</span></div>
+            <p aria-hidden={sidebarCollapsed} className="admin-sidebar-copy text-[10px] leading-4 text-slate-500">工作区修改会自动留存备份，可从面板文件管理中查看。</p>
           </div>
-          <button title={sidebarCollapsed ? "退出登录" : undefined} aria-label="退出登录" onClick={logout} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white ${sidebarCollapsed ? "md:justify-center md:px-0" : ""}`}><LogOut className="size-4 shrink-0" /><span className={sidebarCollapsed ? "md:hidden" : ""}>退出登录</span></button>
-          <div className={`px-3 text-[10px] text-slate-600 ${sidebarCollapsed ? "md:hidden" : ""}`}>ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
+          <button title={sidebarCollapsed ? "退出登录" : undefined} aria-label="退出登录" onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4 shrink-0" /><span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">退出登录</span></button>
+          <div aria-hidden={sidebarCollapsed} className="admin-sidebar-version px-3 text-[10px] text-slate-600">ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
           <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block">
-            <button title={sidebarCollapsed ? "展开侧边栏" : undefined} aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} onClick={() => setSidebarCollapsed(value => !value)} className={`flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200 ${sidebarCollapsed ? "justify-center px-0" : ""}`}>
-              {sidebarCollapsed ? <ChevronRight className="size-4 shrink-0" /> : <ChevronLeft className="size-4 shrink-0" />}
-              <span className={sidebarCollapsed ? "hidden" : ""}>{sidebarCollapsed ? "展开" : "收起"}</span>
+            <button title={sidebarCollapsed ? "展开侧边栏" : undefined} aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200">
+              <ChevronLeft className={`size-4 shrink-0 transition-transform duration-200 ${sidebarCollapsed ? "rotate-180" : ""}`} />
+              <span aria-hidden={sidebarCollapsed} className="admin-sidebar-label">{sidebarCollapsed ? "展开" : "收起"}</span>
             </button>
           </div>
         </div>
@@ -579,10 +618,10 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     <PageIntro eyebrow="Plugin control" title="插件控制" description="管理本地插件、安装仓库插件，并兼容 Guoba 的 schema、配置和操作接口。" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <div className="grid min-h-[640px] gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <Card className="h-fit overflow-hidden"><div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold">本地插件<Badge className="border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}<div className="max-h-[470px] space-y-1 overflow-y-auto px-2 pb-3">{shown.map(plugin => <button key={plugin.id} onClick={() => loadConfig(plugin)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${plugin.hasConfig ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-500"}`}><Plug className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{plugin.title}</span><span className="mt-1 block truncate text-[10px] text-muted-foreground">{plugin.hasConfig ? "支持可视化配置" : plugin.directory}</span></span>{plugin.hasConfig && <span className="size-1.5 rounded-full bg-emerald-500" />}</button>)}{!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}</div>{archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}</Card>
+      <Card className="h-fit overflow-hidden"><div className="p-4 pb-3"><div className="mb-3 flex items-center justify-between text-xs font-semibold">本地插件<Badge className="border-0 bg-slate-100 text-slate-600">{plugins.length}</Badge></div><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索插件…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>{showInstall && <form onSubmit={installPlugin} className="mx-3 mb-3 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}<div className="max-h-[470px] space-y-1 overflow-y-auto px-2 pb-3">{shown.map(plugin => <button key={plugin.id} onClick={() => loadConfig(plugin)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}><span className={`grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl ${plugin.hasConfig ? "bg-indigo-100 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>{plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <Plug className="size-4" style={plugin.iconColor ? { color: plugin.iconColor } : undefined} />}</span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium">{plugin.title}</span><span className="mt-1 block truncate text-[10px] text-muted-foreground">{plugin.hasConfig ? "支持可视化配置" : plugin.directory}</span></span>{plugin.hasConfig && <span className="size-1.5 rounded-full bg-emerald-500" />}</button>)}{!loading && !shown.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}</div>{archives.length > 0 && <div className="border-t border-border px-3 py-3"><div className="mb-2 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div><div className="max-h-36 space-y-1 overflow-y-auto">{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div></div>}</Card>
       <Card className="min-w-0"><CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4"><div className="min-w-0"><CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle><CardDescription className="mt-1 truncate">{selected?.description || selected?.directory || "选择左侧插件查看其配置接口"}</CardDescription></div><div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected && !selected.directory.includes("/") && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div></CardHeader><CardContent className="p-5">
         {selected?.author && <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span>作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</span>{selected.link && <a href={selected.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><Github className="size-3" />仓库</a>}</div>}
-        {selected?.hasConfig ? <div className="space-y-5">{selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div> : selected ? <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">此插件没有兼容配置入口</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">可通过文件管理器编辑插件目录。插件配置页支持 elia.support.js（导出 supportPanel()），也兼容 guoba.support.js（导出 supportGuoba()）。</p><Button variant="outline" size="sm" className="mt-4" onClick={() => window.dispatchEvent(new CustomEvent("panel:navigate-files"))}><FileCode2 />打开文件管理</Button></div> : <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>}
+        {selected?.hasConfig ? <div className="space-y-5">{selected.schemas.map((schema: any, index: number) => schema.component === "SOFT_GROUP_BEGIN" ? <div key={`group-${index}`} className="border-b border-border pb-2 pt-2 text-xs font-semibold text-slate-700">{schema.label}</div> : schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} /> : null)}</div> : selected ? <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center overflow-hidden rounded-2xl bg-white text-slate-500 shadow-sm">{selected.iconData ? <img src={selected.iconData} alt="" className="size-full object-contain" /> : <Plug className="size-5" style={selected.iconColor ? { color: selected.iconColor } : undefined} />}</div><div className="mt-3 text-sm font-medium">此插件没有兼容配置入口</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">可通过文件管理器编辑插件目录。插件配置页支持 elia.support.js（导出 supportPanel()），也兼容 guoba.support.js（导出 supportGuoba()）。</p><Button variant="outline" size="sm" className="mt-4" onClick={() => window.dispatchEvent(new CustomEvent("panel:navigate-files"))}><FileCode2 />打开文件管理</Button></div> : <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>}
         {selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
       </CardContent></Card>
     </div>
@@ -667,35 +706,180 @@ function logFileLabel(file: string) {
   return `${match[2] || "当前"} · ${type}`
 }
 
+const ansiForegroundColors: Record<number, string> = {
+  30: "#cbd5e1", 31: "#f87171", 32: "#4ade80", 33: "#facc15",
+  34: "#60a5fa", 35: "#e879f9", 36: "#22d3ee", 37: "#e2e8f0",
+  90: "#94a3b8", 91: "#fb7185", 92: "#4ade80", 93: "#fde047",
+  94: "#60a5fa", 95: "#f0abfc", 96: "#67e8f9", 97: "#ffffff",
+}
+
+const logLevelColors: Record<string, string> = {
+  MARK: ansiForegroundColors[90],
+  ERRO: ansiForegroundColors[91],
+  WARN: ansiForegroundColors[93],
+  INFO: ansiForegroundColors[32],
+  DEBU: ansiForegroundColors[94],
+}
+
+function colorizeLogLine(line: string) {
+  const segments: { text: string; color?: string }[] = []
+  const ansi = /\u001b\[([0-9;]*)m/g
+  let cursor = 0
+  let color: string | undefined
+
+  const appendText = (text: string) => {
+    const levelPattern = /\[[^\]\r\n]+\]\[(MARK|ERRO|WARN|INFO|DEBU)\]/g
+    let plainCursor = 0
+    for (const match of text.matchAll(levelPattern)) {
+      const index = match.index ?? 0
+      if (index > plainCursor) segments.push({ text: text.slice(plainCursor, index), color })
+      segments.push({ text: match[0], color: logLevelColors[match[1]] })
+      plainCursor = index + match[0].length
+    }
+    if (plainCursor < text.length) segments.push({ text: text.slice(plainCursor), color })
+  }
+
+  for (const match of line.matchAll(ansi)) {
+    const index = match.index ?? 0
+    if (index > cursor) appendText(line.slice(cursor, index))
+    const codes = (match[1] || "0").split(";").map(Number)
+    for (let i = 0; i < codes.length; i += 1) {
+      const code = codes[i]
+      if (code === 0 || code === 39) color = undefined
+      else if (ansiForegroundColors[code]) color = ansiForegroundColors[code]
+      else if (code === 38 && codes[i + 1] === 2 && codes.length > i + 4) {
+        color = `rgb(${codes[i + 2]}, ${codes[i + 3]}, ${codes[i + 4]})`
+        i += 4
+      } else if (code === 38 && codes[i + 1] === 5 && codes.length > i + 2) {
+        const value = codes[i + 2]
+        if (value < 16) {
+          color = ansiForegroundColors[value < 8 ? value + 30 : value + 82]
+        } else if (value < 232) {
+          const channel = (part: number) => part === 0 ? 0 : 55 + part * 40
+          const n = value - 16
+          color = `rgb(${channel(Math.floor(n / 36))}, ${channel(Math.floor(n / 6) % 6)}, ${channel(n % 6)})`
+        } else {
+          const gray = 8 + (value - 232) * 10
+          color = `rgb(${gray}, ${gray}, ${gray})`
+        }
+        i += 2
+      }
+    }
+    cursor = index + match[0].length
+  }
+  if (cursor < line.length) appendText(line.slice(cursor))
+  return segments.length ? segments : [{ text: "" }]
+}
+
+type LogEntry = { id: number; text: string }
+
+function mergeLogEntries(current: LogEntry[], incoming: LogEntry[], replace = false) {
+  const merged = new Map<number, LogEntry>()
+  if (!replace) for (const entry of current) merged.set(entry.id, entry)
+  for (const entry of incoming) {
+    if (Number.isSafeInteger(entry.id) && typeof entry.text === "string") merged.set(entry.id, entry)
+  }
+  return [...merged.values()].sort((left, right) => left.id - right.id).slice(-600)
+}
+
 function LogViewer({ api }: { api: Api }) {
   const [files, setFiles] = useState<string[]>([])
   const [selected, setSelected] = useState("")
-  const [content, setContent] = useState("")
+  const [entries, setEntries] = useState<LogEntry[]>([])
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [followLatest, setFollowLatest] = useState(true)
+  const [wrapLines, setWrapLines] = useState(true)
+  const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "reconnecting">("connecting")
+  const logCursorRef = useRef({ file: "", cursor: 0, identity: "" })
   const logViewRef = useRef<HTMLPreElement>(null)
   const refresh = useCallback(async (file?: string, jumpToLatest = false) => {
     if (jumpToLatest) setFollowLatest(true)
     setLoading(true)
-    try { const result = await api(`/api/logs${file ? `?file=${encodeURIComponent(file)}` : ""}`); setFiles(result.files); setSelected(result.selected); setContent(result.content); setError("") }
+    try {
+      const result = await api(`/api/logs${file ? `?file=${encodeURIComponent(file)}` : ""}`)
+      const snapshot: LogEntry[] = Array.isArray(result.entries)
+        ? result.entries
+        : String(result.content || "").split(/\r?\n/).map((text: string, id: number) => ({ id, text }))
+      setFiles(result.files)
+      setSelected(result.selected)
+      setEntries(mergeLogEntries([], snapshot, true))
+      logCursorRef.current = { file: result.selected, cursor: Number(result.cursor) || 0, identity: String(result.identity || "") }
+      setError("")
+    }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }, [api])
   useEffect(() => { void refresh(undefined, true) }, [refresh])
   useEffect(() => {
     if (!selected) return
-    const timer = window.setInterval(() => { void refresh(selected) }, 7000)
-    return () => window.clearInterval(timer)
-  }, [refresh, selected])
+    let active = true
+    let retryTimer = 0
+    let retryCount = 0
+    let socket: WebSocket | null = null
+    const checkSession = () => {
+      void request("/api/auth/status").then(result => {
+        if (!result.authenticated) window.dispatchEvent(new Event("panel:auth-expired"))
+      }).catch(() => {})
+    }
+    const connect = () => {
+      if (!active) return
+      setLiveStatus(retryCount ? "reconnecting" : "connecting")
+      const scheme = window.location.protocol === "https:" ? "wss:" : "ws:"
+      socket = new WebSocket(`${scheme}//${window.location.host}/api/logs/ws`)
+      socket.onopen = () => {
+        if (!active || !socket) return
+        retryCount = 0
+        setLiveStatus("connected")
+        const checkpoint = logCursorRef.current
+        socket.send(JSON.stringify({
+          type: "subscribe",
+          file: selected,
+          cursor: checkpoint.file === selected ? checkpoint.cursor : null,
+          identity: checkpoint.file === selected ? checkpoint.identity : "",
+        }))
+      }
+      socket.onmessage = event => {
+        try {
+          const message = JSON.parse(String(event.data))
+          if (message.type !== "logs" || message.file !== selected || !Array.isArray(message.entries)) return
+          setEntries(current => mergeLogEntries(current, message.entries, Boolean(message.replace)))
+          logCursorRef.current = { file: selected, cursor: Number(message.cursor) || 0, identity: String(message.identity || "") }
+        } catch {}
+      }
+      socket.onerror = () => socket?.close()
+      socket.onclose = event => {
+        if (!active) return
+        if (event.code === 4401) {
+          window.dispatchEvent(new Event("panel:auth-expired"))
+          return
+        }
+        if (event.code === 1006) checkSession()
+        setLiveStatus("reconnecting")
+        const delay = Math.min(10_000, 500 * (2 ** Math.min(retryCount, 5)))
+        retryCount += 1
+        retryTimer = window.setTimeout(connect, delay)
+      }
+    }
+    connect()
+    const catchupTimer = window.setInterval(() => {
+      if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "catchup" }))
+    }, 10_000)
+    return () => {
+      active = false
+      window.clearTimeout(retryTimer)
+      window.clearInterval(catchupTimer)
+      socket?.close()
+    }
+  }, [selected])
   useEffect(() => {
     if (followLatest && logViewRef.current) logViewRef.current.scrollTop = logViewRef.current.scrollHeight
-  }, [content, followLatest])
-  const lines = useMemo(() => content.split(/\r?\n/).filter(line => !search || line.toLowerCase().includes(search.toLowerCase())), [content, search])
+  }, [entries, followLatest])
+  const visibleEntries = useMemo(() => entries.filter(entry => !search || entry.text.toLowerCase().includes(search.toLowerCase())), [entries, search])
   return <>
-    <PageIntro eyebrow="Runtime logs" title="运行日志" description="默认打开今天的命令日志最新内容，可切换其他日期与日志类型；每 7 秒自动刷新。" action={<Button variant="outline" onClick={() => refresh(selected, true)} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}刷新日志</Button>} />
+    <PageIntro eyebrow="Runtime logs" title="运行日志" description="默认打开今天的命令日志最新内容；文件更新会实时推送，断线后自动重连并补取最近 50 条。" action={<div className="flex gap-2"><Button variant={wrapLines ? "secondary" : "outline"} onClick={() => setWrapLines(value => !value)}>{wrapLines ? "关闭自动换行" : "自动换行"}</Button><Button variant="outline" onClick={() => refresh(selected, true)} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}刷新日志</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex flex-wrap items-center gap-2"><TerminalSquare className="size-4 text-indigo-500" /><label htmlFor="log-file-select" className="text-xs font-medium">日期与类型</label><select id="log-file-select" value={selected} onChange={event => void refresh(event.target.value, true)} className="h-9 min-w-56 rounded-lg border border-border bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" disabled={!files.length}>{files.length ? files.map(file => <option key={file} value={file}>{logFileLabel(file)}</option>) : <option value="">没有可用日志</option>}</select></div><div className="relative w-full sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索日志内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div><div className="flex items-center justify-between px-4 py-2 text-[10px] text-muted-foreground"><span>{selected ? `${logFileLabel(selected)} · ${selected}` : "没有可用日志"}</span><span>{lines.length} 行 · 显示末尾最多 600 行</span></div><pre ref={logViewRef} onScroll={event => { const element = event.currentTarget; setFollowLatest(element.scrollHeight - element.scrollTop - element.clientHeight <= 48) }} className="scrollbar-thin min-h-[560px] max-h-[calc(100vh-300px)] overflow-auto bg-[#171a26] p-4 font-mono text-[11px] leading-[1.75] text-slate-200">{loading && !content ? "正在读取…" : lines.join("\n") || "暂无日志内容"}</pre><div className="flex items-center gap-2 border-t border-border px-4 py-3 text-[10px] text-muted-foreground"><Activity className="size-3.5 text-emerald-500" />每 7 秒刷新；滚动查看旧内容后会暂停自动跟随</div></Card>
+    <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex flex-wrap items-center gap-2"><TerminalSquare className="size-4 text-indigo-500" /><label htmlFor="log-file-select" className="text-xs font-medium">日期与类型</label><select id="log-file-select" value={selected} onChange={event => void refresh(event.target.value, true)} className="h-9 min-w-56 rounded-lg border border-border bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-indigo-400" disabled={!files.length}>{files.length ? files.map(file => <option key={file} value={file}>{logFileLabel(file)}</option>) : <option value="">没有可用日志</option>}</select></div><div className="relative w-full sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索日志内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div><div className="flex items-center justify-between px-4 py-2 text-[10px] text-muted-foreground"><span>{selected ? `${logFileLabel(selected)} · ${selected}` : "没有可用日志"}</span><span className="flex items-center gap-3"><span>{visibleEntries.length} 行 · 保留末尾最多 600 行</span><span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : "bg-amber-400"}`} />{liveStatus === "connected" ? "实时连接" : liveStatus === "connecting" ? "正在连接" : "正在重连"}</span></span></div><pre ref={logViewRef} onScroll={event => { const element = event.currentTarget; setFollowLatest(element.scrollHeight - element.scrollTop - element.clientHeight <= 48) }} className={`scrollbar-thin min-h-[560px] max-h-[calc(100vh-300px)] overflow-auto bg-[#171a26] p-4 font-mono text-[11px] leading-[1.75] text-slate-200 ${wrapLines ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>{loading && !entries.length ? "正在读取…" : visibleEntries.length ? visibleEntries.map((entry, index) => <span key={`${selected}-${entry.id}-${index}`} className="block min-h-[1.75em]">{colorizeLogLine(entry.text).map((segment, segmentIndex) => <span key={segmentIndex} style={segment.color ? { color: segment.color } : undefined}>{segment.text}</span>)}</span>) : "暂无日志内容"}</pre><div className="flex items-center gap-2 border-t border-border px-4 py-3 text-[10px] text-muted-foreground"><Activity className="size-3.5 text-emerald-500" />文件变更会即时推送，并每 10 秒补取最近 50 条；滚动查看旧内容后会暂停自动跟随</div></Card>
   </>
 }
