@@ -6,7 +6,7 @@ import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
   FileText, Folder, Gauge, Github, HardDrive, KeyRound, LayoutDashboard, LoaderCircle,
-  LogOut, Menu, MessageSquareText, Monitor, Pencil, Plug, Plus, RefreshCw, Search,
+  LogOut, Menu, MessageSquareText, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
   Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, Users, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -23,7 +23,7 @@ const MonacoCodeEditor = dynamic(
   { ssr: false, loading: () => <div className="min-h-[545px] flex-1 animate-pulse bg-slate-50" /> },
 )
 
-type Section = "overview" | "config" | "plugins" | "files" | "logs"
+type Section = "overview" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
 
@@ -33,6 +33,7 @@ const navigation: { id: Section; label: string; description: string; icon: typeo
   { id: "plugins", label: "插件控制", description: "兼容 Guoba 配置与操作", icon: Plug },
   { id: "files", label: "文件管理", description: "浏览并编辑工作区文本文件", icon: FileCode2 },
   { id: "logs", label: "运行日志", description: "查看近期 Bot 日志", icon: TerminalSquare },
+  { id: "debug", label: "消息调试", description: "模拟标准输入并调试插件消息", icon: MessageSquareText },
 ]
 
 const configFileLabels: Record<string, string> = {
@@ -417,6 +418,7 @@ export default function Dashboard() {
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}
           {section === "files" && <FileManager api={api} notify={notify} initialPath={fileManagerPath} />}
           {section === "logs" && <LogViewer api={api} />}
+          {section === "debug" && <MessageDebugger api={api} />}
         </main>
       </div>
       {notice && <div className={`fixed bottom-6 right-6 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border bg-white px-4 py-3 text-sm shadow-xl ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
@@ -523,9 +525,11 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   useSaveShortcut(save)
   return <>
     <PageIntro eyebrow="运行配置" title="配置中心" description="图形化编辑 YAML 配置；群组规则、黑白名单与运行参数统一管理。" action={<Button onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button>} />
-    <div className={`grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "xl:grid-cols-[72px_minmax(0,1fr)]" : "xl:grid-cols-[245px_minmax(0,1fr)]"}`}>
-      <Card className={`relative h-fit ${fileSidebarCollapsed ? "z-20 overflow-visible" : "overflow-hidden"}`}>
-        {fileSidebarCollapsed && <div className="hidden gap-1 p-2 xl:grid">
+    <div
+      className={`config-center-grid grid min-h-[640px] gap-5 ${fileSidebarCollapsed ? "is-collapsed" : ""}`}
+    >
+      <Card className="relative h-fit overflow-visible">
+        <div className={`absolute inset-x-0 top-0 z-10 hidden gap-1 p-2 transition-opacity duration-200 xl:grid ${fileSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <Button size="icon" variant="ghost" className="mx-auto mb-1" aria-label="展开配置文件侧栏" title="展开配置文件侧栏" onClick={() => setFileSidebarCollapsed(false)}><ChevronRight /></Button>
           {files.map(file => <button key={file} type="button" aria-label={`${configFileLabel(file)}，${file}`} aria-describedby={`config-file-tooltip-${file.replace(/\W/g, "-")}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`group relative flex h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${selected === file ? "bg-indigo-50 ring-1 ring-indigo-100" : "hover:bg-slate-50"}`}>
             <ConfigFileIcon file={file} className="size-4" />
@@ -534,8 +538,8 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
               {configFileLabel(file)}<span className="mt-0.5 block text-[10px] font-normal text-slate-300">{file}</span>
             </span>
           </button>)}
-        </div>}
-        <div className={fileSidebarCollapsed ? "xl:hidden" : ""}>
+        </div>
+        <div className={`transition-opacity duration-150 ${fileSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
           <div className="p-4 pb-3">
             <div className="mb-3 flex items-center justify-between gap-2 text-xs font-semibold"><span>配置文件 <Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{files.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起配置文件侧栏" title="收起配置文件侧栏" onClick={() => setFileSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选配置…" value={search} onChange={event => setSearch(event.target.value)} /></div>
@@ -1000,6 +1004,68 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
       <div className="grid min-h-[600px] xl:grid-cols-[320px_minmax(0,1fr)]"><div className="border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>文件浏览器</span><span>{entries.length} 项</span></div><div className="max-h-[550px] overflow-y-auto px-2 pb-3 scrollbar-thin">{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{loading && <div className="grid h-24 place-items-center"><LoaderCircle className="size-5 animate-spin text-indigo-500" /></div>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
         <div className="flex min-w-0 flex-col"><div className="flex h-11 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs"><FileCode2 className="size-4 text-indigo-500" /><span className="truncate font-medium">{current?.path || "选择一个文本文件"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div>{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{formatBytes(new Blob([content]).size)} · UTF-8</span>}</div>{current ? <MonacoCodeEditor key={current.path} path={current.path} value={content} onChange={value => { setContent(value); setDirty(true) }} /> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
       </div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-slate-50/70 px-4 py-2.5 text-[10px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" />写入前自动备份 · 自动忽略 node_modules / .git / 构建产物</span>{current?.modifiedAt && <span>上次修改：{new Date(current.modifiedAt).toLocaleString("zh-CN")}</span>}</div></Card>
+  </>
+}
+
+function MessageDebugger({ api }: { api: Api }) {
+  const [messageType, setMessageType] = useState<"private" | "group">("private")
+  const [userId, setUserId] = useState("55555")
+  const [groupId, setGroupId] = useState("")
+  const [message, setMessage] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const [history, setHistory] = useState<any[]>([])
+
+  async function sendMessage(event: React.FormEvent) {
+    event.preventDefault()
+    if (busy || !message.trim()) return
+    setBusy(true)
+    setError("")
+    try {
+      const result = await api("/api/debug/message", {
+        method: "POST",
+        body: JSON.stringify({ message, userId, messageType, groupId }),
+      })
+      setHistory(old => [{
+        id: `${Date.now()}-${Math.random()}`,
+        sentAt: new Date(),
+        message,
+        messageType,
+        userId,
+        groupId,
+        replies: result.replies || [],
+        summary: result.message,
+      }, ...old].slice(0, 20))
+      setMessage("")
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <>
+    <PageIntro eyebrow="Message debugger" title="消息调试" description="通过 stdin 适配器构造消息事件，并送入 Yunzai 插件处理链。" />
+    <div className="grid items-start gap-5 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)]">
+      <Card><CardHeader className="border-b border-border/70 pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></CardHeader><CardContent className="p-5">
+        <form className="space-y-4" onSubmit={sendMessage}>
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1" role="group" aria-label="消息类型">
+            {([["private", "私聊"], ["group", "群聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`rounded-lg px-3 py-2 text-xs font-medium transition ${messageType === type ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>{label}</button>)}
+          </div>
+          <div className={`grid gap-3 ${messageType === "group" ? "sm:grid-cols-2" : ""}`}>
+            <div className="space-y-2"><Label htmlFor="debug-user-id">发送方 ID</Label><Input id="debug-user-id" value={userId} maxLength={80} onChange={event => setUserId(event.target.value)} placeholder="例如：123456789" /></div>
+            {messageType === "group" && <div className="space-y-2"><Label htmlFor="debug-group-id">群号</Label><Input id="debug-group-id" value={groupId} maxLength={80} onChange={event => setGroupId(event.target.value)} placeholder="例如：987654321" /></div>}
+          </div>
+          <div className="space-y-2"><Label htmlFor="debug-message">消息内容</Label><Textarea id="debug-message" className="min-h-36 resize-y font-mono text-sm leading-6" value={message} maxLength={5000} onChange={event => setMessage(event.target.value)} placeholder="输入要交给插件处理的文本消息…" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="flex justify-between text-[10px] text-muted-foreground"><span>支持以 # 开头的命令与普通聊天文本</span><span>{message.length}/5000</span></div></div>
+          {error && <ErrorState message={error} />}
+          <Button className="w-full" disabled={busy || !message.trim() || !userId.trim() || (messageType === "group" && !groupId.trim())}>{busy ? <LoaderCircle className="animate-spin" /> : <Send />}送入插件处理链</Button>
+        </form>
+        <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-[10px] leading-5 text-amber-900"><div className="font-semibold">调试权限</div><p className="mt-1">模拟事件按标准输入方式以主人身份运行；群聊同时模拟群主/管理员。插件命令可能执行实际操作，请确认输入内容。</p><p className="mt-1">事件回复会在此捕获，不通过真实 QQ 会话发送；插件若自行调用真实 Bot 或外部服务，仍可能产生实际副作用。</p></div>
+      </CardContent></Card>
+      <Card className="min-h-96 overflow-hidden"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">调试记录</CardTitle><CardDescription className="mt-1">本次面板会话最近 20 条</CardDescription></div><Button variant="outline" size="sm" disabled={!history.length} onClick={() => setHistory([])}>清空</Button></CardHeader>
+        <CardContent className="space-y-4 p-4">{history.length ? history.map(item => <article key={item.id} className="overflow-hidden rounded-xl border border-border"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-slate-50/70 px-3 py-2 text-[10px]"><span className="font-medium text-slate-700">{item.messageType === "group" ? `群聊 ${item.groupId}` : "私聊"} · 发送方 {item.userId}</span><time className="text-muted-foreground">{item.sentAt.toLocaleTimeString("zh-CN")}</time></div><div className="space-y-3 p-3"><div><div className="mb-1 text-[10px] font-semibold text-slate-400">输入</div><pre className="whitespace-pre-wrap break-words text-xs leading-5">{item.message}</pre></div><div><div className="mb-1 text-[10px] font-semibold text-slate-400">处理结果</div>{item.replies.length ? <div className="space-y-2">{item.replies.map((reply: string, index: number) => <pre key={index} className="whitespace-pre-wrap break-words rounded-lg bg-indigo-50/70 p-2.5 text-xs leading-5 text-indigo-950">{reply}</pre>)}</div> : <p className="text-xs text-muted-foreground">{item.summary}</p>}</div></div></article>) : <div className="grid min-h-64 place-items-center text-center"><div><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><MessageSquareText className="size-5" /></div><p className="mt-3 text-sm font-medium">还没有调试记录</p><p className="mt-1 text-xs text-muted-foreground">发送消息后，插件回复会显示在这里。</p></div></div>}</CardContent>
+      </Card>
+    </div>
   </>
 }
 

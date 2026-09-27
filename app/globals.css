@@ -52,6 +52,16 @@ body { margin: 0; background: var(--background); color: var(--foreground); font-
 button, input, textarea { font: inherit; }
 ::selection { background: #dfe2ff; }
 
+@media (min-width: 1280px) {
+  .config-center-grid {
+    grid-template-columns: 245px minmax(0, 1fr);
+    transition: grid-template-columns 300ms cubic-bezier(.2,.8,.2,1);
+  }
+  .config-center-grid.is-collapsed {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+}
+
 .admin-panel-sidebar { width: 264px; transition: transform 200ms cubic-bezier(.2,.8,.2,1); }
 .admin-sidebar-brand,
 .admin-sidebar-group,

@@ -11,6 +11,7 @@ import express from "express"
 import { WebSocketServer } from "ws"
 import YAML from "yaml"
 import cfg from "../../../lib/config/config.js"
+import pluginsLoader from "../../../lib/plugins/loader.js"
 
 const ROOT = process.cwd()
 const requireFromRoot = createRequire(path.join(ROOT, "package.json"))
@@ -69,6 +70,111 @@ const safeLogger = (level, message) => {
 function isInside(parent, target) {
   const relative = path.relative(parent, target)
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
+}
+
+function formatDebugOutput(value) {
+  const parts = Array.isArray(value) ? value : [value]
+  return parts.map(part => {
+    if (typeof part === "string") return part
+    if (part?.type === "text") return String(part.text || "")
+    try {
+      return JSON.stringify(part, (_key, item) => Buffer.isBuffer(item) ? `[Buffer ${item.length} bytes]` : item)
+    } catch {
+      return String(part)
+    }
+  }).join("")
+}
+
+function createPanelDebugEvent({ message, userId, messageType, groupId, replies }) {
+  const bot = global.Bot
+  if (!bot) throw Object.assign(new Error("Yunzai Bot 尚未初始化"), { status: 503 })
+  const sendDebugReply = async reply => {
+    if (replies.length < 20) replies.push(formatDebugOutput(reply).slice(0, 5000))
+    return { message_id: `panel-debug-${Date.now()}` }
+  }
+  const logStdinReply = async reply => {
+    safeLogger("info", `[标准输入] 发送消息：${formatDebugOutput(reply).slice(0, 1000)}`)
+    return { message_id: `stdin-debug-${Date.now()}` }
+  }
+
+  if (!bot.stdin) {
+    bot.stdin = {
+      uin: "stdin",
+      nickname: "EliaAdminPanel 调试输入",
+      getAvatarUrl: () => "",
+      avatar: "",
+      stat: { start_time: Date.now() / 1000, recv_msg_cnt: 0 },
+      version: { name: "EliaAdminPanel Debug Stdin" },
+      fl: new Map(),
+      gl: new Map(),
+      gml: new Map(),
+      pickUser: () => ({ sendMsg: logStdinReply }),
+      pickGroup: () => ({ sendMsg: logStdinReply }),
+    }
+    if (!Array.isArray(bot.adapter)) bot.adapter = []
+    if (!bot.adapter.includes("stdin")) bot.adapter.push("stdin")
+  }
+
+  const now = Date.now()
+  const event = {
+    adapter: "stdin",
+    message_id: `panel-debug-${now}`,
+    message_type: messageType,
+    post_type: "message",
+    sub_type: messageType === "group" ? "normal" : "friend",
+    self_id: "stdin",
+    seq: now,
+    time: now / 1000,
+    uin: "stdin",
+    user_id: userId,
+    message: [{ type: "text", text: message }],
+    raw_message: message,
+    sender: {
+      user_id: userId,
+      card: "面板调试",
+      nickname: "面板调试",
+      role: messageType === "group" ? "owner" : "",
+    },
+    isMaster: true,
+    toString: () => message,
+    reply: sendDebugReply,
+    recall: async () => ({ ok: true }),
+  }
+
+  if (messageType === "group") {
+    const info = { user_id: userId, nickname: "面板调试", card: "面板调试", last_sent_time: now / 1000 }
+    const member = {
+      _info: info,
+      info,
+      user_id: userId,
+      nickname: info.nickname,
+      card: info.card,
+      is_owner: true,
+      is_admin: true,
+      getAvatarUrl: () => "",
+    }
+    event.group_id = groupId
+    event.group_name = `调试群 ${groupId}`
+    event.member = member
+    event.group = {
+      group_id: groupId,
+      name: event.group_name,
+      mute_left: 0,
+      is_owner: true,
+      pickMember: () => member,
+      sendMsg: sendDebugReply,
+      recallMsg: async () => ({ ok: true }),
+    }
+  } else {
+    event.friend = {
+      user_id: userId,
+      nickname: "面板调试",
+      sendMsg: sendDebugReply,
+      recallMsg: async () => ({ ok: true }),
+      makeForwardMsg: async forward => forward,
+    }
+  }
+  return event
 }
 
 function resolveWorkspacePath(relativePath = ".") {
@@ -1047,6 +1153,23 @@ export async function startAdminPanel() {
 
   app.use("/api", requireAuth)
   app.use("/api", checkOrigin)
+
+  app.post("/api/debug/message", asyncRoute(async (req, res) => {
+    const message = typeof req.body?.message === "string" ? req.body.message : ""
+    const messageType = req.body?.messageType === "group" ? "group" : "private"
+    const userId = String(req.body?.userId || "").trim()
+    const groupId = String(req.body?.groupId || "").trim()
+    const validId = id => id.length > 0 && id.length <= 80 && !/[\s\x00-\x1f]/.test(id)
+    if (!message.trim() || message.length > 5000) return res.status(400).json({ error: "消息不能为空，且最多 5000 个字符" })
+    if (!validId(userId)) return res.status(400).json({ error: "发送方 ID 必填，且不能包含空白字符" })
+    if (messageType === "group" && !validId(groupId)) return res.status(400).json({ error: "群聊调试需要填写有效的群号" })
+
+    const replies = []
+    const event = createPanelDebugEvent({ message, userId, messageType, groupId, replies })
+    safeLogger("mark", `[面板调试输入][${messageType === "group" ? `群聊 ${groupId}` : "私聊"}][${userId}] ${message.slice(0, 200)}`)
+    await pluginsLoader.deal(event)
+    res.json({ ok: true, replies, message: replies.length ? "消息处理完成，已捕获插件回复" : "消息已送入插件处理链，未捕获到回复" })
+  }))
 
   app.post("/api/cron/validate", asyncRoute(async (req, res) => {
     const expression = String(req.body?.expression || "").trim()
