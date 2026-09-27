@@ -528,7 +528,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} />}

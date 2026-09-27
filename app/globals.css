@@ -219,6 +219,26 @@ button, input, textarea { font: inherit; }
   padding: 0;
 }
 
+.logs-fullscreen > div:has(> pre) {
+  display: flex;
+  flex: 1 1 0%;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0;
+  border-inline: 0;
+}
+
+.logs-fullscreen > div:has(> pre) > div {
+  flex-shrink: 0;
+}
+
+.logs-fullscreen > div:has(> pre) > pre {
+  flex: 1 1 0%;
+  min-height: 0;
+  max-height: none;
+}
+
 .file-manager-fullscreen > .rounded-2xl {
   display: flex;
   height: 100%;
