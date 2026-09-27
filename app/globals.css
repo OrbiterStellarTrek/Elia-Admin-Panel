@@ -71,9 +71,24 @@ button, input, textarea { font: inherit; }
 .admin-dialog-content[data-state="open"] { animation: admin-dialog-content-in 220ms cubic-bezier(.2,.8,.2,1) both; }
 .admin-dialog-content[data-state="closed"] { animation: admin-dialog-content-out 150ms ease-in both; }
 
+@keyframes admin-toast-pop-in {
+  0% { opacity: 0; transform: translate3d(12px, -8px, 0) scale(.88); }
+  70% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.025); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes admin-toast-pop-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  to { opacity: 0; transform: translate3d(10px, -6px, 0) scale(.96); }
+}
+
+.admin-toast { animation: admin-toast-pop-in 500ms cubic-bezier(.16,1,.3,1) both; }
+.admin-toast.admin-toast-out { animation: admin-toast-pop-out 500ms cubic-bezier(.4,0,.8,.5) both; pointer-events: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .admin-dialog-overlay,
-  .admin-dialog-content {
+  .admin-dialog-content,
+  .admin-toast {
     animation-duration: 1ms !important;
   }
 }
