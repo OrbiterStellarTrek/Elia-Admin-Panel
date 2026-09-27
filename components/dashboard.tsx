@@ -36,6 +36,26 @@ const navigation: { id: Section; label: string; icon: typeof LayoutDashboard }[]
   { id: "debug", label: "消息调试", icon: MessageSquareText },
 ]
 
+function sectionPath(section: Section) {
+  return section === "overview" ? "/" : `/${section}/`
+}
+
+function sectionFromPath(pathname: string): Section {
+  const name = pathname.split("/").filter(Boolean)[0]
+  return navigation.find(item => item.id === name)?.id || "overview"
+}
+
+function routeQuery(name: string) {
+  return new URLSearchParams(window.location.search).get(name) || ""
+}
+
+function setRouteQuery(name: string, value: string) {
+  const url = new URL(window.location.href)
+  if (value) url.searchParams.set(name, value)
+  else url.searchParams.delete(name)
+  window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
 const configFileLabels: Record<string, string> = {
   "bot.yaml": "机器人设置",
   "db.yaml": "数据库设置",
@@ -318,12 +338,12 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ initialSection = "overview" }: { initialSection?: Section }) {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null)
   const [loginError, setLoginError] = useState("")
-  const [section, setSection] = useState<Section>("overview")
-  const [fileManagerPath, setFileManagerPath] = useState(".")
+  const [section, setSection] = useState<Section>(initialSection)
+  const [fileManagerPath, setFileManagerPath] = useState(() => typeof window === "undefined" ? "." : routeQuery("path") || ".")
   const [notice, setNotice] = useState<Notice>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -334,14 +354,25 @@ export default function Dashboard() {
   }, [])
   const navigateTo = useCallback((nextSection: Section) => {
     if (nextSection === "files") setFileManagerPath(".")
+    window.history.pushState(null, "", sectionPath(nextSection))
     setSection(nextSection)
     setSidebarOpen(false)
+  }, [])
+
+  useEffect(() => {
+    const syncRoute = () => {
+      setSection(sectionFromPath(window.location.pathname))
+      setFileManagerPath(routeQuery("path") || ".")
+    }
+    window.addEventListener("popstate", syncRoute)
+    return () => window.removeEventListener("popstate", syncRoute)
   }, [])
 
   useEffect(() => {
     const handler = (event: Event) => {
       const requestedPath = (event as CustomEvent<string>).detail
       setFileManagerPath(requestedPath || "plugins")
+      window.history.pushState(null, "", `/files/?path=${encodeURIComponent(requestedPath || "plugins")}`)
       setSection("files")
       setSidebarOpen(false)
     }
@@ -552,7 +583,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [dirty, setDirty] = useState(false)
-  useEffect(() => { api("/api/config").then(result => { setFiles(result.files); if (result.files[0]) setSelected(result.files[0]) }).catch(reason => setError(reason.message)) }, [api])
+  useEffect(() => { api("/api/config").then(result => { setFiles(result.files); const requested = routeQuery("file"); if (result.files[0]) setSelected(result.files.includes(requested) ? requested : result.files[0]) }).catch(reason => setError(reason.message)) }, [api])
   const selectedLabel = configFileLabel(selected)
   const load = useCallback(async (name: string) => {
     setLoading(true); setError("")
@@ -560,6 +591,21 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }, [api])
+  function chooseFile(name: string) {
+    if (name === selected) return
+    setRouteQuery("file", name)
+    void load(name)
+  }
+  useEffect(() => {
+    const syncSelection = () => {
+      if (sectionFromPath(window.location.pathname) !== "config") return
+      const requested = routeQuery("file")
+      const target = files.includes(requested) ? requested : files[0]
+      if (target && target !== selected) void load(target)
+    }
+    window.addEventListener("popstate", syncSelection)
+    return () => window.removeEventListener("popstate", syncSelection)
+  }, [files, selected, load])
   useEffect(() => { if (selected && !data) load(selected) }, [selected, data, load])
   const visible = files.filter(file => `${file} ${configFileLabel(file)}`.toLowerCase().includes(search.toLowerCase()))
   function update(path: string[], value: any) { setData((old: any) => setNested(old, path, value)); setDirty(true) }
@@ -582,7 +628,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
       <Card className="relative h-fit overflow-visible">
         <div className={`absolute inset-x-0 top-0 z-10 hidden gap-1 p-2 transition-opacity duration-200 xl:grid ${fileSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <Button size="icon" variant="ghost" className="mx-auto mb-1" aria-label="展开配置文件侧栏" title="展开配置文件侧栏" onClick={() => setFileSidebarCollapsed(false)}><ChevronRight /></Button>
-          {files.map(file => <button key={file} type="button" aria-label={`${configFileLabel(file)}，${file}`} aria-describedby={`config-file-tooltip-${file.replace(/\W/g, "-")}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`group relative flex h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${selected === file ? "bg-indigo-50 ring-1 ring-indigo-100" : "hover:bg-slate-50"}`}>
+          {files.map(file => <button key={file} type="button" aria-label={`${configFileLabel(file)}，${file}`} aria-describedby={`config-file-tooltip-${file.replace(/\W/g, "-")}`} aria-current={selected === file ? "page" : undefined} onClick={() => chooseFile(file)} className={`group relative flex h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-lg transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${selected === file ? "bg-indigo-50 ring-1 ring-indigo-100" : "hover:bg-slate-50"}`}>
             <ConfigFileIcon file={file} className="size-4" />
             <span className={`text-[8px] leading-3 ${selected === file ? "font-medium text-indigo-700" : "text-slate-500"}`}>{configFileCompactLabels[file] || configFileLabel(file)}</span>
             <span id={`config-file-tooltip-${file.replace(/\W/g, "-")}`} role="tooltip" className="pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-50 w-max max-w-56 -translate-y-1/2 translate-x-1 rounded-lg bg-[#202124] px-3 py-2 text-left text-xs font-medium text-white opacity-0 shadow-xl transition duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100">
@@ -595,7 +641,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
             <div className="mb-3 flex items-center justify-between gap-2 text-xs font-semibold"><span>配置文件 <Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{files.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起配置文件侧栏" title="收起配置文件侧栏" onClick={() => setFileSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选配置…" value={search} onChange={event => setSearch(event.target.value)} /></div>
           </div>
-          <div className="max-h-[560px] space-y-1 overflow-y-auto px-2 pb-3">{visible.map(file => <button key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected === file ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span><span className="text-[10px] text-slate-400">YAML</span></button>)}</div>
+          <div className="max-h-[560px] space-y-1 overflow-y-auto px-2 pb-3">{visible.map(file => <button key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => chooseFile(file)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected === file ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span></button>)}</div>
         </div>
       </Card>
       <Card className="min-w-0"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div><div className="flex items-center gap-2"><Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={() => { if (!rawMode) { if (dirty && !window.confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return; setDirty(raw !== loadedContent); setRawMode(true); return } try { const parsed = parseYaml(raw); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("YAML 内容必须是对象"); setData(parsed); setDirty(raw !== loadedContent); setRawMode(false) } catch (reason) { notify("error", `YAML 无法解析：${(reason as Error).message}`) } }}><Braces />{rawMode ? "图形化编辑" : "YAML 源码"}</Button><Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button></div></CardHeader><CardContent className="p-5">
@@ -808,7 +854,10 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     try {
       const [result, archiveResult] = await Promise.all([api("/api/plugins"), api("/api/plugins/archives")])
       setPlugins(result.plugins); setArchives(archiveResult.archives)
-      if (!selected && result.plugins.length) setSelected(result.plugins[0])
+      if (!selected && result.plugins.length) {
+        const requested = routeQuery("plugin")
+        setSelected(result.plugins.find((plugin: any) => plugin.id === requested) || result.plugins[0])
+      }
     }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
@@ -851,6 +900,21 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     setConfigPreview("")
     setError("")
   }
+  function choosePlugin(plugin: any) {
+    if (selected?.id === plugin.id) return
+    setRouteQuery("plugin", plugin.id)
+    selectPlugin(plugin)
+  }
+  useEffect(() => {
+    const syncSelection = () => {
+      if (sectionFromPath(window.location.pathname) !== "plugins") return
+      const requested = routeQuery("plugin")
+      const target = plugins.find(plugin => plugin.id === requested) || plugins[0]
+      if (target && target.id !== selected?.id) selectPlugin(target)
+    }
+    window.addEventListener("popstate", syncSelection)
+    return () => window.removeEventListener("popstate", syncSelection)
+  }, [plugins, selected?.id])
   const largePlugins = plugins.filter(plugin => plugin.kind === "large")
   const smallPlugins = plugins.filter(plugin => plugin.kind === "small")
   const shownLarge = largePlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(largeSearch.toLowerCase()))
@@ -931,7 +995,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   function renderPlugin(plugin: any) {
     const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
     const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
-    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}>
+    return <button key={plugin.id} type="button" onClick={() => choosePlugin(plugin)} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-slate-50"}`}>
       <span className={`grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
         {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
       </span>
@@ -942,7 +1006,7 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
   function renderCompactPlugin(plugin: any) {
     const PluginIcon = plugin.kind === "small" ? FileCode2 : Plug
     const canOpen = plugin.kind === "small" || plugin.hasConfig || plugin.hasSupport || plugin.configFiles?.length > 0
-    return <button key={plugin.id} type="button" onClick={() => selectPlugin(plugin)} aria-label={plugin.title} title={plugin.title} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`relative mx-auto flex size-11 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
+    return <button key={plugin.id} type="button" onClick={() => choosePlugin(plugin)} aria-label={plugin.title} title={plugin.title} aria-current={selected?.id === plugin.id ? "page" : undefined} className={`relative mx-auto flex size-11 items-center justify-center rounded-xl transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected?.id === plugin.id ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50"}`}>
       <span className={`grid size-8 place-items-center overflow-hidden rounded-lg ${plugin.iconData ? "bg-white" : plugin.kind === "small" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-600"}`}>
         {plugin.iconData ? <img src={plugin.iconData} alt="" className="size-full object-contain" /> : <PluginIcon className="size-4" style={plugin.iconColor && plugin.kind === "large" ? { color: plugin.iconColor } : undefined} />}
       </span>
@@ -1100,10 +1164,21 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   const [dirty, setDirty] = useState(false)
   const [search, setSearch] = useState("")
   const [error, setError] = useState("")
-  const browse = useCallback(async (path: string) => {
+  const browse = useCallback(async (path: string, updateUrl = false) => {
     setLoading(true); setError("")
-    try { const result = await api(`/api/files?path=${encodeURIComponent(path)}`); setDirectory(result.path); setEntries(result.entries); setCurrent(null); setContent(""); setDirty(false) }
-    catch (reason) { setError((reason as Error).message) }
+    try {
+      const result = await api(`/api/files?path=${encodeURIComponent(path)}`)
+      setDirectory(result.path); setEntries(result.entries); setCurrent(null); setContent(""); setDirty(false)
+      if (updateUrl) setRouteQuery("path", path === "." ? "" : path)
+    } catch (reason) {
+      try {
+        const file = await api(`/api/files/read?path=${encodeURIComponent(path)}`)
+        const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "."
+        const result = await api(`/api/files?path=${encodeURIComponent(parent)}`)
+        setDirectory(result.path); setEntries(result.entries); setCurrent(file); setContent(file.content); setDirty(false)
+        if (updateUrl) setRouteQuery("path", path)
+      } catch { setError((reason as Error).message) }
+    }
     finally { setLoading(false) }
   }, [api])
   useEffect(() => { browse(initialPath) }, [browse, initialPath])
@@ -1123,7 +1198,7 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   async function openFile(entry: any) {
     if (dirty && !window.confirm("当前文件有未保存修改，继续切换吗？")) return
     setLoading(true); setError("")
-    try { const result = await api(`/api/files/read?path=${encodeURIComponent(entry.path)}`); setCurrent(result); setContent(result.content); setDirty(false) }
+    try { const result = await api(`/api/files/read?path=${encodeURIComponent(entry.path)}`); setCurrent(result); setContent(result.content); setDirty(false); setRouteQuery("path", entry.path) }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }
@@ -1141,8 +1216,8 @@ function FileManager({ api, notify, initialPath = "." }: { api: Api; notify: any
   return <>
     <PageIntro eyebrow="Workspace files" title="文件管理" description="浏览 Yunzai 工作区中的可读文本文件；每次保存都会创建时间戳备份。按 Ctrl+S / ⌘+S 保存当前文件。" action={<Button onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <Card className={editorFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0" : "overflow-hidden"}><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".")} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="flex w-full items-center gap-2 sm:w-auto"><div className="relative min-w-0 flex-1 sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div>{editorFullscreen && <Button size="sm" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}</div></div>
-      <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>文件浏览器</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{loading && <div className="grid h-24 place-items-center"><LoaderCircle className="size-5 animate-spin text-indigo-500" /></div>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
+    <Card className={editorFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0" : "overflow-hidden"}><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".", true)} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path, true)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="flex w-full items-center gap-2 sm:w-auto"><div className="relative min-w-0 flex-1 sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div>{editorFullscreen && <Button size="sm" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}</div></div>
+      <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span>文件浏览器</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".", true)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{loading && <div className="grid h-24 place-items-center"><LoaderCircle className="size-5 animate-spin text-indigo-500" /></div>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path, true) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type === "file" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
         <div className={`flex min-w-0 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><div className="flex h-11 shrink-0 items-center justify-between border-b border-border px-4"><div className="flex min-w-0 items-center gap-2 text-xs"><FileCode2 className="size-4 text-indigo-500" /><span className="truncate font-medium">{current?.path || "选择一个文本文件"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{formatBytes(new Blob([content]).size)} · UTF-8</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current ? <div className={`flex flex-1 flex-col ${editorFullscreen ? "min-h-0" : ""}`}><MonacoCodeEditor key={current.path} path={current.path} value={content} className={editorFullscreen ? "h-full min-h-0 flex-1" : undefined} onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
       </div><div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-slate-50/70 px-4 py-2.5 text-[10px] text-muted-foreground"><span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5 text-emerald-600" />写入前自动备份 · 自动忽略 node_modules / .git / 构建产物</span><div className="flex items-center gap-3">{current?.modifiedAt && <span>上次修改：{new Date(current.modifiedAt).toLocaleString("zh-CN")}</span>}{editorFullscreen && <Button type="button" size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => setEditorFullscreen(false)}>退出全屏 <Minimize2 className="size-3" /></Button>}</div></div></Card>
   </>

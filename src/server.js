@@ -1413,8 +1413,10 @@ export async function startAdminPanel() {
   app.use("/api", (req, res) => res.status(404).json({ error: "API 不存在" }))
   app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
   app.use((req, res, next) => {
-    fs.access(path.join(STATIC_DIR, "index.html"))
-      .then(() => res.sendFile(path.join(STATIC_DIR, "index.html")))
+    const section = req.path.match(/^\/(config|plugins|files|logs|debug)\/?$/)?.[1]
+    const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
+    fs.access(entry)
+      .then(() => res.sendFile(entry))
       .catch(() => res.status(503).send("Web UI 尚未构建。请在 plugins/EliaAdminPanel 中运行 pnpm install 和 pnpm run build。"))
   })
   app.use((error, req, res, next) => {
