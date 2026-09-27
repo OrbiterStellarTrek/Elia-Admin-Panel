@@ -16,7 +16,7 @@ async function readConfig() {
     return config
   } catch (error) {
     if (error.code !== "ENOENT") throw error
-    return { host: "127.0.0.1", port: 50882, publicUrl: "" }
+    return { host: "127.0.0.1", port: 50882, publicUrl: "", devMode: false }
   }
 }
 
@@ -90,6 +90,12 @@ export function supportPanel() {
           componentProps: { min: 1, max: 65535, placeholder: "50882" },
         },
         {
+          field: "devMode",
+          label: "开发模式",
+          bottomHelpMessage: "开启后需重启 Bot，使用 next dev 实时热更新。开发模式占用资源较多，不建议对公网开放。",
+          component: "Switch",
+        },
+        {
           field: "publicUrl",
           label: "公网访问地址",
           bottomHelpMessage: "主人快捷登录链接使用的站点根地址；可填写多个，每行一个或用逗号分隔，不要包含子路径。留空则根据监听地址生成。",
@@ -117,6 +123,7 @@ export function supportPanel() {
         return {
           host: config.host || "127.0.0.1",
           port: config.port || 50882,
+          devMode: config.devMode === true,
           publicUrl: config.publicUrl || "",
           password: "",
           secret: "",
@@ -126,6 +133,7 @@ export function supportPanel() {
         const current = await readConfig()
         const host = String(data.host ?? current.host ?? "127.0.0.1").trim()
         const port = Number(data.port ?? current.port ?? 50882)
+        const devMode = data.devMode === true
         const publicUrl = String(data.publicUrl ?? current.publicUrl ?? "").trim()
         const password = String(data.password ?? "")
         const secret = String(data.secret ?? "")
@@ -136,7 +144,7 @@ export function supportPanel() {
         if (password.length > 1024) return Result.error("面板密码不能超过 1024 个字符")
         if (secret && Buffer.byteLength(secret, "utf8") < 32) return Result.error("浏览器会话 Secret 至少需要 32 个 UTF-8 字节")
 
-        const next = { ...current, host, port, publicUrl }
+        const next = { ...current, host, port, devMode, publicUrl }
         delete next.password
         if (password) Object.assign(next, await createPasswordCredential(password))
         if (secret) next.secret = secret
@@ -146,6 +154,7 @@ export function supportPanel() {
         if (password) notes.push("新密码立即生效，并以加盐哈希存储")
         if (secret) notes.push("新 Secret 需重启 Bot 后生效，旧浏览器令牌会失效")
         if (host !== String(current.host || "127.0.0.1").trim() || port !== Number(current.port || 50882)) notes.push("监听地址和端口需重启 Bot 后生效")
+        if (devMode !== (current.devMode === true)) notes.push("开发模式需重启 Bot 后生效")
         if (publicUrl !== String(current.publicUrl || "").trim()) notes.push("公网访问地址立即用于主人快捷登录链接")
         return Result.ok({}, `配置已保存；${notes.join("；") || "没有需要立即生效的变更"}`)
       },

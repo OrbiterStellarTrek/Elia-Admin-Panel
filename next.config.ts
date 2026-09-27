@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
   output: "export",
   outputFileTracingRoot: process.cwd(),
   trailingSlash: true,
+  agentRules: false,
   images: { unoptimized: true },
   webpack(config, { isServer }) {
     config.resolve.alias = {

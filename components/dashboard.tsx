@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
+import * as Dialog from "@radix-ui/react-dialog"
 import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
@@ -1033,7 +1034,8 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
     </button>
   }
   return <>
-    <PageIntro title="插件控制" action={<div className="flex gap-2"><Button variant="outline" onClick={() => setShowInstall(!showInstall)}><Plus />安装插件</Button><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
+    <Dialog.Root open={showInstall} onOpenChange={setShowInstall}>
+    <PageIntro title="插件控制" action={<div className="flex gap-2"><Dialog.Trigger asChild><Button variant="outline"><Plus />安装插件</Button></Dialog.Trigger><Button variant="outline" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重新扫描</Button></div>} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`}>
       <div className="relative flex h-[640px] min-h-[640px] min-w-0 flex-col gap-3">
@@ -1048,7 +1050,6 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
-            {showInstall && <form onSubmit={installPlugin} className="mx-3 mb-2 space-y-2 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3"><Label className="text-[11px]">HTTPS 仓库地址</Label><Input className="h-9 bg-white text-xs" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /><Input className="h-9 bg-white text-xs" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="插件目录名（可选，默认仓库名）" /><p className="text-[10px] leading-4 text-muted-foreground">只下载代码，不自动执行依赖安装脚本。下载后请安装依赖并重启 Bot。</p><Button size="sm" className="w-full" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button></form>}
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {shownLarge.map(renderPlugin)}
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
@@ -1075,6 +1076,27 @@ function PluginCenter({ api, notify }: { api: Api; notify: any }) {
         {selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
       </CardContent></Card>
     </div>
+    <Dialog.Portal>
+      <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+      <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <Dialog.Title className="text-base font-semibold">安装插件</Dialog.Title>
+            <Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">通过 HTTPS 仓库地址下载插件；依赖安装脚本不会自动运行。</Dialog.Description>
+          </div>
+          <Dialog.Close asChild><Button type="button" variant="ghost" size="icon" aria-label="关闭安装弹窗"><X /></Button></Dialog.Close>
+        </div>
+        <form onSubmit={installPlugin} className="space-y-3">
+          <div className="space-y-1.5"><Label htmlFor="plugin-install-url" className="text-xs">HTTPS 仓库地址</Label><Input id="plugin-install-url" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /></div>
+          <div className="space-y-1.5"><Label htmlFor="plugin-install-name" className="text-xs">插件目录名</Label><Input id="plugin-install-name" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="可选，默认使用仓库名" /></div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Dialog.Close asChild><Button type="button" variant="outline">取消</Button></Dialog.Close>
+            <Button type="submit" disabled={busy}>{busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}下载并安装</Button>
+          </div>
+        </form>
+      </Dialog.Content>
+    </Dialog.Portal>
+    </Dialog.Root>
   </>
 }
 

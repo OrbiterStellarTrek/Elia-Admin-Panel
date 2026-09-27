@@ -4,6 +4,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { createRequire } from "node:module"
 import { spawn } from "node:child_process"
+import http from "node:http"
 import net from "node:net"
 import os from "node:os"
 import { pathToFileURL, fileURLToPath } from "node:url"
@@ -18,6 +19,7 @@ const ROOT = process.cwd()
 const requireFromRoot = createRequire(path.join(ROOT, "package.json"))
 const PLUGINS = path.join(ROOT, "plugins")
 const PANEL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const requireFromPanel = createRequire(path.join(PANEL_DIR, "package.json"))
 const DATA_DIR = path.join(ROOT, "data", "elia-admin-panel")
 const PANEL_CONFIG = path.join(DATA_DIR, "config.yaml")
 const LOGS_DIR = path.join(ROOT, "logs")
@@ -52,6 +54,8 @@ const PLUGIN_SUPPORT_ENTRIES = [
   { fileName: "guoba.support.js", factoryName: "supportGuoba" },
 ]
 let expressServer
+let nextDevProcess
+let nextDevPort
 let logWebSocketServer
 let logDirectoryWatcher
 let logHeartbeatTimer
@@ -237,11 +241,12 @@ async function readPanelSettings() {
     return {
       host: String(parsed.host || "127.0.0.1").trim(),
       port: Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 50882,
+      devMode: parsed.devMode === true,
       publicUrl: String(parsed.publicUrl || "").trim(),
     }
   } catch (error) {
     safeLogger("error", `[AdminPanel] 读取面板配置失败：${error.message}`)
-    return { host: "127.0.0.1", port: 50882, publicUrl: "" }
+    return { host: "127.0.0.1", port: 50882, devMode: false, publicUrl: "" }
   }
 }
 
@@ -885,6 +890,137 @@ function startLogDirectoryWatcher() {
   }
 }
 
+function reserveLocalPort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer()
+    probe.once("error", reject)
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address()
+      const port = typeof address === "object" && address ? address.port : 0
+      probe.close(error => error ? reject(error) : resolve(port))
+    })
+  })
+}
+
+function stopNextDevServer() {
+  const child = nextDevProcess
+  nextDevProcess = null
+  nextDevPort = null
+  if (child && child.exitCode === null && child.signalCode === null) child.kill()
+}
+
+function canConnectNextDev(port) {
+  return new Promise(resolve => {
+    const socket = net.createConnection(port, "127.0.0.1")
+    let settled = false
+    const finish = ready => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      socket.destroy()
+      resolve(ready)
+    }
+    const timeout = setTimeout(() => finish(false), 1000)
+    socket.once("connect", () => finish(true))
+    socket.once("error", () => finish(false))
+  })
+}
+
+async function startNextDevServer() {
+  const port = await reserveLocalPort()
+  const nextCli = requireFromPanel.resolve("next/dist/bin/next")
+  const child = spawn(process.execPath, [nextCli, "dev", "--webpack", "--hostname", "127.0.0.1", "--port", String(port)], {
+    cwd: PANEL_DIR,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  let startupError
+  nextDevProcess = child
+  nextDevPort = port
+  process.once("exit", stopNextDevServer)
+  child.once("error", error => { startupError = error })
+  child.once("exit", (code, signal) => {
+    if (nextDevProcess !== child) return
+    nextDevProcess = null
+    nextDevPort = null
+    safeLogger("error", `[AdminPanel] Next.js 开发服务已退出：${signal || `退出码 ${code}`}`)
+  })
+  for (const [stream, level] of [[child.stdout, "mark"], [child.stderr, "warn"]]) {
+    stream?.on("data", chunk => {
+      const output = chunk.toString().trim()
+      if (output) safeLogger(level, `[AdminPanel][next dev] ${output}`)
+    })
+  }
+
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    if (startupError || child.exitCode !== null || child.signalCode !== null) break
+    if (await canConnectNextDev(port)) {
+      safeLogger("mark", `[AdminPanel] Next.js 开发服务已启动，实时热更新端口：${port}`)
+      return
+    }
+    await new Promise(resolve => setTimeout(resolve, 300))
+  }
+
+  stopNextDevServer()
+  const detail = startupError?.message || (child.exitCode !== null ? `进程退出码 ${child.exitCode}` : "启动超时")
+  throw new Error(`Next.js 开发服务启动失败：${detail}`)
+}
+
+function proxyNextRequest(req, res) {
+  if (!nextDevPort) return res.status(503).send("Next.js 开发服务不可用")
+  const headers = { ...req.headers, host: `127.0.0.1:${nextDevPort}` }
+  if (headers.origin) headers.origin = `http://127.0.0.1:${nextDevPort}`
+  const proxy = http.request({
+    hostname: "127.0.0.1",
+    port: nextDevPort,
+    method: req.method,
+    path: req.originalUrl || req.url,
+    headers,
+  }, upstream => {
+    res.writeHead(upstream.statusCode || 502, upstream.headers)
+    upstream.pipe(res)
+  })
+  proxy.on("error", error => {
+    if (res.headersSent) return res.destroy(error)
+    res.status(502).send("Next.js 开发服务连接失败")
+  })
+  req.on("aborted", () => proxy.destroy())
+  req.pipe(proxy)
+}
+
+function proxyNextUpgrade(request, socket, head) {
+  if (!nextDevPort) return socket.destroy()
+  const headers = { ...request.headers, host: `127.0.0.1:${nextDevPort}` }
+  if (headers.origin) headers.origin = `http://127.0.0.1:${nextDevPort}`
+  const proxy = http.request({
+    hostname: "127.0.0.1",
+    port: nextDevPort,
+    method: request.method,
+    path: request.url,
+    headers,
+  })
+  proxy.on("upgrade", (response, upstreamSocket, upstreamHead) => {
+    const responseHeaders = Object.entries(response.headers).flatMap(([name, value]) =>
+      Array.isArray(value) ? value.map(item => `${name}: ${item}`) : value ? [`${name}: ${value}`] : [],
+    )
+    socket.write([`HTTP/1.1 ${response.statusCode} ${response.statusMessage}`, ...responseHeaders, "", ""].join("\r\n"))
+    if (upstreamHead.length) socket.write(upstreamHead)
+    if (head.length) upstreamSocket.write(head)
+    upstreamSocket.pipe(socket)
+    socket.pipe(upstreamSocket)
+    socket.on("error", () => upstreamSocket.destroy())
+    upstreamSocket.on("error", () => socket.destroy())
+  })
+  proxy.on("response", response => {
+    socket.end(`HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\nConnection: close\r\n\r\n`)
+    response.resume()
+  })
+  proxy.on("error", () => socket.destroy())
+  socket.on("close", () => proxy.destroy())
+  proxy.end()
+}
+
 function attachLogWebSocket(server) {
   logWebSocketServer = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 })
   logHeartbeatTimer = setInterval(() => {
@@ -943,7 +1079,8 @@ function attachLogWebSocket(server) {
       return
     }
     if (pathname !== "/api/logs/ws") {
-      socket.destroy()
+      if (nextDevPort) proxyNextUpgrade(request, socket, head)
+      else socket.destroy()
       return
     }
     const origin = request.headers.origin
@@ -1411,25 +1548,36 @@ export async function startAdminPanel() {
   }))
 
   app.use("/api", (req, res) => res.status(404).json({ error: "API 不存在" }))
-  app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
-  app.use((req, res, next) => {
-    const section = req.path.match(/^\/(config|plugins|files|logs|debug)\/?$/)?.[1]
-    const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
-    fs.access(entry)
-      .then(() => res.sendFile(entry))
-      .catch(() => res.status(503).send("Web UI 尚未构建。请在 plugins/EliaAdminPanel 中运行 pnpm install 和 pnpm run build。"))
-  })
+  if (settings.devMode) {
+    await startNextDevServer()
+    app.use((req, res) => proxyNextRequest(req, res))
+  } else {
+    app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
+    app.use((req, res, next) => {
+      const section = req.path.match(/^\/(config|plugins|files|logs|debug)\/?$/)?.[1]
+      const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
+      fs.access(entry)
+        .then(() => res.sendFile(entry))
+        .catch(() => res.status(503).send("Web UI 尚未构建。请在 plugins/EliaAdminPanel 中运行 pnpm install 和 pnpm run build。"))
+    })
+  }
   app.use((error, req, res, next) => {
     const status = Number(error.status) || 500
     if (status >= 500) safeLogger("error", `[AdminPanel] ${req.method} ${req.path}: ${error.stack || error.message}`)
     res.status(status).json({ error: status >= 500 ? "面板处理请求失败，请查看 Bot 日志" : error.message })
   })
 
-  expressServer = await new Promise((resolve, reject) => {
-    const server = app.listen(settings.port, settings.host)
-    server.once("listening", () => resolve(server))
-    server.once("error", reject)
-  })
+  try {
+    expressServer = await new Promise((resolve, reject) => {
+      const server = app.listen(settings.port, settings.host)
+      server.once("listening", () => resolve(server))
+      server.once("error", reject)
+    })
+  } catch (error) {
+    stopNextDevServer()
+    throw error
+  }
+  expressServer.once("close", stopNextDevServer)
   attachLogWebSocket(expressServer)
   startLogDirectoryWatcher()
   const address = expressServer.address()

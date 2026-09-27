@@ -8,7 +8,7 @@ export class EliaAdminPanel extends plugin {
       dsc: "桌面优先的 WebUI 管理控制台",
       event: "message",
       priority: 9999,
-      rule: [{ reg: "^#?面板(登录|登陆)$", fnc: "quickLogin", permission: "master" }],
+      rule: [{ reg: /^#?Elia(登录|登陆)$/i, fnc: "quickLogin", permission: "master" }],
     })
   }
 
