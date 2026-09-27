@@ -10,6 +10,7 @@ import { pathToFileURL, fileURLToPath } from "node:url"
 import express from "express"
 import { WebSocketServer } from "ws"
 import YAML from "yaml"
+import { updateYamlPreservingComments } from "./config-yaml.js"
 import cfg from "../../../lib/config/config.js"
 import pluginsLoader from "../../../lib/plugins/loader.js"
 
@@ -1242,9 +1243,23 @@ export async function startAdminPanel() {
   app.put("/api/config/:name", asyncRoute(async (req, res) => {
     if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
     const filePath = path.join(ROOT, "config", "config", req.params.name)
-    const content = typeof req.body?.content === "string" ? req.body.content : YAML.stringify(req.body?.data)
+    const rawContent = typeof req.body?.content === "string" ? req.body.content : null
+    let content
+    if (rawContent !== null) {
+      content = rawContent
+    } else {
+      try {
+        const baseContent = typeof req.body?.baseContent === "string" ? req.body.baseContent : await fs.readFile(filePath, "utf8")
+        content = updateYamlPreservingComments(baseContent, req.body?.data)
+      } catch (error) {
+        return res.status(400).json({ error: `无法保留原配置注释：${error.message}` })
+      }
+    }
     const parsed = YAML.parse(content)
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return res.status(400).json({ error: "配置必须是 YAML 对象" })
+    if (req.params.name.toLowerCase() === "qq.yaml" && (!Number.isInteger(parsed.platform) || parsed.platform < 1 || parsed.platform > 6)) {
+      return res.status(400).json({ error: "QQ 登录设备类型必须设置为 1–6；即使跳过 ICQQ 登录也需要有效值" })
+    }
     await writeBackupAndFile(filePath, content.endsWith("\n") ? content : `${content}\n`)
     const name = req.params.name.replace(/\.yaml$/i, "")
     if (cfg.config) cfg.config[`config.${name}`] = parsed

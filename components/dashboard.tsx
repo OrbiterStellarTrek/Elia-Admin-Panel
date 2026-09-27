@@ -150,7 +150,7 @@ const configFieldDescriptions: Record<string, string> = {
   addPrivate: "控制是否允许通过私聊添加表情，0 禁止，1 允许。",
   autoFriend: "开启后自动同意添加好友请求；关闭时不自动处理。",
   autoQuit: "Bot 加入群后，人数达到此值或更少时自动退群；群内有主人或 Bot 是群主时不会退群，0 关闭。",
-  platform: "ICQQ 登录时使用的设备类型。",
+  platform: "ICQQ 客户端构造时需要有效设备类型，即使跳过 ICQQ 登录也必须设置。",
   restart_port: "重启 API 使用的端口，仅在启用 ksr.js 时生效。",
   imgMaxSize: "添加表情时允许的图片大小上限，单位 MB。",
   puppeteer_timeout: "Puppeteer 截图超时时间，单位毫秒；留空或 0 使用默认行为。",
@@ -181,6 +181,7 @@ const configSelectOptions: Record<string, { value: string; label: string }[]> = 
     { value: "2", label: "仅主人" },
   ],
 }
+const numericConfigSelectFields = new Set(["platform", "onlyReplyAt", "imgAddLimit"])
 
 function configFileLabel(file: string) {
   return configFileLabels[file] || file
@@ -544,6 +545,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const [data, setData] = useState<any>(null)
   const [defaults, setDefaults] = useState<any>(null)
   const [raw, setRaw] = useState("")
+  const [loadedContent, setLoadedContent] = useState("")
   const [rawMode, setRawMode] = useState(false)
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(false)
@@ -554,7 +556,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
   const selectedLabel = configFileLabel(selected)
   const load = useCallback(async (name: string) => {
     setLoading(true); setError("")
-    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setDirty(false); setRawMode(false) }
+    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setLoadedContent(result.content); setDirty(false); setRawMode(false) }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }, [api])
@@ -565,7 +567,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
     if (!selected || saving || (!dirty && !rawMode)) return
     setSaving(true)
     try {
-      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify(rawMode ? { content: raw } : { data }) })
+      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify(rawMode ? { content: raw } : { data, ...(raw !== loadedContent ? { baseContent: raw } : {}) }) })
       notify("success", `${selectedLabel} 已保存并刷新运行时配置`)
       await load(selected)
     } catch (reason) { setError((reason as Error).message); notify("error", (reason as Error).message) }
@@ -596,7 +598,7 @@ function ConfigCenter({ api, notify }: { api: Api; notify: any }) {
           <div className="max-h-[560px] space-y-1 overflow-y-auto px-2 pb-3">{visible.map(file => <button key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => load(file)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 ${selected === file ? "bg-indigo-50 font-medium text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span><span className="text-[10px] text-slate-400">YAML</span></button>)}</div>
         </div>
       </Card>
-      <Card className="min-w-0"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div><div className="flex items-center gap-2"><Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={() => { if (!rawMode) { if (dirty && !window.confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return; setRaw(stringifyYaml(data || {})); setRawMode(true); return } try { const parsed = parseYaml(raw); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("YAML 内容必须是对象"); setData(parsed); setDirty(true); setRawMode(false) } catch (reason) { notify("error", `YAML 无法解析：${(reason as Error).message}`) } }}><Braces />{rawMode ? "图形化编辑" : "YAML 源码"}</Button><Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button></div></CardHeader><CardContent className="p-5">
+      <Card className="min-w-0"><CardHeader className="flex-row items-center justify-between border-b border-border/70 pb-4"><div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div><div className="flex items-center gap-2"><Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={() => { if (!rawMode) { if (dirty && !window.confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return; setDirty(raw !== loadedContent); setRawMode(true); return } try { const parsed = parseYaml(raw); if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("YAML 内容必须是对象"); setData(parsed); setDirty(raw !== loadedContent); setRawMode(false) } catch (reason) { notify("error", `YAML 无法解析：${(reason as Error).message}`) } }}><Braces />{rawMode ? "图形化编辑" : "YAML 源码"}</Button><Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button></div></CardHeader><CardContent className="p-5">
         {error && <div className="mb-4"><ErrorState message={error} /></div>}
         {loading && <div className="grid min-h-64 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div>}
         {!loading && rawMode && <Textarea className="min-h-[560px] resize-y font-mono text-xs leading-6" spellCheck={false} value={raw} onChange={event => { setRaw(event.target.value); setDirty(true) }} />}
@@ -767,9 +769,11 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0 }: {
   const multilineText = multilineTextField(name, value)
   const numericToggle = numericBooleanField(name, value)
   const selectOptions = configSelectOptions[name]
+  const selectValue = value === null || value === undefined ? "" : String(value)
+  const hasValidSelection = selectOptions?.some(option => option.value === selectValue)
   return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
     <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
-    <div className="min-w-0">{selectOptions ? <select aria-label={label} className="h-10 w-full rounded-xl border border-border/80 bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring" value={String(value)} onChange={event => { const option = selectOptions.find(item => item.value === event.target.value); onChange(path, typeof value === "number" ? Number(option?.value) : option?.value) }}>{selectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+    <div className="min-w-0">{selectOptions ? <select aria-label={label} className={`h-10 w-full rounded-xl border bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`} value={selectValue} onChange={event => onChange(path, numericConfigSelectFields.has(name) ? Number(event.target.value) : event.target.value)}>{!hasValidSelection && <option value={selectValue} disabled>{selectValue ? `无效值：${selectValue}，请选择` : "未设置，请选择"}</option>}{selectOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} onChange={next => onChange(path, next)} />
