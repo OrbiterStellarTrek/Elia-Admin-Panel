@@ -119,7 +119,7 @@ export function supportPanel() {
 }
 ```
 
-`schemas[].field` 支持点分路径；完整控件示例见 [elia.support.example.js](elia.support.example.js)。支持 `SOFT_GROUP_BEGIN` 分组、`Switch`、`InputNumber`、`Input`（包括 `componentProps.type: "password"`）、`InputTextArea`、单选/多选/tags 模式的 `Select`、`RadioGroup`、`CheckboxGroup`、`GTags`、`GSelectFriend`、`GSelectGroup`、`EasyCron` 和 `GSubForm`。多选值保存为数组，tags 可添加自定义值；好友和群组选择从当前机器人账号缓存加载。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。面板自身的 `elia.support.js` 和 `guoba.support.js` 共用配置定义，监听地址或端口修改后需重启 Bot 生效。
+`schemas[].field` 支持点分路径；完整控件示例见 [elia.support.example.js](elia.support.example.js)。支持 `SOFT_GROUP_BEGIN` 分组、`Switch`、`InputNumber`、`Input`（包括 `componentProps.type: "password"`）、`ColorPicker`、`GColorPicker`、`InputTextArea`、单选/多选/tags 模式的 `Select`、`RadioGroup`、`CheckboxGroup`、`GTags`、`GSelectFriend`、`GSelectGroup`、`EasyCron` 和 `GSubForm`。`ColorPicker`/`GColorPicker` 保存为颜色字符串；兼容 Guoba 的普通 `Input` 字段若标签包含“颜色”，也会自动显示颜色选择器。多选值保存为数组，tags 可添加自定义值；好友和群组选择从当前机器人账号缓存加载。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。面板自身的 `elia.support.js` 和 `guoba.support.js` 共用配置定义，监听地址或端口修改后需重启 Bot 生效。
 
 ## 开源许可
 

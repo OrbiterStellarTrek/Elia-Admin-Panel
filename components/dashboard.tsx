@@ -54,6 +54,31 @@ function SecretInput({ className, ...props }: SecretInputProps) {
   </div>
 }
 
+function ColorPickerField({ value, label, placeholder, onChange }: { value: string; label: string; placeholder?: string; onChange: (value: string) => void }) {
+  const isHexColor = /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(value)
+  const pickerValue = isHexColor && value.length === 4
+    ? `#${[...value.slice(1)].map(channel => channel + channel).join("")}`
+    : isHexColor ? value : "#000000"
+  return <div className="flex w-fit max-w-full items-center gap-2">
+    <Input
+      type="color"
+      aria-label={`${label}颜色选择器`}
+      className="h-10 w-12 shrink-0 cursor-pointer p-1"
+      value={pickerValue}
+      disabled={Boolean(value) && !isHexColor}
+      onChange={event => onChange(event.target.value)}
+    />
+    <Input
+      type="text"
+      aria-label={`${label}颜色值`}
+      className="w-36 shrink-0 font-mono"
+      value={value}
+      placeholder={placeholder || "#RRGGBB"}
+      onChange={event => onChange(event.target.value)}
+    />
+  </div>
+}
+
 type Section = "overview" | "accounts" | "config" | "plugins" | "files" | "logs" | "debug"
 type Notice = { kind: "success" | "error" | "info"; message: string; exiting: boolean } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
@@ -352,7 +377,7 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
     }
   }
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e7e9ff_0,_transparent_42%),radial-gradient(ellipse_at_bottom_right,_#e9f4fa_0,_transparent_42%)] px-5 py-12">
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e6e4fc_0,_transparent_46%),radial-gradient(ellipse_at_bottom_right,_#e2effb_0,_transparent_46%)] px-5 py-12">
       <Card className="w-full max-w-[430px] overflow-hidden border-white/70 shadow-[0_30px_100px_-42px_rgba(58,67,150,.35)]">
         <div className="h-2 bg-gradient-to-r from-indigo-500 via-violet-400 to-sky-300" />
         <CardHeader className="px-8 pt-9">
@@ -526,10 +551,10 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
-      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-[#373737] bg-[#202124] text-slate-100 shadow-xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.06] bg-[linear-gradient(180deg,#1f212b_0%,#16171f_100%)] text-slate-100 shadow-2xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0 md:top-8">
           <div className="flex items-center gap-3 px-2 pb-7">
-            <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+            <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40 ring-1 ring-white/15"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
             <div className="min-w-0 truncate font-semibold tracking-tight">EliaAdminPanel</div>
             <button className="ml-auto text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></button>
           </div>
@@ -538,8 +563,9 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             {navigation.map(item => {
               const Icon = item.icon
               const selected = section === item.id
-              return <button key={item.id} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
-                <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
+              return <button key={item.id} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"}`}>
+                {selected && <span aria-hidden="true" className="absolute left-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-300 to-violet-400" />}
+                <Icon className={`size-[18px] shrink-0 ${selected ? "text-indigo-300" : "text-slate-500 group-hover:text-slate-300"}`} />
                 <span className="min-w-0 flex-1 text-[13px] font-medium">{item.label}</span>
               </button>
             })}
@@ -547,21 +573,21 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
           <div className="mt-auto space-y-3 px-1 pb-3">
             <button aria-label="退出登录" onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4 shrink-0" />退出登录</button>
             <div className="px-3 text-[10px] text-slate-600">ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
-            <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronLeft className="size-4" />收起</button></div>
+            <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200"><ChevronLeft className="size-4" />收起</button></div>
           </div>
         </div>
         <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3 md:top-8">
-          <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+          <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 ring-1 ring-white/15"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
           <nav className="w-full space-y-1" aria-label="主导航">
             {navigation.map(item => {
               const Icon = item.icon
               const selected = section === item.id
-              return <button key={item.id} title={item.label} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group grid h-10 w-full place-items-center rounded-lg transition ${selected ? "bg-[#2c3448] text-blue-300" : "text-slate-500 hover:bg-white/5 hover:text-slate-200"}`}><Icon className="size-[18px]" /></button>
+              return <button key={item.id} title={item.label} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative grid h-10 w-full place-items-center rounded-lg transition ${selected ? "bg-white/[0.08] text-indigo-300" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-200"}`}>{selected && <span aria-hidden="true" className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-300 to-violet-400" />}<Icon className="size-[18px]" /></button>
             })}
           </nav>
           <div className="mt-auto w-full space-y-2 border-t border-white/10 pt-2">
             <button title="退出登录" aria-label="退出登录" onClick={logout} className="grid h-10 w-full place-items-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4" /></button>
-            <button title="展开侧边栏" aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(false)} className="grid h-10 w-full place-items-center rounded-lg text-blue-300 transition hover:bg-white/5 hover:text-blue-200"><ChevronRight className="size-4" /></button>
+            <button title="展开侧边栏" aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(false)} className="grid h-10 w-full place-items-center rounded-lg text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200"><ChevronRight className="size-4" /></button>
           </div>
         </div>
       </aside>
@@ -1629,8 +1655,8 @@ function RecordListField({ rows, template, label, onChange }: { rows: any[]; tem
     : { key: "键", value: "值" }
 
   return <div className="space-y-2.5">
-    {rows.map((row, index) => <div key={index} className="rounded-xl border border-border/80 bg-white p-3.5">
-      <div className="mb-3 flex items-center justify-between"><span className="text-[11px] font-medium text-slate-500">{label} {index + 1}</span><Button type="button" size="icon" variant="ghost" className="size-7 text-slate-400 hover:text-rose-600" aria-label={`删除${label} ${index + 1}`} title="删除此项" onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}><X className="size-3.5" /></Button></div>
+    {rows.map((row, index) => <div key={index} className="rounded-xl border border-border/70 bg-white p-3.5 shadow-[0_1px_2px_rgba(28,29,58,0.04)]">
+      <div className="mb-3 flex items-center justify-between"><span className="flex items-center gap-2 text-[11px] font-medium text-slate-500"><span className="grid size-4 place-items-center rounded-md bg-indigo-50 text-[10px] font-semibold tabular-nums text-indigo-600">{index + 1}</span>{label}</span><Button type="button" size="icon" variant="ghost" className="size-7 text-slate-400 hover:text-rose-600" aria-label={`删除${label} ${index + 1}`} title="删除此项" onClick={() => onChange(rows.filter((_, rowIndex) => rowIndex !== index))}><X className="size-3.5" /></Button></div>
       <div className="grid gap-3 sm:grid-cols-2">{Object.entries(row).map(([field, current]) => <div key={field} className="min-w-0 space-y-1.5">
         <Label className="text-[10px] text-muted-foreground">{keyValueLabels[field as "key" | "value"] || configFieldLabel(field)}</Label>
         {typeof current === "boolean"
@@ -1750,7 +1776,7 @@ function groupSchemaFields(schemas: any[], data: any) {
     const compactOptionGroup = (component === "CheckboxGroup" || (component === "Select" && (props.mode === "multiple" || props.mode === "tags"))) && optionLabels.length <= 8 && optionLabels.reduce((length: number, text: string) => length + Array.from(text).length, 0) <= 36
     const recordList = Array.isArray(value) && value.length > 0 && value.every(isSimpleRecord)
     const fullWidth = (Array.isArray(value) && !compactOptionGroup) || isObject(value) || component === "InputTextArea" || component === "EasyCron" || component === "GTags" || (component === "CheckboxGroup" && !compactOptionGroup) || component === "GSelectFriend" || component === "GSelectGroup" || component === "GSubForm" || (component === "Select" && (props.mode === "multiple" || props.mode === "tags") && !compactOptionGroup) || (multilineTextField(schema.field, value) && !secretField(schema.field))
-    const compact = component === "Switch" || ["Input", "InputNumber", "Select", "RadioGroup"].includes(component) || compactOptionGroup
+    const compact = component === "Switch" || ["Input", "InputNumber", "Select", "RadioGroup", "ColorPicker", "GColorPicker"].includes(component) || compactOptionGroup
     const kind = recordList ? "wide" : compact && !fullWidth ? "cards" : "field"
     const previous = groups[groups.length - 1]
     if (kind === "cards" && previous?.kind === "cards") previous.schemas.push(schema)
@@ -1827,18 +1853,19 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const activeSchemaGroupData = schemaGroups[activeSchemaGroup] || schemaGroups[0]
   const schemaRows = groupSchemaFields(hasSchemaGroupTabs ? activeSchemaGroupData?.schemas || [] : selected?.schemas || [], data)
   const schemaItems = schemaRows.flatMap(row => row.schemas.map((schema, index) => ({ kind: row.kind, schema, index })))
-  const schemaLayout: { kind: "cards" | "wide" | "field" | "wideWithAside"; schema: any; index: number; aside?: typeof schemaItems }[] = []
+  type SchemaLayoutEntry =
+    | { kind: "panel"; items: typeof schemaItems }
+    | { kind: "block"; schema: any; index: number }
+  const schemaLayout: SchemaLayoutEntry[] = []
   for (let index = 0; index < schemaItems.length; index++) {
     const item = schemaItems[index]
-    if (item.kind === "wide") {
-      const aside = schemaItems.slice(index + 1, index + 6).every(next => next?.kind === "cards")
-        ? schemaItems.slice(index + 1, index + 6)
-        : []
-      if (aside.length) {
-        schemaLayout.push({ ...item, kind: "wideWithAside", aside })
-        index += aside.length
-      } else schemaLayout.push(item)
-    } else schemaLayout.push(item)
+    if (item.kind === "cards") {
+      const items = [item]
+      while (index + 1 < schemaItems.length && schemaItems[index + 1].kind === "cards") items.push(schemaItems[++index])
+      schemaLayout.push({ kind: "panel", items })
+    } else {
+      schemaLayout.push({ kind: "block", schema: item.schema, index: item.index })
+    }
   }
   const needsSchemaFriends = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectFriend" || /qq|friend|user/i.test(String(schema.field || ""))))
   const needsSchemaGroups = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectGroup" || /group/i.test(String(schema.field || ""))))
@@ -2072,8 +2099,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         </div>
       </div>
       <Card className={sourceFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-none border-0" : selected?.kind === "small" ? "flex min-h-0 min-w-0 flex-col" : "min-w-0"}>
-        <div className={sourceFullscreen ? "hidden" : "sticky top-px z-20 bg-card"}>
-        <CardHeader className="flex-row items-start justify-between border-b border-border/70 bg-card pb-4">
+        <div className={sourceFullscreen ? "hidden" : "sticky top-px z-20 bg-card/95 backdrop-blur-sm"}>
+        <CardHeader className="flex-row items-start justify-between border-b border-border/70 pb-4">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle>
@@ -2084,14 +2111,20 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           </div>
           <div className="flex flex-wrap justify-end gap-2">{selected?.kind === "large" && <PluginTools key={selected.id} plugin={selected} api={api} notify={notify} confirm={confirm} onUpdated={refresh} />}{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />禁用插件</Button>}</div>
         </CardHeader>
-        {hasSchemaGroupTabs && <div role="group" aria-label="插件配置分组" className="flex gap-1 overflow-x-auto border-b border-border bg-card px-5">
-          {schemaGroups.map((group, index) => <button key={`${group.label}-${index}`} type="button" aria-pressed={index === activeSchemaGroup} onClick={() => setActiveSchemaGroup(index)} className={`shrink-0 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${index === activeSchemaGroup ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{group.label}</button>)}
+        {hasSchemaGroupTabs && <div role="group" aria-label="插件配置分组" className="scrollbar-thin flex gap-0.5 overflow-x-auto border-b border-border/70 px-3">
+          {schemaGroups.map((group, index) => <button key={`${group.label}-${index}`} type="button" aria-pressed={index === activeSchemaGroup} onClick={() => setActiveSchemaGroup(index)} className={`relative shrink-0 px-3.5 py-3 text-xs font-medium transition-colors ${index === activeSchemaGroup ? "text-primary after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary" : "text-muted-foreground hover:text-foreground"}`}>{group.label}</button>)}
         </div>}
         </div>
         <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-5" : "p-5"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${sourceFullscreen ? "" : "rounded-xl border border-border"}`}><div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><div className="flex shrink-0 items-center gap-2"><span className="hidden text-[10px] text-muted-foreground sm:block">Ctrl+S 保存 · 重启后加载</span><Button type="button" size="icon" variant="ghost" className="size-8" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{detailLoading ? <div className="grid min-h-[545px] flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="min-h-[545px] flex-1" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
-          : selected.hasConfig ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 xl:grid-flow-dense">{detailLoading ? <div className="grid min-h-48 place-items-center sm:col-span-2 xl:col-span-3"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => item.kind === "wideWithAside" ? <div key={`wide-${item.schema.field}`} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2 xl:col-span-3 xl:grid-cols-3"><div className="min-w-0 sm:col-span-2 xl:col-span-2">{renderSchemaField(item.schema, item.index)}</div><div className="flex min-w-0 flex-col gap-3 sm:col-span-2 xl:col-span-1">{item.aside?.map(({ schema, index }) => renderSchemaField(schema, index, true))}</div></div> : <div key={`${item.kind}-${item.schema.field}`} className={`min-w-0 ${item.kind === "wide" ? "sm:col-span-2 xl:col-span-2" : item.kind === "field" ? "sm:col-span-2 xl:col-span-3" : ""}`}>{renderSchemaField(item.schema, item.index, item.kind === "cards")}</div>)}</div>
+          : selected.hasConfig ? <div className="space-y-3.5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => {
+            if (item.kind === "panel") {
+              const multi = item.items.length > 1
+              return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border/70 bg-border/60 shadow-[0_1px_2px_rgba(28,29,58,0.04)] ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }) => <div key={schema.field} className="min-w-0 bg-card px-4 py-3 transition-colors hover:bg-indigo-50/25">{renderSchemaField(schema, index, true)}</div>)}</div>
+            }
+            return <div key={`block-${item.schema.field}`} className="min-w-0">{renderSchemaField(item.schema, item.index)}</div>
+          })}</div>
             : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
               : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {!sourceFullscreen && selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
@@ -2206,20 +2239,22 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" || component === "GSelectGroup"
   const forceAvatarKind = component === "GSelectFriend" ? "qq" : component === "GSelectGroup" ? "group" : undefined
   const textValue = typeof value === "string" ? value : value == null ? "" : String(value)
-  if (compactCard && component === "Switch") return <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-border/80 bg-white px-3 py-2.5">
+  const colorInput = component === "ColorPicker" || component === "GColorPicker" || (component === "Input" && String(label).includes("颜色") && (!props.type || props.type === "text"))
+  if (compactCard && component === "Switch") return <div className="flex min-h-12 items-center justify-between gap-3 py-1">
     <div className="min-w-0"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
-    <div className="flex shrink-0 items-center gap-2"><span className="text-[10px] text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
+    <div className="flex shrink-0 items-center gap-2"><span className={`text-[10px] font-medium ${value ? "text-indigo-600" : "text-slate-400"}`}>{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
   </div>
-  if (compactCard) return <div className="space-y-2 rounded-xl border border-border/80 bg-white p-3">
+  if (compactCard) return <div className="space-y-1.5 py-0.5">
     <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
-    {component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={onChange} /> : <Input type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
+    {component === "InputNumber" ? <Input className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={onChange} /> : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
   </div>
-  return <div className="space-y-2 rounded-xl border border-border/80 bg-white p-3">
+  return <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/40 p-3.5 transition-colors hover:border-indigo-200/80 hover:bg-indigo-50/30">
     <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
     <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} />
       : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />
+      : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} />
       : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} forceItemType="string" forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />

@@ -33,6 +33,7 @@ const defaultConfig = {
   enabled: true,
   intervalSeconds: 60,
   serviceUrl: "https://example.com/api",
+  redisValueColor: "#485ab6",
   demoPassword: "",
   description: "这是 InputTextArea 的多行文本示例。",
   mode: "balanced",
@@ -73,6 +74,7 @@ function normalizeConfig(value) {
     enabled: typeof saved.enabled === "boolean" ? saved.enabled : defaultConfig.enabled,
     intervalSeconds: boundedInteger(saved.intervalSeconds, 5, 3600, defaultConfig.intervalSeconds),
     serviceUrl: typeof saved.serviceUrl === "string" ? saved.serviceUrl : defaultConfig.serviceUrl,
+    redisValueColor: typeof saved.redisValueColor === "string" ? saved.redisValueColor : defaultConfig.redisValueColor,
     demoPassword: typeof saved.demoPassword === "string" ? saved.demoPassword : "",
     description: typeof saved.description === "string" ? saved.description : defaultConfig.description,
     mode: modeValues.includes(saved.mode) ? saved.mode : defaultConfig.mode,
@@ -99,6 +101,7 @@ function validateConfig(data) {
   if (typeof data.enabled !== "boolean") return "启用状态无效"
   if (!Number.isSafeInteger(Number(data.intervalSeconds)) || Number(data.intervalSeconds) < 5 || Number(data.intervalSeconds) > 3600) return "运行间隔必须是 5 到 3600 秒之间的整数"
   if (typeof data.serviceUrl !== "string" || data.serviceUrl.length > 2048) return "服务地址无效"
+  if (typeof data.redisValueColor !== "string" || data.redisValueColor.length > 64) return "Redis 值颜色无效"
   if (typeof data.demoPassword !== "string" || data.demoPassword.length > 1024) return "密码框示例内容无效"
   if (typeof data.description !== "string" || data.description.length > 4000) return "说明文本不能超过 4000 个字符"
   if (!modeValues.includes(data.mode)) return "运行模式无效"
@@ -161,6 +164,12 @@ export function supportPanel() {
           // 未指定 component 时默认也是 Input；此处显式写出便于复制。
           component: "Input",
           componentProps: { placeholder: "https://example.com/api", autocomplete: "url" },
+        },
+        {
+          field: "redisValueColor",
+          label: "Redis 值颜色",
+          component: "ColorPicker",
+          componentProps: { placeholder: "#485ab6" },
         },
         {
           field: "demoPassword",

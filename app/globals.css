@@ -34,29 +34,42 @@
 }
 
 :root {
-  --background: #f5f6fa;
-  --foreground: #1c2031;
+  --background: #f6f7fb;
+  --foreground: #1a1d2e;
   --card: #ffffff;
-  --card-foreground: #1c2031;
-  --primary: #626bd1;
+  --card-foreground: #1a1d2e;
+  --primary: #5952d4;
   --primary-foreground: #ffffff;
-  --secondary: #eef0fb;
-  --secondary-foreground: #444b9b;
-  --muted: #f1f2f7;
-  --muted-foreground: #7b8094;
-  --accent: #eeeffa;
-  --accent-foreground: #414888;
-  --destructive: #d9475e;
-  --border: #e7e8f0;
-  --input: #e1e3ec;
-  --ring: #9098ea;
+  --secondary: #efeffa;
+  --secondary-foreground: #4a439e;
+  --muted: #f1f2f8;
+  --muted-foreground: #6e7389;
+  --accent: #edeefb;
+  --accent-foreground: #453f96;
+  --destructive: #d94860;
+  --border: #e7e8f1;
+  --input: #e2e3ee;
+  --ring: #8f8ae8;
 }
 
 * { box-sizing: border-box; }
 html, body { min-height: 100%; }
-body { margin: 0; background: var(--background); color: var(--foreground); font-family: Arial, "Microsoft YaHei", sans-serif; }
+body {
+  margin: 0;
+  background-color: var(--background);
+  background-image:
+    radial-gradient(1100px 520px at 88% -8%, rgba(99, 91, 220, .075), transparent 62%),
+    radial-gradient(880px 480px at -8% 108%, rgba(56, 132, 248, .05), transparent 58%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  color: var(--foreground);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
 button, input, textarea { font: inherit; }
-::selection { background: #dfe2ff; }
+::selection { background: rgba(89, 82, 212, .16); }
 
 @keyframes admin-dialog-overlay-in {
   from { opacity: 0; }
@@ -206,9 +219,10 @@ button, input, textarea { font: inherit; }
   }
 }
 
-.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #d4d6e2 transparent; }
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: #c9cbdd transparent; }
 .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d6e2; border-radius: 999px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #c9cbdd; border-radius: 999px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #b3b6cf; }
 
 .file-manager-fullscreen {
   width: 100%;
