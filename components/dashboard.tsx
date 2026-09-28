@@ -569,7 +569,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-0 pt-16 sm:px-6 md:pt-0 lg:px-9" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
@@ -1739,6 +1739,26 @@ function splitPluginSchemaGroups(schemas: any[]) {
   return groups
 }
 
+function groupSchemaFields(schemas: any[], data: any) {
+  const groups: { kind: "cards" | "wide" | "field"; schemas: any[] }[] = []
+  for (const schema of schemas) {
+    if (!schema?.field) continue
+    const component = String(schema.component || "Input")
+    const value = getNested(data, schema.field)
+    const props = schema.componentProps || {}
+    const optionLabels = (Array.isArray(props.options) ? props.options : []).map((option: any) => String(option && typeof option === "object" ? option.label ?? option.title ?? option.value ?? "" : option))
+    const compactOptionGroup = (component === "CheckboxGroup" || (component === "Select" && (props.mode === "multiple" || props.mode === "tags"))) && optionLabels.length <= 8 && optionLabels.reduce((length: number, text: string) => length + Array.from(text).length, 0) <= 36
+    const recordList = Array.isArray(value) && value.length > 0 && value.every(isSimpleRecord)
+    const fullWidth = (Array.isArray(value) && !compactOptionGroup) || isObject(value) || component === "InputTextArea" || component === "EasyCron" || component === "GTags" || (component === "CheckboxGroup" && !compactOptionGroup) || component === "GSelectFriend" || component === "GSelectGroup" || component === "GSubForm" || (component === "Select" && (props.mode === "multiple" || props.mode === "tags") && !compactOptionGroup) || (multilineTextField(schema.field, value) && !secretField(schema.field))
+    const compact = component === "Switch" || ["Input", "InputNumber", "Select", "RadioGroup"].includes(component) || compactOptionGroup
+    const kind = recordList ? "wide" : compact && !fullWidth ? "cards" : "field"
+    const previous = groups[groups.length - 1]
+    if (kind === "cards" && previous?.kind === "cards") previous.schemas.push(schema)
+    else groups.push({ kind, schemas: [schema] })
+  }
+  return groups
+}
+
 function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
   const [plugins, setPlugins] = useState<any[]>([])
   const [pluginSidebarCollapsed, setPluginSidebarCollapsed] = useBrowserBooleanPreference("pluginSidebarCollapsed")
@@ -1805,6 +1825,21 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const schemaGroups = selected?.hasConfig ? splitPluginSchemaGroups(selected.schemas) : []
   const hasSchemaGroupTabs = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "SOFT_GROUP_BEGIN"))
   const activeSchemaGroupData = schemaGroups[activeSchemaGroup] || schemaGroups[0]
+  const schemaRows = groupSchemaFields(hasSchemaGroupTabs ? activeSchemaGroupData?.schemas || [] : selected?.schemas || [], data)
+  const schemaItems = schemaRows.flatMap(row => row.schemas.map((schema, index) => ({ kind: row.kind, schema, index })))
+  const schemaLayout: { kind: "cards" | "wide" | "field" | "wideWithAside"; schema: any; index: number; aside?: typeof schemaItems }[] = []
+  for (let index = 0; index < schemaItems.length; index++) {
+    const item = schemaItems[index]
+    if (item.kind === "wide") {
+      const aside = schemaItems.slice(index + 1, index + 6).every(next => next?.kind === "cards")
+        ? schemaItems.slice(index + 1, index + 6)
+        : []
+      if (aside.length) {
+        schemaLayout.push({ ...item, kind: "wideWithAside", aside })
+        index += aside.length
+      } else schemaLayout.push(item)
+    } else schemaLayout.push(item)
+  }
   const needsSchemaFriends = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectFriend" || /qq|friend|user/i.test(String(schema.field || ""))))
   const needsSchemaGroups = Boolean(selected?.hasConfig && selected.schemas.some((schema: any) => schema.component === "GSelectGroup" || /group/i.test(String(schema.field || ""))))
   useEffect(() => {
@@ -1895,6 +1930,9 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const shownLarge = largePlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(largeSearch.toLowerCase()))
   const shownSmall = smallPlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(smallSearch.toLowerCase()))
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
+  function renderSchemaField(schema: any, index: number, compactCard = false) {
+    return <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} friendOptions={schemaFriendOptions} friendsLoading={schemaFriendsLoading} friendsError={schemaFriendsError} groupOptions={schemaGroupOptions} groupsLoading={schemaGroupsLoading} groupsError={schemaGroupsError} compactCard={compactCard} />
+  }
   async function save() {
     if (!selected || busy) return
     setBusy(true)
@@ -2001,8 +2039,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
       { label: "重新扫描", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="重新扫描" title="重新扫描" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "重新扫描"}</Button> },
     ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
-      <div className="relative h-[640px] min-h-[640px] min-w-0 xl:h-dvh xl:min-h-0">
+    <div className={`plugin-center-grid grid min-h-[640px] gap-5 xl:min-h-0 xl:items-start ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
+      <div className="relative h-[640px] min-h-[640px] min-w-0 xl:h-auto xl:min-h-0">
         <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
         <div className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-white p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -2053,7 +2091,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-5" : "p-5"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${sourceFullscreen ? "" : "rounded-xl border border-border"}`}><div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><div className="flex shrink-0 items-center gap-2"><span className="hidden text-[10px] text-muted-foreground sm:block">Ctrl+S 保存 · 重启后加载</span><Button type="button" size="icon" variant="ghost" className="size-8" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{detailLoading ? <div className="grid min-h-[545px] flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="min-h-[545px] flex-1" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
-          : selected.hasConfig ? <div className="space-y-5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : (hasSchemaGroupTabs ? activeSchemaGroupData?.schemas || [] : selected.schemas).map((schema: any, index: number) => schema.field ? <SchemaField key={`${schema.field}-${index}`} schema={schema} value={getNested(data, schema.field)} onChange={value => update(schema.field, value)} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} friendOptions={schemaFriendOptions} friendsLoading={schemaFriendsLoading} friendsError={schemaFriendsError} groupOptions={schemaGroupOptions} groupsLoading={schemaGroupsLoading} groupsError={schemaGroupsError} /> : null)}</div>
+          : selected.hasConfig ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 xl:grid-flow-dense">{detailLoading ? <div className="grid min-h-48 place-items-center sm:col-span-2 xl:col-span-3"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => item.kind === "wideWithAside" ? <div key={`wide-${item.schema.field}`} className="grid min-w-0 gap-3 sm:col-span-2 sm:grid-cols-2 xl:col-span-3 xl:grid-cols-3"><div className="min-w-0 sm:col-span-2 xl:col-span-2">{renderSchemaField(item.schema, item.index)}</div><div className="flex min-w-0 flex-col gap-3 sm:col-span-2 xl:col-span-1">{item.aside?.map(({ schema, index }) => renderSchemaField(schema, index, true))}</div></div> : <div key={`${item.kind}-${item.schema.field}`} className={`min-w-0 ${item.kind === "wide" ? "sm:col-span-2 xl:col-span-2" : item.kind === "field" ? "sm:col-span-2 xl:col-span-3" : ""}`}>{renderSchemaField(item.schema, item.index, item.kind === "cards")}</div>)}</div>
             : selected.configFiles?.length > 0 ? <div className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3"><div><div className="text-xs font-semibold text-amber-950">未找到 *.support.js 配置入口</div><p className="mt-1 text-[10px] text-amber-900/75">以下是当前插件 config/configs 目录中的配置文件，可预览并在文件管理器中编辑。</p></div><select aria-label="选择插件配置文件" value={activeConfigFile?.path || ""} onChange={event => setSelectedConfigFile(event.target.value)} className="h-9 max-w-full rounded-lg border border-amber-200 bg-white px-3 text-xs text-slate-700 outline-none focus-visible:ring-2 focus-visible:ring-amber-400">{selected.configFiles.map((file: any) => <option key={file.path} value={file.path}>{file.name}</option>)}</select></div><div className="overflow-hidden rounded-xl border border-border"><div className="flex items-center justify-between border-b border-border bg-slate-50/80 px-4 py-2.5 text-xs"><span className="truncate font-medium">{activeConfigFile?.path}</span>{activeConfigFile && <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">{formatBytes(activeConfigFile.size)}</span>}</div>{detailLoading ? <div className="grid min-h-[420px] place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <Textarea readOnly spellCheck={false} aria-label="插件配置文件预览" className="min-h-[420px] resize-y rounded-none border-0 bg-[#fbfbfd] p-5 font-mono text-[12px] leading-6 shadow-none focus-visible:ring-0" value={configPreview} />}</div></div>
               : <div className="rounded-2xl border border-dashed border-border bg-slate-50/70 px-6 py-10 text-center"><div className="mx-auto grid size-11 place-items-center rounded-2xl bg-white text-slate-500 shadow-sm"><Plug className="size-5" /></div><div className="mt-3 text-sm font-medium">{selected.hasSupport ? "插件提供了 support 入口，但没有可视化配置表单" : "未找到 *.support.js 或可预览的配置文件"}</div><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{selected.hasSupport ? "请检查配置入口是否提供 configInfo.schemas 和 getConfigData()。" : "可打开插件目录浏览源码，或添加 elia.support.js / guoba.support.js 配置入口。"}</p><Button variant="outline" size="sm" className="mt-4" onClick={() => openFileManager(selected.sourcePath)}><FileCode2 />浏览插件目录</Button></div>}
         {!sourceFullscreen && selected?.actions?.length > 0 && <div className="mt-8 border-t border-border pt-5"><div className="mb-1 text-sm font-semibold">插件操作</div><p className="mb-3 text-xs text-muted-foreground">调用 Guoba 兼容接口 configInfo.actions；运行前会进行确认。</p><Textarea className="mb-3 min-h-20 font-mono text-xs" value={actionArgs} onChange={event => setActionArgs(event.target.value)} /><div className="flex flex-wrap gap-2">{selected.actions.map((action: any) => <Button key={action.key} variant="outline" size="sm" disabled={!action.available || busy} onClick={() => runAction(action.key)}><Sparkles />{action.key}</Button>)}</div></div>}
@@ -2159,7 +2197,7 @@ function CronExpressionField({ value, onChange, validate }: { value: string; onC
   </div>
 }
 
-function SchemaField({ schema, value, onChange, validateCron, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError }: { schema: any; value: any; onChange: (value: any) => void; validateCron: (expression: string) => Promise<any>; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string }) {
+function SchemaField({ schema, value, onChange, validateCron, friendOptions, friendsLoading, friendsError, groupOptions, groupsLoading, groupsError, compactCard = false }: { schema: any; value: any; onChange: (value: any) => void; validateCron: (expression: string) => Promise<any>; friendOptions?: FriendOption[]; friendsLoading?: boolean; friendsError?: string; groupOptions?: GroupOption[]; groupsLoading?: boolean; groupsError?: string; compactCard?: boolean }) {
   const component = String(schema.component || "Input")
   const props = schema.componentProps || {}
   const label = schema.label || schema.field
@@ -2168,8 +2206,16 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" || component === "GSelectGroup"
   const forceAvatarKind = component === "GSelectFriend" ? "qq" : component === "GSelectGroup" ? "group" : undefined
   const textValue = typeof value === "string" ? value : value == null ? "" : String(value)
-  return <div className="grid gap-3 md:grid-cols-[minmax(155px,250px)_minmax(220px,1fr)]">
-    <div className="pt-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
+  if (compactCard && component === "Switch") return <div className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-border/80 bg-white px-3 py-2.5">
+    <div className="min-w-0"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
+    <div className="flex shrink-0 items-center gap-2"><span className="text-[10px] text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
+  </div>
+  if (compactCard) return <div className="space-y-2 rounded-xl border border-border/80 bg-white p-3">
+    <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
+    {component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={onChange} /> : <Input type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
+  </div>
+  return <div className="space-y-2 rounded-xl border border-border/80 bg-white p-3">
+    <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
     <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} />
