@@ -54,7 +54,9 @@ pnpm --filter elia-admin-panel build
 
 ## 面板设置
 
-所有运行设置都可在 EliaAdminPanel 插件配置页修改，也可编辑工作区中的 `data/elia-admin-panel/config.yaml`。该文件由插件创建，包含监听地址、端口、公网访问地址、开发模式、Secret，以及面板密码的盐和哈希；面板文件管理器会保护整个数据目录。不要将这个文件提交到 Git 或公开分享。
+所有运行设置都可在 EliaAdminPanel 插件配置页修改，也可编辑工作区中的 `data/elia-admin-panel/config.yaml`。该文件由插件创建，包含监听地址、端口、公网访问地址、登录随机图 API、开发模式、Secret，以及面板密码的盐和哈希；面板文件管理器会保护整个数据目录。不要将这个文件提交到 Git 或公开分享。
+
+登录页左侧默认从 `https://t.alcy.cc/moez` 加载随机图片。可在配置文件中修改 `loginImageApi: "https://example.com/random-image"`，该地址必须直接返回图片或重定向到图片；也可在插件配置页修改，保存后立即生效。
 
 `devMode` 默认为 `false`。本机开发时可在插件配置页开启，或在 YAML 中设置 `devMode: true`；重启 Bot 后面板会使用 `next dev` 并通过原面板地址提供实时热更新。开发模式性能较低且包含开发工具，不要对公网开放；生产环境保持关闭。
 

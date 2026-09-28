@@ -68,7 +68,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     const port = await new Promise(resolve => { const server = net.createServer().listen(0, "127.0.0.1", () => { const port = server.address().port; server.close(() => resolve(port)) }) })
     const password = crypto.randomBytes(24).toString("hex"), salt = crypto.randomBytes(16)
     const configFile = path.join(fixture, "data/elia-admin-panel/config.yaml")
-    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
+    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], loginImageApi: "https://images.example.test/random", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
     const cfg = { config: {}, bot: {}, getConfig() { return {} }, getGroup() { return {} } }
     global.Bot = { uin: [], fl: new Map(), gl: new Map() }
     global.logger = Object.fromEntries(["mark", "warn", "error", "info"].map(level => [level, message => logs.push(String(message))]))
@@ -102,6 +102,9 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     }
     const login = await call("/api/auth/login", { password }); assert.equal(login.status, 200)
     let cookie = login.cookie.split(";")[0]
+    const loginStatus = await call("/api/auth/status")
+    assert.equal(loginStatus.status, 200)
+    assert.equal(loginStatus.data.loginImageApi, "https://images.example.test/random")
     await t.test("全部业务路由与日志 WS 拒绝未登录，完整跨站来源被拒绝", async () => {
       let routes = 0
       for (const match of code.slice(code.indexOf('app.use("/api", requireAuth)')).matchAll(/app\.(get|post|put|patch)\(("[^"]+"|\[[^\]]+\])/g)) for (const route of match[2].matchAll(/"([^"]+)"/g)) {

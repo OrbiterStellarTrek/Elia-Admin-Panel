@@ -328,10 +328,11 @@ function ErrorState({ message }: { message: string }) {
   return <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><CircleHelp className="mt-0.5 size-4 shrink-0" />{message}</div>
 }
 
-function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) => void; initialError?: string }) {
+function Login({ onLogin, initialError = "", imageApi }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string }) {
   const [mode, setMode] = useState<"code" | "password">("code")
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
+  const [codeToast, setCodeToast] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(initialError)
   const [expiresAt, setExpiresAt] = useState(0)
@@ -345,12 +346,19 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
     return () => window.clearInterval(timer)
   }, [expiresAt])
 
+  useEffect(() => {
+    if (!codeToast) return
+    const timer = window.setTimeout(() => setCodeToast(""), 30_000)
+    return () => window.clearTimeout(timer)
+  }, [codeToast])
+
   async function requestCode() {
     setBusy(true)
     setError("")
     try {
       const result = await request("/api/auth/code/request", { method: "POST", body: "{}" })
       setExpiresAt(Date.now() + result.expiresIn * 1000)
+      setCodeToast(`${result.message || "验证码已写入本机凭据文件"}，验证码只能使用一次。`)
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
@@ -377,37 +385,48 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
     }
   }
   return (
-    <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e6e4fc_0,_transparent_46%),radial-gradient(ellipse_at_bottom_right,_#e2effb_0,_transparent_46%)] px-5 py-12">
-      <Card className="w-full max-w-[430px] overflow-hidden border-white/70 shadow-[0_30px_100px_-42px_rgba(58,67,150,.35)]">
+    <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e6e4fc_0,_transparent_46%),radial-gradient(ellipse_at_bottom_right,_#e2effb_0,_transparent_46%)] px-5 py-10 lg:py-12">
+      <div className="grid w-full max-w-[1260px] items-stretch lg:grid-cols-[minmax(0,1fr)_430px]">
+      <section aria-label="登录图片" className="relative aspect-video w-full overflow-hidden rounded-t-2xl rounded-b-none border border-white/70 bg-slate-200 shadow-[0_30px_100px_-42px_rgba(58,67,150,.35)] lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
+        <img src={imageApi} alt="登录页展示图片" className="absolute inset-0 size-full object-cover" />
+      </section>
+      <Card className="flex min-h-[800px] w-full max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-white/70 shadow-[0_30px_100px_-42px_rgba(58,67,150,.35)] sm:min-h-[672px] lg:rounded-l-none">
         <div className="h-2 bg-gradient-to-r from-indigo-500 via-violet-400 to-sky-300" />
         <CardHeader className="px-8 pt-9">
-          <div className="mb-4 grid size-12 place-items-center overflow-hidden rounded-2xl bg-indigo-50 p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-          <CardTitle className="text-2xl">EliaAdminPanel</CardTitle>
-          <CardDescription>登录以管理 Bot 配置、插件与工作区文件</CardDescription>
+          <div className="mb-4 flex items-center gap-4">
+            <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-2xl p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+            <CardTitle className="min-w-0 text-2xl">登录到 Elia Panel</CardTitle>
+          </div>
         </CardHeader>
-        <CardContent className="px-8 pb-8">
+        <CardContent className="flex flex-1 flex-col px-8 pb-8">
           <div role="tablist" aria-label="登录方式" className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
             <button type="button" role="tab" aria-selected={mode === "code"} onClick={() => { setMode("code"); setError("") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "code" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>验证码登录</button>
             <button type="button" role="tab" aria-selected={mode === "password"} onClick={() => { setMode("password"); setError("") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "password" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>面板密码</button>
           </div>
           <form onSubmit={submit} className="space-y-4">
             {mode === "code" ? <>
-              <div className="space-y-2"><Label htmlFor="panel-code">登录验证码</Label><Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} placeholder="从 Bot 本机凭据文件中复制验证码" /></div>
-              <Button type="button" variant="outline" className="w-full" disabled={busy || remaining > 0} onClick={requestCode}>
-                {busy ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                {remaining > 0 ? `验证码已写入本机凭据文件（${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}）` : "获取验证码"}
-              </Button>
-              <p className="text-xs leading-5 text-muted-foreground">点击获取后，在 Bot 本机读取 data/elia-admin-panel/credentials/login-code.txt。验证码 5 分钟有效且只能使用一次。</p>
-            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="读取本机 bootstrap.txt 中的首次密码" /></div>}
+              <div className="flex h-10 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-ring">
+                <Label htmlFor="panel-code" className="shrink-0 pl-4 text-sm font-medium">验证码</Label>
+                <Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
+                <Button type="button" variant="ghost" className="h-full shrink-0 rounded-none px-4 text-sm font-medium text-primary hover:bg-accent hover:text-accent-foreground" disabled={busy || remaining > 0} onClick={requestCode}>
+                  {busy && <LoaderCircle className="animate-spin" />}
+                  {remaining > 0 ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}` : "获取验证码"}
+                </Button>
+              </div>
+            </> : <div className="flex h-10 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-ring">
+              <Label htmlFor="panel-password" className="shrink-0 pl-4 text-sm font-medium">面板密码</Label>
+              <Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
+            </div>}
             {error && <ErrorState message={error} />}
-            <Button className="w-full" disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : <KeyRound />}进入控制台</Button>
+            <Button className={mode === "code" ? "w-full rounded-lg" : "w-full"} disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : mode === "password" ? <KeyRound /> : null}{mode === "code" ? "立即登录" : "进入控制台"}</Button>
           </form>
-          <div className="mt-5 space-y-2 border-t pt-4 text-xs leading-5 text-muted-foreground">
-            <p>主人也可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#面板登录</code> 获取快捷登录地址，地址 3 分钟有效且只能打开一次。</p>
-            <p>面板密码只用于登录校验，不会保存在浏览器。登录后浏览器仅保留 12 小时有效的 HttpOnly 临时令牌。</p>
+          <div className="mt-auto space-y-2 border-t pt-4 text-xs leading-5 text-muted-foreground">
+            <p>主人可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#面板登录</code> 获取快捷登录地址</p>
           </div>
         </CardContent>
       </Card>
+      </div>
+      {codeToast && <div role="status" className="admin-toast fixed right-4 top-4 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-700 shadow-xl sm:right-6 sm:top-6"><Check className="mt-0.5 size-4 shrink-0" />{codeToast}</div>}
     </main>
   )
 }
@@ -415,6 +434,7 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
 export default function Dashboard({ initialSection = "overview" }: { initialSection?: Section }) {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null)
+  const [loginImageApi, setLoginImageApi] = useState("https://t.alcy.cc/moez")
   const [loginError, setLoginError] = useState("")
   const [section, setSection] = useState<Section>(initialSection)
   const [fileManagerPath, setFileManagerPath] = useState(() => typeof window === "undefined" ? "." : routeQuery("path") || ".")
@@ -500,12 +520,19 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   useEffect(() => {
     let active = true
     const quickCode = window.location.hash.match(/^#\/(?:ml|quick)\/([^/?#]+)/)?.[1]
+    const statusRequest = request("/api/auth/status")
+      .then(result => {
+        if (active) setLoginImageApi(result.loginImageApi || "https://t.alcy.cc/moez")
+        return result
+      })
+      .catch(() => null)
     if (quickCode) {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`)
       request("/api/auth/quick", { method: "POST", body: JSON.stringify({ code: quickCode }) })
         .then(result => {
           if (!active) return
           setSessionExpiresAt(result.expiresAt)
+          notify("success", "登录成功！欢迎回来，主人~")
           setAuthenticated(true)
         })
         .catch(reason => {
@@ -514,16 +541,15 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
           setAuthenticated(false)
         })
     } else {
-      request("/api/auth/status")
+      statusRequest
         .then(result => {
           if (!active) return
-          setSessionExpiresAt(result.authenticated ? result.expiresAt : null)
-          setAuthenticated(result.authenticated)
+          setSessionExpiresAt(result?.authenticated ? result.expiresAt : null)
+          setAuthenticated(Boolean(result?.authenticated))
         })
-        .catch(() => { if (active) setAuthenticated(false) })
     }
     return () => { active = false }
-  }, [])
+  }, [notify])
 
   useEffect(() => {
     if (!authenticated || !sessionExpiresAt) return
@@ -542,7 +568,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }, [authenticated, sessionExpiresAt])
 
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
-  if (!authenticated) return <Login initialError={loginError} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); setAuthenticated(true) }} />
+  if (!authenticated) return <Login imageApi={loginImageApi} initialError={loginError} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
 
   async function logout() {
     try { await api("/api/auth/logout", { method: "POST" }) } catch {}

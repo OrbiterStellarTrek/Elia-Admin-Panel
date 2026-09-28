@@ -48,6 +48,7 @@ const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000
 const PASSWORD_HASH_ITERATIONS = 310_000
+const DEFAULT_LOGIN_IMAGE_API = "https://t.alcy.cc/moe"
 const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
@@ -109,6 +110,17 @@ const safeLogger = (level, message) => {
     else console.log(redact(message))
   } catch {
     console.log(redact(message))
+  }
+}
+
+function loginImageApi(value) {
+  if (typeof value !== "string" || !value.trim() || value.length > 2048) return DEFAULT_LOGIN_IMAGE_API
+  try {
+    const url = new URL(value.trim())
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return DEFAULT_LOGIN_IMAGE_API
+    return url.toString()
+  } catch {
+    return DEFAULT_LOGIN_IMAGE_API
   }
 }
 
@@ -1874,7 +1886,7 @@ export async function startAdminPanel() {
     if (!authenticated && token) {
       clearSessionCookie(req, res)
     }
-    res.json({ authenticated, expiresAt: authenticated ? session.expiresAt : null })
+    res.json({ authenticated, expiresAt: authenticated ? session.expiresAt : null, loginImageApi: loginImageApi(securityPolicy.loginImageApi) })
   })
   app.post("/api/auth/login", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
@@ -1902,7 +1914,7 @@ export async function startAdminPanel() {
     loginCode = { value: code, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }
     await deliverCredential("login-code", `验证码 ${code}\n有效期 5 分钟，只能使用一次\n`)
     safeLogger("warn", "[AdminPanel] 验证码已写入本机 data/elia-admin-panel/credentials/login-code.txt，5 分钟有效")
-    res.json({ ok: true, expiresIn: 300, message: "请在 Bot 本机读取 data/elia-admin-panel/credentials/login-code.txt，有效期 5 分钟" })
+    res.json({ ok: true, expiresIn: 300, message: "请前往 data/elia-admin-panel/credentials/login-code.txt 查看验证码，有效期 5 分钟" })
   }))
   app.post("/api/auth/code/check", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"

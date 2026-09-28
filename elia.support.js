@@ -6,6 +6,7 @@ import { contentVersion, requireVersion, trustedProxy, withBudget } from "./src/
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const passwordIterations = 310_000
+const defaultLoginImageApi = "https://t.alcy.cc/moez"
 
 function createPasswordCredential(password) {
   return withBudget("password-kdf", 4, () => createPasswordCredentialUnbounded(password))
@@ -33,6 +34,16 @@ function validatePublicUrls(value) {
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return false
   }
   return true
+}
+
+function validLoginImageApi(value) {
+  if (typeof value !== "string" || value.length > 2048) return false
+  try {
+    const url = new URL(value)
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
+  } catch {
+    return false
+  }
 }
 
 /** EliaAdminPanel 的原生配置入口；Guoba 适配器也复用此处定义。 */
@@ -80,6 +91,13 @@ export function supportPanel() {
           component: "InputTextArea",
           componentProps: { rows: 3, placeholder: "https://bot.example.com" },
         },
+        {
+          field: "loginImageApi",
+          label: "登录随机图 API",
+          bottomHelpMessage: "登录页左侧随机图片接口，需直接返回图片或重定向到图片；仅允许 HTTP(S) 地址。",
+          component: "Input",
+          componentProps: { placeholder: defaultLoginImageApi, autocomplete: "url" },
+        },
         { label: "登录安全", component: "SOFT_GROUP_BEGIN" },
         {
           field: "password",
@@ -105,6 +123,7 @@ export function supportPanel() {
           port: config.port || 50882,
           devMode: config.devMode === true,
           publicUrl: config.publicUrl || "",
+          loginImageApi: config.loginImageApi || defaultLoginImageApi,
           password: "",
           secret: "",
           trustedProxies: (config.trustedProxies || []).join("\n"),
@@ -120,11 +139,13 @@ export function supportPanel() {
         const port = Number(data.port ?? current.port ?? 50882)
         const devMode = data.devMode === undefined ? current.devMode === true : data.devMode === true
         const publicUrl = String(data.publicUrl ?? current.publicUrl ?? "").trim()
+        const loginImageApi = String(data.loginImageApi ?? current.loginImageApi ?? defaultLoginImageApi).trim() || defaultLoginImageApi
         const password = String(data.password ?? "")
         const secret = String(data.secret ?? "")
 
         if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return Result.error("监听地址或端口无效")
         if (publicUrl && !validatePublicUrls(publicUrl)) return Result.error("公网访问地址必须是 http(s) 站点根地址，不能包含子路径、查询参数或凭据")
+        if (!validLoginImageApi(loginImageApi)) return Result.error("登录随机图 API 必须是有效的 HTTP(S) 地址，且不能包含凭据")
         if (password && password.length < 12) return Result.error("面板密码至少需要 12 个字符")
         if (password.length > 1024) return Result.error("面板密码不能超过 1024 个字符")
         if (secret && Buffer.byteLength(secret, "utf8") < 32) return Result.error("浏览器会话 Secret 至少需要 32 个 UTF-8 字节")
@@ -132,7 +153,7 @@ export function supportPanel() {
         const trustedProxies = data.trustedProxies === undefined ? current.trustedProxies || [] : String(data.trustedProxies).split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean)
         if (trustedProxies.some(entry => !trustedProxy(entry.split("/")[0], [entry]))) return Result.error("可信代理必须填写有效 IP 或 CIDR")
 
-        const next = { ...current, host, port, devMode, publicUrl, trustedProxies, cookieSecure: data.cookieSecure === undefined ? current.cookieSecure === true : data.cookieSecure === true }
+        const next = { ...current, host, port, devMode, publicUrl, loginImageApi, trustedProxies, cookieSecure: data.cookieSecure === undefined ? current.cookieSecure === true : data.cookieSecure === true }
         delete next.password
         if (password) Object.assign(next, await createPasswordCredential(password))
         if (secret) next.secret = secret
@@ -144,6 +165,7 @@ export function supportPanel() {
         if (host !== String(current.host || "127.0.0.1").trim() || port !== Number(current.port || 50882)) notes.push("监听地址和端口需重启 Bot 后生效")
         if (devMode !== (current.devMode === true)) notes.push("开发模式需重启 Bot 后生效")
         if (publicUrl !== String(current.publicUrl || "").trim()) notes.push("公网访问地址立即用于主人快捷登录链接")
+        if (loginImageApi !== String(current.loginImageApi || defaultLoginImageApi).trim()) notes.push("登录随机图 API 立即生效")
         return Result.ok({}, `配置已保存；${notes.join("；") || "没有需要立即生效的变更"}`)
         })
       },
