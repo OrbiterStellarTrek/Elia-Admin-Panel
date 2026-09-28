@@ -71,6 +71,7 @@ const DEBUG_AUDIO_INPUT_FORMATS = new Map([
 ])
 const PLUGIN_CONFIG_EXTENSIONS = new Set([".yaml", ".yml", ".json", ".toml", ".ini", ".conf", ".properties"])
 const PLUGIN_SCAN_IGNORED_DIRECTORIES = new Set([".git", "node_modules", ".next", "out", "dist", "build", "coverage", "data", "logs"])
+const PLUGIN_SCAN_IGNORED_ROOTS = new Set(["system", "other"])
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
@@ -1020,7 +1021,7 @@ async function listPlugins() {
   const result = []
   const entries = await fs.readdir(PLUGINS, { withFileTypes: true })
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue
+    if (!entry.isDirectory() || entry.name.startsWith(".") || PLUGIN_SCAN_IGNORED_ROOTS.has(entry.name.toLowerCase())) continue
     const directory = path.join(PLUGINS, entry.name)
     let children
     try {

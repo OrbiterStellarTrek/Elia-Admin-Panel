@@ -20,9 +20,12 @@ let browser
 let module
 let failures = []
 try {
-  for (const folder of ["plugins/fixture-support", "plugins/fixture-config/config", "plugins/fixture-empty", "plugins/example", "config/config", "data/elia-admin-panel", "logs"] ) await fs.mkdir(path.join(temp, folder), { recursive: true })
+  for (const folder of ["plugins/fixture-support", "plugins/fixture-config/config", "plugins/fixture-empty", "plugins/system", "plugins/other", "plugins/example", "config/config", "data/elia-admin-panel", "logs"] ) await fs.mkdir(path.join(temp, folder), { recursive: true })
   await fs.writeFile(path.join(temp, "package.json"), '{"type":"module"}')
   for (const folder of ["fixture-support", "fixture-config", "fixture-empty"]) await fs.writeFile(path.join(temp, "plugins", folder, "index.js"), "export default {}")
+  await fs.writeFile(path.join(temp, "plugins/system/index.js"), "export default {}")
+  await fs.writeFile(path.join(temp, "plugins/system/update.js"), "export default {}")
+  await fs.writeFile(path.join(temp, "plugins/other/helper.js"), "export default {}")
   await fs.writeFile(path.join(temp, "plugins/fixture-config/config/settings.yaml"), "enabled: true\n")
   await fs.writeFile(path.join(temp, "plugins/fixture-support/package.json"), '{"type":"module","name":"fixture-plugin","dependencies":{"yaml":"^2.8.0"}}')
   await fs.writeFile(path.join(temp, "plugins/fixture-support/elia.support.js"), `
