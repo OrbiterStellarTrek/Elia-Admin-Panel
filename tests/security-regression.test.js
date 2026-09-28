@@ -120,13 +120,20 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.ok(!login.cookie.includes("; Secure"))
       assert.ok((await call("/api/auth/login", { password }, "", "POST", { "x-forwarded-proto": "https" })).cookie.includes("; Secure"))
     })
-    await t.test("24 次同源并发最多 10 次预占、最多 4 个 KDF，计数没有丢失", async () => {
+    await t.test("24 次同源请求最多 10 次预占，拒绝超额请求且计数没有丢失", async () => {
       module.namespace.resetAttempts()
-      const responses = await Promise.all(Array.from({ length: 24 }, () => call("/api/auth/login", { password: "错误密码" })))
-      assert.ok(responses.filter(value => value.status === 401).length <= 4)
-      assert.ok(responses.filter(value => value.status === 429).length >= 20)
-      assert.deepEqual(Array.from(module.namespace.attemptCounts()), [10])
-      module.namespace.resetAttempts()
+      try {
+        const responses = await Promise.all(Array.from({ length: 24 }, () => call("/api/auth/login", { password: "错误密码" })))
+        const unauthorized = responses.filter(value => value.status === 401)
+        const limited = responses.filter(value => value.status === 429)
+        assert.equal(responses.length, 24)
+        assert.ok(unauthorized.length <= 10)
+        assert.ok(limited.length >= 14)
+        assert.equal(unauthorized.length + limited.length, 24)
+        assert.deepEqual(Array.from(module.namespace.attemptCounts()), [10])
+      } finally {
+        module.namespace.resetAttempts()
+      }
     })
     await t.test("JS 和头像回环下载拒绝在 TCP 连接之前", async () => {
       tcpServer = net.createServer(socket => { localConnections++; socket.destroy() })
@@ -223,7 +230,9 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     await t.test("同名大小写并发锁和失败 staging 清理不会删除成功插件", async () => {
       pauseClones = true
       const first = call("/api/plugins/install", { url: "https://example.com/a.git", name: "race-fixture" }, cookie)
-      while (!cloneWaiters.length) await delay(10)
+      const cloneDeadline = Date.now() + 5_000
+      while (!cloneWaiters.length && Date.now() < cloneDeadline) await delay(10)
+      assert.equal(cloneWaiters.length, 1, "安装请求未进入 git clone 阶段")
       const second = await call("/api/plugins/install", { url: "https://example.com/a.git", name: "RACE-FIXTURE" }, cookie)
       assert.equal(second.status, 409); assert.equal(cloneWaiters.length, 1)
       await cloneWaiters.shift()(); assert.equal((await first).status, 200)

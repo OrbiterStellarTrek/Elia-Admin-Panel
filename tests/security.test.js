@@ -90,7 +90,7 @@ test("Git 固定 DNS、禁用重定向，常规代理只接受运维批准的固
   assert.ok(approved.args.includes("http.proxy=http://127.0.0.1:7890/"))
 })
 
-test("规范化锁覆盖大小写变体，并发预算在 await 前占用", async () => {
+test("规范化锁覆盖大小写变体，并发预算在 await 前占用且遵守上限", async () => {
   let release
   const first = withLock("Plugins/Test", () => new Promise(resolve => { release = resolve }))
   await assert.rejects(withLock("plugins/test", () => {}), { status: 409 })
@@ -99,6 +99,22 @@ test("规范化锁覆盖大小写变体，并发预算在 await 前占用", asyn
   await assert.rejects(withBudget("unit", 1, () => {}), { status: 429 })
   release(); await one
   await withBudget("unit", 1, () => {})
+
+  let active = 0, peak = 0
+  const releases = []
+  const requests = Array.from({ length: 24 }, () => withBudget("unit-four", 4, async () => {
+    active++
+    peak = Math.max(peak, active)
+    await new Promise(resolve => releases.push(resolve))
+    active--
+  }))
+  assert.equal(active, 4)
+  assert.equal(peak, 4)
+  for (const resolve of releases) resolve()
+  const results = await Promise.allSettled(requests)
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 4)
+  assert.equal(results.filter(result => result.status === "rejected" && result.reason.status === 429).length, 20)
+  assert.equal(active, 0)
 })
 
 test("完整 Origin 和可信代理 HTTPS Cookie 策略", () => {
