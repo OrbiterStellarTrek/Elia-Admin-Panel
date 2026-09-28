@@ -1507,9 +1507,9 @@ function proxyNextRequest(req, res) {
   req.pipe(proxy)
 }
 
-function proxyNextUpgrade(request, socket, head) {
+function proxyNextUpgrade(request, socket, head, sessionToken) {
   if (!nextDevPort) return socket.destroy()
-  devConnections.set(socket, request.headers.cookie)
+  devConnections.set(socket, sessionToken)
   socket.once("close", () => devConnections.delete(socket))
   const headers = { ...request.headers, host: `127.0.0.1:${nextDevPort}` }
   if (headers.origin) headers.origin = `http://127.0.0.1:${nextDevPort}`
@@ -1521,11 +1521,11 @@ function proxyNextUpgrade(request, socket, head) {
     headers,
   })
   proxy.on("upgrade", (response, upstreamSocket, upstreamHead) => {
-    if (!verifySessionToken(parseCookies(request.headers.cookie).get("elia_panel_session"))) { upstreamSocket.destroy(); return socket.destroy() }
-    devConnections.set(socket, request.headers.cookie)
-    const timer = setInterval(() => { if (!verifySessionToken(parseCookies(request.headers.cookie).get("elia_panel_session"))) socket.destroy() }, 15_000)
-    timer.unref?.()
-    socket.on("close", () => { clearInterval(timer); devConnections.delete(socket); upstreamSocket.destroy() })
+    if (sessionToken && !verifySessionToken(sessionToken)) { upstreamSocket.destroy(); return socket.destroy() }
+    devConnections.set(socket, sessionToken)
+    const timer = sessionToken ? setInterval(() => { if (!verifySessionToken(sessionToken)) socket.destroy() }, 15_000) : null
+    timer?.unref?.()
+    socket.on("close", () => { if (timer) clearInterval(timer); devConnections.delete(socket); upstreamSocket.destroy() })
     const responseHeaders = Object.entries(response.headers).flatMap(([name, value]) =>
       Array.isArray(value) ? value.map(item => `${name}: ${item}`) : value ? [`${name}: ${value}`] : [],
     )
@@ -1619,23 +1619,30 @@ function attachLogWebSocket(server) {
       socket.destroy()
       return
     }
-    if (!originAllowed(request, securityPolicy)) return socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
+    const isDevHmr = nextDevPort && ["/_next/hmr", "/_next/webpack-hmr"].includes(pathname)
+    if (!originAllowed(request, securityPolicy) || (isDevHmr && !request.headers.origin)) return socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
     let token
     try { token = parseCookies(request.headers.cookie).get("elia_panel_session") } catch {
       socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
       socket.destroy()
       return
     }
-    if (!token || !verifySessionToken(token)) {
+    const sessionToken = token && verifySessionToken(token) ? token : null
+    if (!sessionToken && !isDevHmr) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
       socket.destroy()
       return
     }
-    const sameSession = [...logWebSocketServer.clients].filter(client => client.logSessionToken === token).length + [...devConnections.values()].filter(cookie => parseCookies(cookie).get("elia_panel_session") === token).length
+    const sameSession = sessionToken
+      ? [...logWebSocketServer.clients].filter(client => client.logSessionToken === sessionToken).length + [...devConnections.values()].filter(value => value === sessionToken).length
+      : 0
     if (logWebSocketServer.clients.size + devConnections.size >= 32 || sameSession >= 4) return socket.end("HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n")
+    if (isDevHmr) {
+      proxyNextUpgrade(request, socket, head, sessionToken)
+      return
+    }
     if (pathname !== "/api/logs/ws") {
-      if (nextDevPort && ["/_next/hmr", "/_next/webpack-hmr"].includes(pathname)) proxyNextUpgrade(request, socket, head)
-      else socket.destroy()
+      socket.destroy()
       return
     }
     logWebSocketServer.handleUpgrade(request, socket, head, webSocket => {
@@ -1673,7 +1680,7 @@ function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = fals
 
 function closeInvalidConnections() {
   for (const socket of logWebSocketServer?.clients || []) if (!verifySessionToken(socket.logSessionToken)) socket.close(4401, "登录已失效")
-  for (const [socket, cookie] of devConnections) if (!verifySessionToken(parseCookies(cookie).get("elia_panel_session"))) socket.destroy()
+  for (const [socket, sessionToken] of devConnections) if (sessionToken && !verifySessionToken(sessionToken)) socket.destroy()
 }
 
 async function applySecurityConfig(config) {
