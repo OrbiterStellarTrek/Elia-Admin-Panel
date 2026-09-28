@@ -5,8 +5,30 @@ permissions:
 jobs:
   security:
     runs-on: ubuntu-latest
+    outputs:
+      frontend_changed: ${{ steps.frontend_changes.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect frontend changes
+        id: frontend_changes
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            changed_files="$(git ls-tree -r --name-only "$HEAD")"
+          else
+            changed_files="$(git diff --name-only "$BEFORE" "$HEAD")"
+          fi
+          if grep -Eq '^(app/|components/|public/|lib/|components\.json$|next-env\.d\.ts$|next\.config\.ts$|postcss\.config\.mjs$|tsconfig\.json$|package\.json$|pnpm-lock\.yaml$)' <<< "$changed_files"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -16,3 +38,33 @@ jobs:
       - run: pnpm typecheck
       - run: node scripts/check-secrets.mjs
       - run: pnpm audit --prod --audit-level=high --registry=https://registry.npmjs.org
+  frontend-release:
+    needs: security
+    if: github.event_name == 'push' && needs.security.outputs.frontend_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g pnpm@12.3.4
+      - run: pnpm install --ignore-scripts --registry=https://registry.npmjs.org
+      - run: pnpm build
+      - name: Package and publish frontend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          asset="frontend-${GITHUB_SHA}.tar.gz"
+          tag="sha-${GITHUB_SHA}"
+          tar -czf "$asset" -C out .
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber
+          else
+            gh release create "$tag" "$asset" \
+              --target "$GITHUB_SHA" \
+              --title "Frontend build ${GITHUB_SHA:0:12}" \
+              --notes "Automated frontend build for commit ${GITHUB_SHA}."
+          fi
