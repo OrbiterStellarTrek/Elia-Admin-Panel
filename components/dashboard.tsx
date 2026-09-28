@@ -358,7 +358,7 @@ function Login({ onLogin, initialError = "", imageApi }: { onLogin: (expiresAt: 
     try {
       const result = await request("/api/auth/code/request", { method: "POST", body: "{}" })
       setExpiresAt(Date.now() + result.expiresIn * 1000)
-      setCodeToast(`${result.message || "验证码已写入本机凭据文件"}，验证码只能使用一次。`)
+      setCodeToast(`${result.message || "验证码已写入本机凭据文件"}`)
     } catch (reason) {
       setError((reason as Error).message)
     } finally {

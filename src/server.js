@@ -592,12 +592,12 @@ function resolveWorkspacePath(relativePath = ".") {
     throw Object.assign(new Error("文件路径无效"), { status: 400 })
   }
   const absolute = path.resolve(ROOT, relativePath || ".")
-  if (!isInside(ROOT, absolute)) throw Object.assign(new Error("不能访问工作区以外的路径"), { status: 403 })
-  if (isInside(DATA_DIR, absolute)) throw Object.assign(new Error("面板凭据与会话数据由面板保护，不能通过文件管理器访问"), { status: 403 })
+  if (!isInside(ROOT, absolute)) throw Object.assign(new Error("禁止通过文件管理器访问该文件夹"), { status: 403 })
+  if (isInside(DATA_DIR, absolute)) throw Object.assign(new Error("禁止通过文件管理器访问该文件夹"), { status: 403 })
   const segments = path.relative(ROOT, absolute).split(path.sep).filter(Boolean)
-  if (segments.some(segment => /[. ]$/.test(segment) || /~\d/.test(segment) || segment.includes(":"))) throw Object.assign(new Error("不能使用 Windows 路径别名"), { status: 403 })
+  if (segments.some(segment => /[. ]$/.test(segment) || /~\d/.test(segment) || segment.includes(":"))) throw Object.assign(new Error("禁止使用 Windows 路径别名"), { status: 403 })
   if (segments.some(segment => BLOCKED_SEGMENTS.has(segment.toLowerCase()))) {
-    throw Object.assign(new Error("该目录由面板保护，不能通过文件管理器访问"), { status: 403 })
+    throw Object.assign(new Error("禁止通过文件管理器访问该文件夹"), { status: 403 })
   }
   return absolute
 }
@@ -674,7 +674,7 @@ async function initializePassword() {
   const { password: _plaintext, ...safeConfig } = config
   await writePanelConfig({ ...safeConfig, ...credential })
   await deliverCredential("bootstrap", `${generatedPassword}\n`)
-  safeLogger("mark", "[EliaAdminPanel] 首次密码已写入受保护的 data/elia-admin-panel/credentials/bootstrap.txt，请在本机读取并登录")
+  safeLogger("mark", "[EliaAdminPanel] 首次密码已写入受保护的 data/elia-admin-panel/credentials/bootstrap.txt，请前往查看")
 }
 
 async function verifyPanelPassword(submitted) {
@@ -1675,7 +1675,7 @@ async function restartBot() {
     const sign = crypto.createHmac("sha256", token).update(nonce).digest("hex")
     const response = await fetch(`http://127.0.0.1:${port}/restart?nonce=${encodeURIComponent(nonce)}&sign=${sign}`, { signal: AbortSignal.timeout(2500) })
     if (!response.ok) throw new Error(`重启请求返回 HTTP ${response.status}`)
-    return "已向 ksr 重启服务发送请求"
+    return "已向 ksr 发送重启请求"
   }
   if (process.env.pm_id !== undefined) {
     const pm2Script = path.join(ROOT, "node_modules", "pm2", "bin", "pm2")
@@ -1684,7 +1684,7 @@ async function restartBot() {
     child.unref()
     return "已向 PM2 发送重启请求"
   }
-  throw Object.assign(new Error("当前没有可识别的守护进程，面板未强制结束 Bot。请通过外部进程管理器重启。"), { status: 409 })
+  throw Object.assign(new Error("当前没有可识别的守护进程，面板未强制结束 Bot。请通过外部进程管理器重启"), { status: 409 })
 }
 
 function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false, stdoutOnly = false) {
@@ -1757,7 +1757,7 @@ function validateRemoteRepository(input) {
   let url
   try { url = new URL(input) } catch { throw Object.assign(new Error("请输入有效的 HTTPS 仓库地址"), { status: 400 }) }
   if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname || net.isIP(url.hostname) || url.hostname === "localhost" || url.hostname.endsWith(".local")) {
-    throw Object.assign(new Error("插件仓库只接受不含凭据的公开 HTTPS 域名地址"), { status: 400 })
+    throw Object.assign(new Error("不能输入带凭据的 HTTPS 仓库地址"), { status: 400 })
   }
   const name = path.posix.basename(url.pathname.replace(/\/$/, "")).replace(/\.git$/i, "")
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name) || name === "." || name === "..") {
@@ -1845,7 +1845,7 @@ async function validateCronWithRuntime(expression) {
 export async function startAdminPanel() {
   if (expressServer) return
   const settings = await readPanelSettings()
-  if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许绑定回环地址，请关闭 devMode 后远程部署")
+  if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许本地访问，请关闭 devMode 后再继续后续操作")
   await fs.mkdir(DATA_DIR, { recursive: true })
   await fs.mkdir(LOGS_DIR, { recursive: true })
   sessionSecret = await loadSessionSecret()
@@ -1908,11 +1908,11 @@ export async function startAdminPanel() {
   }))
   app.post("/api/auth/code/request", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
-    if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请读取本机凭据文件" })
+    if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请查看本机凭据文件" })
     if (!allowAttempt(codeRequestAttempts, ip, 3, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码请求过于频繁，请 15 分钟后再试" })
     const code = crypto.randomBytes(12).toString("base64url")
     loginCode = { value: code, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }
-    await deliverCredential("login-code", `验证码 ${code}\n有效期 5 分钟，只能使用一次\n`)
+    await deliverCredential("login-code", `验证码 ${code}`)
     safeLogger("warn", "[AdminPanel] 验证码已写入本机 data/elia-admin-panel/credentials/login-code.txt，5 分钟有效")
     res.json({ ok: true, expiresIn: 300, message: "请前往 data/elia-admin-panel/credentials/login-code.txt 查看验证码，有效期 5 分钟" })
   }))
@@ -1977,7 +1977,7 @@ export async function startAdminPanel() {
     const event = createPanelDebugEvent({ message, userId, messageType, groupId, replies })
     safeLogger("mark", `[面板调试输入][${messageType === "group" ? `群聊 ${groupId}` : "私聊"}][${userId}] ${message.slice(0, 200)}`)
     await pluginsLoader.deal(event)
-    res.json({ ok: true, replies, message: replies.length ? "消息处理完成，已捕获插件回复" : "消息已送入插件处理链，未捕获到回复" })
+    res.json({ ok: true, replies, message: replies.length ? "消息处理完成，已捕获插件回复" : "消息发送了，但是没有插件处理" })
   }))
 
   app.post("/api/cron/validate", asyncRoute(async (req, res) => {
@@ -2578,7 +2578,7 @@ export async function startAdminPanel() {
       const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
       fs.access(entry)
         .then(() => res.sendFile(entry))
-        .catch(() => res.status(503).send("Web UI 尚未构建。请在 plugins/EliaAdminPanel 中运行 pnpm install 和 pnpm run build。"))
+        .catch(() => res.status(503).send("当前插件没有有效的构建产物，请重新参阅 README.md 进行构建"))
     })
   }
   app.use((error, req, res, next) => {
@@ -2602,7 +2602,7 @@ export async function startAdminPanel() {
   startLogDirectoryWatcher()
   const address = expressServer.address()
   const shownHost = settings.host === "0.0.0.0" || settings.host === "::" ? "127.0.0.1" : settings.host
-  safeLogger("mark", `[EliaAdminPanel] Web 管理面板已启动：http://${shownHost}:${address.port}`)
+  safeLogger("mark", `[EliaAdminPanel] 网页管理面板已启动：http://${shownHost}:${address.port}`)
 }
 
 export async function createQuickLoginLinks() {
