@@ -78,7 +78,7 @@ EliaAdminPanel 自身的原生配置入口为 `elia.support.js`，导出 `suppor
 
 插件列表将含 `index.js`、Git 仓库或 `*.support.js` 的插件目录归为大插件；`example` 目录及未识别为独立插件目录下的 `.js` 文件归为小插件。小插件可直接在插件页编辑源码，保存前自动备份，Ctrl+S 可保存，重启 Bot 后加载新代码。大插件按 `elia.support.js`、`guoba.support.js`、其他 `*.support.js` 的顺序查找配置工厂；没有 support 入口时，面板预览其 `config/` 或 `configs/` 中的 YAML、JSON、TOML、INI、CONF 和 properties 文件，并可跳转文件管理器编辑。
 
-原生 `supportPanel()` 可同步或异步返回 `pluginInfo` 和 `configInfo`。标准 Guoba 的 `supportGuoba()` 需要同步返回对象，以匹配 Guoba 加载器的调用方式；其中配置读写方法仍可异步。插件列表中的 Logo 读取 `pluginInfo.iconPath`，支持插件目录内的 PNG、JPG、WebP、GIF 或 ICO 图片。示例：
+原生 `supportPanel()` 可同步或异步返回 `pluginInfo` 和 `configInfo`。标准 Guoba 的 `supportGuoba()` 需要同步返回对象，以匹配 Guoba 加载器的调用方式；其中配置读写方法仍可异步。插件列表中的 Logo 读取 `pluginInfo.iconPath`，支持插件目录内的 PNG、JPG、WebP、GIF 或 ICO 图片。完整的可复制示例见 [elia.support.example.js](elia.support.example.js)；将它复制到目标插件根目录并改名为 `elia.support.js`，示例配置保存在插件自己的 `config/example.json` 中。该示例文件名不会被面板当作 support 入口加载。下面是精简示例：
 
 ```js
 import path from "node:path"
@@ -119,7 +119,7 @@ export function supportPanel() {
 }
 ```
 
-`schemas[].field` 支持点分路径；可视化控件包括 `Switch`、`InputNumber`、`Input`、`InputTextArea`、`Select`、`RadioGroup`，以及以多行文本编辑的 `GTags`、`CheckboxGroup`、`GSelectFriend` 等列表字段。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。面板自身的 `elia.support.js` 和 `guoba.support.js` 共用配置定义，监听地址或端口修改后需重启 Bot 生效。
+`schemas[].field` 支持点分路径；完整控件示例见 [elia.support.example.js](elia.support.example.js)。支持 `SOFT_GROUP_BEGIN` 分组、`Switch`、`InputNumber`、`Input`（包括 `componentProps.type: "password"`）、`InputTextArea`、单选/多选/tags 模式的 `Select`、`RadioGroup`、`CheckboxGroup`、`GTags`、`GSelectFriend`、`GSelectGroup`、`EasyCron` 和 `GSubForm`。多选值保存为数组，tags 可添加自定义值；好友和群组选择从当前机器人账号缓存加载。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。面板自身的 `elia.support.js` 和 `guoba.support.js` 共用配置定义，监听地址或端口修改后需重启 Bot 生效。
 
 ## 开源许可
 
