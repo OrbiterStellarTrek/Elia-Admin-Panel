@@ -1891,6 +1891,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   }, [plugins, selected?.id])
   const largePlugins = plugins.filter(plugin => plugin.kind === "large")
   const smallPlugins = plugins.filter(plugin => plugin.kind === "small")
+  const hasUnconfiguredLargePlugins = largePlugins.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length)
   const shownLarge = largePlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(largeSearch.toLowerCase()))
   const shownSmall = smallPlugins.filter(plugin => `${plugin.title} ${plugin.name} ${plugin.author}`.toLowerCase().includes(smallSearch.toLowerCase()))
   function update(field: string, value: any) { setData((old: any) => setNested(old, field.split("."), value)) }
@@ -2000,26 +2001,26 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
       { label: "重新扫描", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="重新扫描" title="重新扫描" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "重新扫描"}</Button> },
     ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "72px" : "280px" } as React.CSSProperties}>
+    <div className={`plugin-center-grid grid min-h-[640px] gap-5 ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
       <div className="relative h-[640px] min-h-[640px] min-w-0 xl:h-dvh xl:min-h-0">
         <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
-        <div className={`absolute inset-0 z-20 hidden flex-col rounded-2xl border border-border bg-white p-2 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
-          <Button size="icon" variant="ghost" className="mx-auto mb-2 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
+        <div className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-white p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-            <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}<Button size="icon" variant="ghost" aria-label="展开无配置插件" onClick={() => setShowUnconfigured(value => !value)}><ChevronDown /></Button></div>
+            <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}{hasUnconfiguredLargePlugins && <Button size="icon" variant="ghost" aria-label={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} title={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} onClick={() => setShowUnconfigured(value => !value)}><ChevronDown className={showUnconfigured ? "rotate-180" : ""} /></Button>}</div>
             <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
+          <div className="mt-2 flex shrink-0 justify-start border-t border-border/70 px-1 pt-2"><Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight className="size-4" /></Button></div>
         </div>
         <div className={`flex min-h-[640px] flex-1 flex-col transition-opacity duration-150 xl:min-h-0 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
-          <Card className="flex max-h-[50%] min-h-0 flex-[0_1_auto] flex-col overflow-hidden rounded-none">
-            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
+          <Card className="flex max-h-[50%] min-h-0 flex-[0_1_auto] flex-col overflow-hidden rounded-tl-none rounded-tr-2xl rounded-br-none rounded-bl-none">
+            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {shownLarge.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length).map(renderPlugin)}{shownLarge.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length) && <div><Button type="button" size="sm" variant="ghost" className="w-full justify-between" onClick={() => setShowUnconfigured(value => !value)}>无配置插件（{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).length}）<ChevronDown className={showUnconfigured ? "rotate-180" : ""} /></Button>{(showUnconfigured || largeSearch.trim()) && shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).map(renderPlugin)}</div>}
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
           </Card>
-          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-t-0">
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-tl-none rounded-tr-none rounded-br-2xl rounded-bl-none border-t-0">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{smallPlugins.length}</Badge></span><ScriptInstaller api={api} notify={notify} onInstalled={refresh} /></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -2027,6 +2028,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
               {!loading && !shownSmall.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
             {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-slate-500">已禁用插件 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>启用</Button></div>)}</div>}
+            <div className="flex shrink-0 justify-start border-t border-border/70 px-2 py-2"><Button size="icon" variant="ghost" className="size-8" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
           </Card>
         </div>
         </div>

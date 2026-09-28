@@ -129,7 +129,7 @@ button, input, textarea { font: inherit; }
     transition: grid-template-columns 300ms cubic-bezier(.2,.8,.2,1);
   }
   .plugin-center-grid.is-collapsed {
-    grid-template-columns: 72px minmax(0, 1fr);
+    grid-template-columns: 56px minmax(0, 1fr);
   }
   .plugin-center-sidebar-fixed {
     position: fixed;
