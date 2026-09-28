@@ -787,11 +787,19 @@ function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; c
       <Metric icon={Users} label="群组缓存" value={status ? String(status.groupCount) : "—"} detail={status ? `${status.accounts.length} 个机器人账号` : "当前 Bot 群组数量"} tone="violet" />
     </div>
     <div className="mb-2 text-xs font-semibold text-slate-700">消息统计</div>
-    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       <Metric icon={Send} label="今日发送" value={formatCount(status?.messages?.sentToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} tone="blue" />
+      <Metric icon={Clock3} label="本周发送" value={formatCount(status?.messages?.sentThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} tone="indigo" />
       <Metric icon={Clock3} label="本月发送" value={formatCount(status?.messages?.sentThisMonth)} detail={status?.messages?.redisAvailable ? "Redis 月度计数" : "Redis 未连接"} tone="indigo" />
+      <Metric icon={Send} label="累计发送" value={formatCount(status?.messages?.sentTotal)} detail={status?.messages?.redisAvailable ? "Redis 累计计数" : "Redis 未连接"} tone="violet" />
       <Metric icon={MessageSquareText} label="运行期间接收" value={formatCount(status?.messages?.receivedSinceStart)} detail={status?.messages?.receivedSinceStart == null ? "适配器未提供接收计数" : "机器人账号运行时计数"} tone="green" />
-      <Metric icon={ImageIcon} label="今日截图" value={formatCount(status?.messages?.screenshotsToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} tone="violet" />
+    </div>
+    <div className="mb-2 text-xs font-semibold text-slate-700">图片统计</div>
+    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric icon={ImageIcon} label="今日生成图片" value={formatCount(status?.messages?.screenshotsToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} tone="violet" />
+      <Metric icon={Clock3} label="本周生成图片" value={formatCount(status?.messages?.screenshotsThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} tone="blue" />
+      <Metric icon={Clock3} label="本月生成图片" value={formatCount(status?.messages?.screenshotsThisMonth)} detail={status?.messages?.redisAvailable ? "Redis 月度计数" : "Redis 未连接"} tone="indigo" />
+      <Metric icon={ImageIcon} label="累计生成图片" value={formatCount(status?.messages?.screenshotsTotal)} detail={status?.messages?.redisAvailable ? "Redis 累计计数" : "Redis 未连接"} tone="green" />
     </div>
     <div className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
       <Card className="overflow-hidden"><CardHeader className="flex-row items-start justify-between"><div><CardTitle>Bot 实例</CardTitle><CardDescription className="mt-1">Yunzai 运行环境与连接信息</CardDescription></div><Badge className="border-emerald-100 bg-emerald-50 text-emerald-700"><span className="mr-1.5 size-1.5 rounded-full bg-emerald-500" />{status ? "运行正常" : "连接中"}</Badge></CardHeader><CardContent>

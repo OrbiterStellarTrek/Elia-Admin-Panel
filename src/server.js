@@ -1200,28 +1200,60 @@ async function getMessageMetrics() {
     return Number.isSafeInteger(count) && count >= 0 ? count : null
   }).filter(count => count !== null)
   const receivedSinceStart = receivedCounts.length ? receivedCounts.reduce((total, count) => total + count, 0) : null
-  const unavailable = { redisAvailable: false, sentToday: null, sentThisMonth: null, screenshotsToday: null, receivedSinceStart }
+  const unavailable = {
+    redisAvailable: false,
+    sentToday: null,
+    sentThisWeek: null,
+    sentThisMonth: null,
+    sentTotal: null,
+    screenshotsToday: null,
+    screenshotsThisWeek: null,
+    screenshotsThisMonth: null,
+    screenshotsTotal: null,
+    receivedSinceStart,
+  }
   const redis = global.redis
   if (!redis?.isReady || typeof redis.mGet !== "function") return unavailable
 
   const now = new Date()
-  const day = `${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`
+  const dateKey = date => `${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`
+  const day = dateKey(now)
   const month = now.getMonth() + 1
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - now.getDay())
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(weekStart)
+    date.setDate(weekStart.getDate() + index)
+    return dateKey(date)
+  })
   try {
     const values = await redis.mGet([
       `Yz:count:sendMsg:day:${day}`,
       `Yz:count:sendMsg:month:${month}`,
       `Yz:count:screenshot:day:${day}`,
+      `Yz:count:sendMsg:total`,
+      ...weekDays.map(date => `Yz:count:sendMsg:day:${date}`),
+      ...weekDays.map(date => `Yz:count:screenshot:day:${date}`),
+      `Yz:count:screenshot:month:${month}`,
+      `Yz:count:screenshot:total`,
     ])
     const toCount = value => {
       const count = Number(value)
       return Number.isSafeInteger(count) && count >= 0 ? count : 0
     }
+    const sumWeek = start => (values?.slice(start, start + weekDays.length) || []).reduce((total, value) => total + toCount(value), 0)
+    const screenshotWeekStart = 4 + weekDays.length
+    const screenshotMonthIndex = screenshotWeekStart + weekDays.length
     return {
       redisAvailable: true,
       sentToday: toCount(values?.[0]),
+      sentThisWeek: sumWeek(4),
       sentThisMonth: toCount(values?.[1]),
+      sentTotal: toCount(values?.[3]),
       screenshotsToday: toCount(values?.[2]),
+      screenshotsThisWeek: sumWeek(screenshotWeekStart),
+      screenshotsThisMonth: toCount(values?.[screenshotMonthIndex]),
+      screenshotsTotal: toCount(values?.[screenshotMonthIndex + 1]),
       receivedSinceStart,
     }
   } catch {
