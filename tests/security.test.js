@@ -3,8 +3,43 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import vm from "node:vm"
 import { fakeDownload } from "./download-fixture.js"
-import { isPublicAddress, resolvePublicUrl, safeDownload, secureGitTransport } from "../src/network-policy.js"
-import { withLock, withBudget, devRequestNeedsAuth, originAllowed, requestIsSecure } from "../src/security.js"
+import { isPublicAddress, normalizeNetworkUrl, resolvePublicUrl, safeDownload, secureGitTransport } from "../src/network-policy.js"
+import { contentVersion, credentialVersion, requireVersion, trustedProxy, redact, withLock, withBudget, devRequestNeedsAuth, originAllowed, requestIsSecure } from "../src/security.js"
+
+test("内容版本、凭据版本和乐观并发版本校验", () => {
+  assert.equal(contentVersion("same"), contentVersion("same"))
+  assert.notEqual(contentVersion("same"), contentVersion("changed"))
+  const config = { host: "127.0.0.1", passwordSalt: "salt", passwordHash: "hash", passwordIterations: 1000, secret: "secret" }
+  assert.equal(credentialVersion(config), credentialVersion({ ...config, host: "panel.example" }))
+  assert.notEqual(credentialVersion(config), credentialVersion({ ...config, secret: "rotated" }))
+  requireVersion("version-1", "version-1")
+  assert.throws(() => requireVersion(undefined, "version-1"), { status: 428 })
+  assert.throws(() => requireVersion("version-0", "version-1"), { status: 409 })
+})
+
+test("可信代理匹配 IPv4/IPv6 CIDR，拒绝无效配置并脱敏日志", () => {
+  assert.equal(trustedProxy("192.168.1.4", ["192.168.1.0/24"]), true)
+  assert.equal(trustedProxy("2001:db8::1", ["2001:db8::/32"]), true)
+  assert.equal(trustedProxy("::ffff:10.1.2.3", ["10.0.0.0/8"]), true)
+  assert.equal(trustedProxy("192.168.2.1", ["192.168.1.0/24"]), false)
+  assert.equal(trustedProxy("127.0.0.1", ["not-an-ip"]), false)
+  assert.equal(trustedProxy("127.0.0.1", ["127.0.0.1/33"]), false)
+
+  const value = redact('external https://example.com/private local http://127.0.0.1:50882/ password=abc token:xyz')
+  assert.match(value, /\[外部地址已隐藏\]/)
+  assert.match(value, /http:\/\/127\.0\.0\.1:50882\//)
+  assert.match(value, /password=\[已隐藏\]/)
+  assert.match(value, /token=\[已隐藏\]/)
+})
+
+test("网络 URL 只允许规范 HTTPS 目标，代理协议单独校验", () => {
+  assert.equal(normalizeNetworkUrl("https://example.com/a").href, "https://example.com/a")
+  for (const url of ["http://example.com/a", "https://example.com:444/a", "https://user:pass@example.com/a", "https://example.com/a#fragment", "https://localhost/a", "https://example.internal/a"]) {
+    assert.throws(() => normalizeNetworkUrl(url), undefined, url)
+  }
+  assert.equal(normalizeNetworkUrl("socks5h://proxy.internal:1080", { proxy: true }).hostname, "proxy.internal")
+  assert.throws(() => normalizeNetworkUrl("ftp://proxy.example", { proxy: true }))
+})
 
 test("拒绝替代 IP、内网、保留地址和混合公网/内网 DNS", async () => {
   for (const address of ["127.0.0.1", "0.0.0.0", "10.1.1.1", "100.64.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "224.0.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "fe80::1", "2002:7f00:1::", "2001:db8::1"]) assert.equal(isPublicAddress(address), false, address)
@@ -29,6 +64,19 @@ test("下载固定已验证地址，重定向逐跳检查且不连接私网", as
   assert.equal(calls, 2)
   await assert.rejects(safeDownload("https://public.example:4443/a", 100, options))
   await assert.rejects(safeDownload("https://u:p@public.example/a", 100, options))
+})
+
+test("下载校验 HTTP 状态、精确字节上限和重定向预算", async () => {
+  const body = "export default 1"
+  const limit = Buffer.byteLength(body)
+  assert.equal((await safeDownload("https://public.example/a", limit, fakeDownload({ body }))).toString(), body)
+  await assert.rejects(safeDownload("https://public.example/a", limit - 1, fakeDownload({ body })), /大小上限/)
+  await assert.rejects(safeDownload("https://public.example/a", 100, fakeDownload({ status: 404 })), /直链未返回有效文件/)
+
+  let redirects = 0
+  const redirect = fakeDownload({ status: 302, headers: { location: "/next" }, inspect() { redirects++ } })
+  await assert.rejects(safeDownload("https://public.example/a", 100, { ...redirect, redirects: 1 }), /重定向次数超限/)
+  assert.equal(redirects, 2)
 })
 
 test("Git 固定 DNS、禁用重定向，常规代理只接受运维批准的固定 IP", async () => {
