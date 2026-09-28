@@ -32,15 +32,14 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 ## 安装与构建
 
-在 Yunzai 根目录克隆插件并构建前端。Yunzai 会按插件目录的 `index.js` 自动加载：
+在 Yunzai 根目录克隆插件并安装依赖。Yunzai 会按插件目录的 `index.js` 自动加载：
 
 ```powershell
 git clone https://github.com/OrbiterStellarTrek/Elia-Admin-Panel.git plugins/EliaAdminPanel
 pnpm install --filter elia-admin-panel --ignore-scripts
-pnpm --filter elia-admin-panel build
 ```
 
-构建后重启 Bot，面板默认地址为 `http://127.0.0.1:50882`。首次随机密码写入受保护的 `data/elia-admin-panel/credentials/bootstrap.txt`；在 Bot 本机读取后登录，首次密码登录成功会删除该交付文件。配置文件只保存随机盐和 PBKDF2 哈希；普通日志和 stdout 不包含首次密码，之后重启不会重新生成密码。
+首次以生产模式启动时，如果插件目录没有完整的 `out/index.html` 和 `out/_next/static/`，插件会从上述 GitHub 仓库的 Latest Release 下载最新前端构建归档，校验 SHA-256 后解压到 `plugins/EliaAdminPanel/out/`。此过程需要访问 GitHub，并需要系统提供 `tar` 命令；如果环境无法联网，也可以在插件目录安装依赖后运行 `pnpm build` 手动生成。开发模式使用 `next dev`，不会触发自动下载。面板默认地址为 `http://127.0.0.1:50882`。首次随机密码写入受保护的 `data/elia-admin-panel/credentials/bootstrap.txt`；在 Bot 本机读取后登录，首次密码登录成功会删除该交付文件。配置文件只保存随机盐和 PBKDF2 哈希；普通日志和 stdout 不包含首次密码，之后重启不会重新生成密码。
 
 面板栏目可以通过固定地址直接打开：`/config/`（配置中心）、`/plugins/`（插件控制）、`/files/`（文件管理）、`/logs/`（运行日志）、`/debug/`（消息调试）；`/` 为运行概览。选中的配置文件、插件和文件路径分别保存在 `?file=`、`?plugin=`、`?path=` 中，刷新或复制网址后仍能回到对应位置。
 

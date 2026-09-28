@@ -18,6 +18,7 @@ import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configE
 import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
 import { safeDownload, secureGitTransport } from "./network-policy.js"
 import { auditEvent } from "./audit.js"
+import { ensureFrontendBuild } from "./frontend-build.js"
 import cfg from "../../../lib/config/config.js"
 import pluginsLoader from "../../../lib/plugins/loader.js"
 
@@ -1846,6 +1847,10 @@ export async function startAdminPanel() {
   if (expressServer) return
   const settings = await readPanelSettings()
   if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许本地访问，请关闭 devMode 后再继续后续操作")
+  if (!settings.devMode) {
+    const releaseTag = await ensureFrontendBuild(PANEL_DIR)
+    if (releaseTag) safeLogger("info", `[AdminPanel] 未检测到前端构建产物，已从 GitHub Release ${releaseTag} 初始化`)
+  }
   await fs.mkdir(DATA_DIR, { recursive: true })
   await fs.mkdir(LOGS_DIR, { recursive: true })
   sessionSecret = await loadSessionSecret()
