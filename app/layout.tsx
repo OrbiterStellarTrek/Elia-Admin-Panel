@@ -7,6 +7,7 @@ import "react-easy-crop/react-easy-crop.css"
 export const metadata: Metadata = {
   title: "EliaAdminPanel · 管理面板",
   description: "独立的 Yunzai WebUI 管理控制台",
+  applicationName: "EliaAdminPanel",
   icons: { icon: "/elia.png", apple: "/elia.png" },
 }
 
