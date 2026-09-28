@@ -2,6 +2,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import crypto from "node:crypto"
 import { pathToFileURL } from "node:url"
+import { safeDownload } from "./network-policy.js"
 
 const bad = message => Object.assign(new Error(message), { status: 400 })
 export function gitTransport(url, { proxyMode = "none", proxy = "" } = {}) {
@@ -37,15 +38,15 @@ export async function repositoryInfo(directory, run) {
   return { available: true, remote, head, branch, branches: [...new Set(refs.split("\n").map(ref => ref.trim().replace(/^origin\//, "")).filter(ref => ref && ref !== "HEAD"))], commits: history.split("\n").filter(Boolean).map(line => { const [hash, ...message] = line.split("\t"); return { hash, message: message.join("\t") } }) }
 }
 
-export async function fetchRepository(directory, options, run, validateRemote) {
+export async function fetchRepository(directory, options, run, validateRemote, transportFor = gitTransport) {
   const remote = await run("git", ["remote", "get-url", "origin"], 30_000, directory)
   const { url } = validateRemote(remote)
-  const transport = gitTransport(url, options)
+  const transport = await transportFor(url, options)
   await run("git", [...transport.args, "fetch", "--no-tags", "--deepen=80", transport.url, "+refs/heads/*:refs/remotes/origin/*"], 120_000, directory)
   return repositoryInfo(directory, run)
 }
 
-export async function updateRepository(directory, options, run, validateRemote, backupRoot) {
+export async function updateRepository(directory, options, run, validateRemote, backupRoot, transportFor = gitTransport) {
   const gitStat = await fs.lstat(path.join(directory, ".git"))
   if (!gitStat.isDirectory() || gitStat.isSymbolicLink()) throw bad("仅支持拥有独立 .git 目录的插件仓库")
   if (options.pruneHistory === true) {
@@ -60,7 +61,7 @@ export async function updateRepository(directory, options, run, validateRemote, 
   const oldHead = await run("git", ["rev-parse", "HEAD"], 30_000, directory)
   const branch = await run("git", ["branch", "--show-current"], 30_000, directory)
   const remote = await run("git", ["remote", "get-url", "origin"], 30_000, directory)
-  const transport = gitTransport(validateRemote(remote).url, options)
+  const transport = await transportFor(validateRemote(remote).url, options)
   const resolvedRef = options.kind === "commit" ? await run("git", ["rev-parse", "--verify", `${ref}^{commit}`], 30_000, directory).catch(() => ref) : `refs/heads/${ref}`
   await run("git", [...transport.args, "fetch", "--no-tags", transport.url, resolvedRef], 120_000, directory)
   const nextHead = await run("git", ["rev-parse", "FETCH_HEAD^{commit}"], 30_000, directory)
@@ -122,18 +123,6 @@ export function validateDependencies(value) {
   return result
 }
 
-export async function downloadScript(input, maxBytes) {
-  let url
-  try { url = new URL(input) } catch { throw bad("请输入 JavaScript 文件的 HTTPS 直链") }
-  if (url.protocol !== "https:" || url.username || url.password) throw bad("只接受不含凭据的 HTTPS 直链")
-  const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(30_000) })
-  if (!response.ok || /text\/html/i.test(response.headers.get("content-type") || "")) throw bad("直链未返回 JavaScript 文件；不支持网页或重定向链接")
-  let size = 0
-  const chunks = []
-  for await (const chunk of response.body) {
-    size += chunk.length
-    if (size > maxBytes) throw bad("单 JS 插件不能超过 1.5 MB")
-    chunks.push(Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
+export async function downloadScript(input, maxBytes, options) {
+  return safeDownload(input, maxBytes, { ...options, redirects: 0 })
 }

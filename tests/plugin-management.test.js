@@ -7,6 +7,7 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { gitTransport, validateGitRef, repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "../src/plugin-management.js"
 import { isOfficialBot, pickNumericGroup, ffmpegPath } from "../src/bot-capabilities.js"
+import { fakeDownload } from "./download-fixture.js"
 
 const exec = promisify(execFile)
 const run = async (command, args, timeout = 30_000, cwd) => (await exec(command, args, { cwd, timeout, windowsHide: true })).stdout.trim()
@@ -53,14 +54,10 @@ test("FFmpeg 每次读取 Yunzai 当前配置", () => {
 })
 
 test("直链安装拒绝网页、重定向和超限响应", async () => {
-  const original = global.fetch
-  try {
-    global.fetch = async () => new Response("<html>bad</html>", { headers: { "content-type": "text/html" } })
-    await assert.rejects(downloadScript("https://example.com/plugin.js", 1024), /直链/)
-    global.fetch = async (_url, options) => { assert.equal(options.redirect, "error"); return new Response("export default 1") }
-    assert.equal((await downloadScript("https://example.com/plugin.js", 1024)).toString(), "export default 1")
-    await assert.rejects(downloadScript("https://example.com/plugin.js", 2), /1.5 MB/)
-  } finally { global.fetch = original }
+  await assert.rejects(downloadScript("https://example.com/plugin.js", 1024, fakeDownload({ body: "<html>bad</html>", headers: { "content-type": "text/html" } })), /直链/)
+  assert.equal((await downloadScript("https://example.com/plugin.js", 1024, fakeDownload())).toString(), "export default 1")
+  await assert.rejects(downloadScript("https://example.com/plugin.js", 2, fakeDownload()), /大小上限/)
+  await assert.rejects(downloadScript("https://example.com/plugin.js", 1024, fakeDownload({ status: 302, headers: { location: "https://example.com/other" } })), /重定向/)
 })
 
 test("在独立仓库中选择分支、旧 commit 和裁剪历史，并保留旧 .git", async () => {

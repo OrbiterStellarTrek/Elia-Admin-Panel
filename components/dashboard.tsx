@@ -364,13 +364,13 @@ function Login({ onLogin, initialError = "" }: { onLogin: (expiresAt: number) =>
           </div>
           <form onSubmit={submit} className="space-y-4">
             {mode === "code" ? <>
-              <div className="space-y-2"><Label htmlFor="panel-code">登录验证码</Label><Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} placeholder="从 Bot 控制台日志中复制验证码" /></div>
+              <div className="space-y-2"><Label htmlFor="panel-code">登录验证码</Label><Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} placeholder="从 Bot 本机凭据文件中复制验证码" /></div>
               <Button type="button" variant="outline" className="w-full" disabled={busy || remaining > 0} onClick={requestCode}>
                 {busy ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                {remaining > 0 ? `验证码已输出到 Bot 日志（${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}）` : "获取验证码"}
+                {remaining > 0 ? `验证码已写入本机凭据文件（${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}）` : "获取验证码"}
               </Button>
-              <p className="text-xs leading-5 text-muted-foreground">点击获取后，到运行 Bot 的控制台查看验证码。验证码 5 分钟有效且只能使用一次。</p>
-            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="首次启动时 Bot 控制台显示的密码" /></div>}
+              <p className="text-xs leading-5 text-muted-foreground">点击获取后，在 Bot 本机读取 data/elia-admin-panel/credentials/login-code.txt。验证码 5 分钟有效且只能使用一次。</p>
+            </> : <div className="space-y-2"><Label htmlFor="panel-password">面板密码</Label><Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} placeholder="读取本机 bootstrap.txt 中的首次密码" /></div>}
             {error && <ErrorState message={error} />}
             <Button className="w-full" disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : <KeyRound />}进入控制台</Button>
           </form>
@@ -701,7 +701,7 @@ function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = 
         : typeof target.disable === "string" ? target.disable.split(/\r?\n/).filter(Boolean) : []
       target.disable = [...new Set([...currentDisabled, ...additions])]
       nextData[groupId] = target
-      const result = await api("/api/config/group.yaml", { method: "PUT", body: JSON.stringify({ data: nextData, baseContent: current.content }) })
+      const result = await api("/api/config/group.yaml", { method: "PUT", body: JSON.stringify({ data: nextData, baseContent: current.content, version: current.version }) })
       notify("success", result.message || `${scopeLabel}已加入禁用列表`)
       await load()
     } catch (reason) { notify("error", (reason as Error).message) }
@@ -1006,6 +1006,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const [defaults, setDefaults] = useState<any>(null)
   const [raw, setRaw] = useState("")
   const [loadedContent, setLoadedContent] = useState("")
+  const [configVersion, setConfigVersion] = useState("")
   const [rawMode, setRawMode] = useState(false)
   const [editorFullscreen, setEditorFullscreen] = useState(false)
   const [search, setSearch] = useState("")
@@ -1017,7 +1018,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const selectedLabel = configFileLabel(selected)
   const load = useCallback(async (name: string) => {
     setLoading(true); setError("")
-    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setActiveGroupId("default"); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setLoadedContent(result.content); setDirty(false); setRawMode(false); setEditorFullscreen(false) }
+    try { const result = await api(`/api/config/${encodeURIComponent(name)}`); setSelected(name); setActiveGroupId("default"); setData(result.data); setDefaults(result.defaults); setRaw(result.content); setLoadedContent(result.content); setConfigVersion(result.version); setDirty(false); setRawMode(false); setEditorFullscreen(false) }
     catch (reason) { setError((reason as Error).message) }
     finally { setLoading(false) }
   }, [api])
@@ -1148,7 +1149,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     if (!selected || saving || (!dirty && !rawMode)) return
     setSaving(true)
     try {
-      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify(rawMode ? { content: raw } : { data, ...(raw !== loadedContent ? { baseContent: raw } : {}) }) })
+      await api(`/api/config/${encodeURIComponent(selected)}`, { method: "PUT", body: JSON.stringify({ ...(rawMode ? { content: raw } : { data, ...(raw !== loadedContent ? { baseContent: raw } : {}) }), version: configVersion }) })
       notify("success", `${selectedLabel} 已保存并刷新运行时配置`)
       await load(selected)
     } catch (reason) { setError((reason as Error).message); notify("error", (reason as Error).message) }
@@ -1279,12 +1280,14 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
 }
 
 function setNested(value: any, path: string[], next: any): any {
+  if (!path.length || path.some(key => ["__proto__", "constructor", "prototype"].includes(key))) return value
   const copy = Array.isArray(value) ? [...value] : { ...(value || {}) }
   if (path.length === 1) copy[path[0]] = next
-  else copy[path[0]] = setNested(value?.[path[0]], path.slice(1), next)
+  else copy[path[0]] = setNested(value && Object.hasOwn(value, path[0]) ? value[path[0]] : undefined, path.slice(1), next)
   return copy
 }
-function getNested(value: any, path: string) { return path.split(".").reduce((current, key) => current?.[key], value) }
+function getNested(value: any, path: string) { return path.split(".").reduce((current, key) => current && !["__proto__", "constructor", "prototype"].includes(key) && Object.hasOwn(current, key) ? current[key] : undefined, value) }
+function safePluginLink(value: any) { try { const url = new URL(String(value)); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : "" } catch { return "" } }
 function isObject(value: any) { return value !== null && typeof value === "object" && !Array.isArray(value) }
 function secretField(name: string) { return /(password|passwd|secret|token|cookie|private.?key|\bpwd\b)/i.test(name) }
 function useSaveShortcut(onSave: () => void | Promise<void>) {
@@ -1634,6 +1637,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const [activeSchemaGroup, setActiveSchemaGroup] = useState(0)
   const [data, setData] = useState<any>({})
   const [sourceContent, setSourceContent] = useState("")
+  const [sourceVersion, setSourceVersion] = useState("")
+  const [pluginConfigVersion, setPluginConfigVersion] = useState("")
   const [sourceDirty, setSourceDirty] = useState(false)
   const [selectedConfigFile, setSelectedConfigFile] = useState("")
   const [configPreview, setConfigPreview] = useState("")
@@ -1730,10 +1735,10 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
       try {
         if (selected.kind === "small") {
           const result = await api(`/api/files/read?path=${encodeURIComponent(selected.sourcePath)}`)
-          if (!cancelled) { setSourceContent(result.content); setSourceDirty(false) }
+          if (!cancelled) { setSourceContent(result.content); setSourceVersion(result.version); setSourceDirty(false) }
         } else if (selected.hasConfig) {
           const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`)
-          if (!cancelled) setData(result.data || {})
+          if (!cancelled) { setData(result.data || {}); setPluginConfigVersion(result.version) }
         } else if (activeConfigFile) {
           const result = await api(`/api/files/read?path=${encodeURIComponent(activeConfigFile.path)}`)
           if (!cancelled) setConfigPreview(result.content)
@@ -1784,11 +1789,12 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     try {
       const values: Record<string, any> = {}
       for (const schema of selected.schemas) if (schema.field) values[schema.field] = getNested(data, schema.field)
-      const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`, { method: "PUT", body: JSON.stringify(values) })
+      const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`, { method: "PUT", body: JSON.stringify({ ...values, ...(data._version ? { _version: data._version } : {}), _panelVersion: pluginConfigVersion }) })
       if (result.code !== undefined && result.code !== 0) throw new Error(result.message || "保存失败")
       notify("success", result.message || `${selected.title} 配置已保存`)
       const saved = await api(`/api/plugins/${encodeURIComponent(selected.id)}/config`)
       setData(saved.data || {})
+      setPluginConfigVersion(saved.version)
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
   }
@@ -1796,7 +1802,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     if (!selected?.sourcePath || !sourceDirty || busy) return
     setBusy(true)
     try {
-      const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: selected.sourcePath, content: sourceContent }) })
+      const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: selected.sourcePath, content: sourceContent, version: sourceVersion }) })
+      setSourceVersion(result.version)
       setSourceDirty(false)
       notify("success", result.message || "源码已保存")
     } catch (reason) { notify("error", (reason as Error).message) }
@@ -1919,7 +1926,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle>
-              {selected?.link && <a href={selected.link} target="_blank" rel="noreferrer" aria-label={`${selected.title} 插件仓库`} title="打开插件仓库" className="shrink-0 rounded text-indigo-600 outline-none hover:text-indigo-800 focus-visible:ring-2 focus-visible:ring-ring"><Github className="size-4" /></a>}
+              {safePluginLink(selected?.link) && <a href={safePluginLink(selected.link)} target="_blank" rel="noreferrer" aria-label={`${selected.title} 插件仓库`} title="打开插件仓库" className="shrink-0 rounded text-indigo-600 outline-none hover:text-indigo-800 focus-visible:ring-2 focus-visible:ring-ring"><Github className="size-4" /></a>}
             </div>
             {!sourceFullscreen && selected?.author && <div className="mt-1 text-[11px] text-muted-foreground">作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</div>}
             {(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 truncate">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}
@@ -2145,7 +2152,7 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
     if (!current || !dirty || saving || savingRef.current) return
     savingRef.current = true
     setSaving(true)
-    try { const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: current.path, content }) }); setDirty(false); notify("success", result.message || "文件已保存") }
+    try { const result = await api("/api/files/write", { method: "PUT", body: JSON.stringify({ path: current.path, content, version: current.version }) }); setCurrent((previous: any) => ({ ...previous, version: result.version })); setDirty(false); notify("success", result.message || "文件已保存") }
     catch (reason) { notify("error", (reason as Error).message) }
     finally { savingRef.current = false; setSaving(false) }
   }, [api, content, current, dirty, notify, saving])

@@ -1,26 +1,16 @@
 import crypto from "node:crypto"
-import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import YAML from "yaml"
+import { readConfig, writeConfig, withConfigLock } from "./src/panel-config.js"
+import { contentVersion, requireVersion, trustedProxy, withBudget } from "./src/security.js"
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
-const dataDir = path.resolve(process.cwd(), "data", "elia-admin-panel")
-const configPath = path.join(dataDir, "config.yaml")
 const passwordIterations = 310_000
 
-async function readConfig() {
-  try {
-    const config = YAML.parse(await fs.readFile(configPath, "utf8")) || {}
-    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("面板配置必须是 YAML 对象")
-    return config
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error
-    return { host: "127.0.0.1", port: 50882, publicUrl: "", devMode: false }
-  }
-}
-
 function createPasswordCredential(password) {
+  return withBudget("password-kdf", 4, () => createPasswordCredentialUnbounded(password))
+}
+function createPasswordCredentialUnbounded(password) {
   const salt = crypto.randomBytes(16)
   return new Promise((resolve, reject) => {
     crypto.pbkdf2(password, salt, passwordIterations, 32, "sha256", (error, hash) => {
@@ -32,18 +22,6 @@ function createPasswordCredential(password) {
       })
     })
   })
-}
-
-async function writeConfig(config) {
-  await fs.mkdir(dataDir, { recursive: true })
-  const temporaryPath = `${configPath}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`
-  await fs.writeFile(temporaryPath, YAML.stringify(config), { encoding: "utf8", mode: 0o600, flag: "wx" })
-  try {
-    await fs.rename(temporaryPath, configPath)
-  } catch (error) {
-    await fs.rm(temporaryPath, { force: true }).catch(() => {})
-    throw error
-  }
 }
 
 function validatePublicUrls(value) {
@@ -92,7 +70,7 @@ export function supportPanel() {
         {
           field: "devMode",
           label: "开发模式",
-          bottomHelpMessage: "开启后需重启 Bot，使用 next dev 实时热更新。开发模式占用资源较多，不建议对公网开放。",
+          bottomHelpMessage: "仅允许绑定回环地址；开发内部接口和 HMR 需要登录。生产或远程部署请关闭，修改后重启 Bot。",
           component: "Switch",
         },
         {
@@ -113,10 +91,12 @@ export function supportPanel() {
         {
           field: "secret",
           label: "浏览器会话 Secret",
-          bottomHelpMessage: "用于签名浏览器临时令牌。留空表示不修改；填写至少 32 个 UTF-8 字节的新值并保存，重启 Bot 后生效，旧令牌会失效。Secret 不会回显。",
+          bottomHelpMessage: "留空表示不修改；至少 32 个 UTF-8 字节。保存后立即撤销所有旧会话和连接，Secret 不会回显。",
           component: "Input",
           componentProps: { type: "password", autocomplete: "new-password", placeholder: "留空表示保持不变" },
         },
+        { field: "trustedProxies", label: "可信反向代理 IP/CIDR", component: "InputTextArea", bottomHelpMessage: "每行一个，仅这些来源可通过 X-Forwarded-Proto 声明 HTTPS。默认不信任任何代理。" },
+        { field: "cookieSecure", label: "始终使用 HTTPS Cookie", component: "Switch", bottomHelpMessage: "公网部署建议启用；启用后 HTTP 无法保持登录。本机 HTTP 开发可关闭。" },
       ],
       async getConfigData() {
         const config = await readConfig()
@@ -127,13 +107,18 @@ export function supportPanel() {
           publicUrl: config.publicUrl || "",
           password: "",
           secret: "",
+          trustedProxies: (config.trustedProxies || []).join("\n"),
+          cookieSecure: config.cookieSecure === true,
+          _version: contentVersion(JSON.stringify(config)),
         }
       },
       async setConfigData(data, { Result }) {
+        return withConfigLock(async () => {
         const current = await readConfig()
+        if (data._version !== undefined) requireVersion(data._version, contentVersion(JSON.stringify(current)))
         const host = String(data.host ?? current.host ?? "127.0.0.1").trim()
         const port = Number(data.port ?? current.port ?? 50882)
-        const devMode = data.devMode === true
+        const devMode = data.devMode === undefined ? current.devMode === true : data.devMode === true
         const publicUrl = String(data.publicUrl ?? current.publicUrl ?? "").trim()
         const password = String(data.password ?? "")
         const secret = String(data.secret ?? "")
@@ -143,20 +128,24 @@ export function supportPanel() {
         if (password && password.length < 12) return Result.error("面板密码至少需要 12 个字符")
         if (password.length > 1024) return Result.error("面板密码不能超过 1024 个字符")
         if (secret && Buffer.byteLength(secret, "utf8") < 32) return Result.error("浏览器会话 Secret 至少需要 32 个 UTF-8 字节")
+        if (devMode && !["127.0.0.1", "::1", "localhost"].includes(host)) return Result.error("开发模式仅允许绑定回环地址")
+        const trustedProxies = data.trustedProxies === undefined ? current.trustedProxies || [] : String(data.trustedProxies).split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean)
+        if (trustedProxies.some(entry => !trustedProxy(entry.split("/")[0], [entry]))) return Result.error("可信代理必须填写有效 IP 或 CIDR")
 
-        const next = { ...current, host, port, devMode, publicUrl }
+        const next = { ...current, host, port, devMode, publicUrl, trustedProxies, cookieSecure: data.cookieSecure === undefined ? current.cookieSecure === true : data.cookieSecure === true }
         delete next.password
         if (password) Object.assign(next, await createPasswordCredential(password))
         if (secret) next.secret = secret
         await writeConfig(next)
 
         const notes = []
-        if (password) notes.push("新密码立即生效，并以加盐哈希存储")
-        if (secret) notes.push("新 Secret 需重启 Bot 后生效，旧浏览器令牌会失效")
+        if (password) notes.push("新密码立即生效，已撤销全部旧会话和连接")
+        if (secret) notes.push("新 Secret 立即生效，已撤销全部旧会话和连接")
         if (host !== String(current.host || "127.0.0.1").trim() || port !== Number(current.port || 50882)) notes.push("监听地址和端口需重启 Bot 后生效")
         if (devMode !== (current.devMode === true)) notes.push("开发模式需重启 Bot 后生效")
         if (publicUrl !== String(current.publicUrl || "").trim()) notes.push("公网访问地址立即用于主人快捷登录链接")
         return Result.ok({}, `配置已保存；${notes.join("；") || "没有需要立即生效的变更"}`)
+        })
       },
     },
   }

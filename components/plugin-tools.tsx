@@ -30,11 +30,13 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   const [prune, setPrune] = useState(false)
   const [proxy, setProxy] = useState<Proxy>({ proxyMode: "none", proxy: "" })
   const [dependencies, setDependencies] = useState("")
+  const [dependencyVersion, setDependencyVersion] = useState("")
   const [install, setInstall] = useState(false)
   async function load(tool: "git" | "dependencies") {
     setBusy(true)
     try {
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${tool === "git" ? "git" : "dependencies"}`)
+      if (tool === "dependencies") setDependencyVersion(result.version)
       if (tool === "git") { setInfo(result); setRef(result.branch || result.head); setKind(result.branch ? "branch" : "commit"); setPrune(false) }
       else { setDependencies(JSON.stringify(result.data, null, 2)); setInstall(false) }
       setOpen(tool)
@@ -50,7 +52,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
     if (open === "git" && !await confirm(`将 ${plugin.title} 更新到${kind === "branch" ? "分支" : "提交"} ${ref}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
     setBusy(true)
     try {
-      const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: JSON.parse(dependencies), install }
+      const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: JSON.parse(dependencies), install, version: dependencyVersion }
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${open === "git" ? "git/update" : "dependencies"}`, { method: open === "git" ? "POST" : "PUT", body: JSON.stringify(body) })
       notify("success", result.message); setOpen(null); await onUpdated()
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }

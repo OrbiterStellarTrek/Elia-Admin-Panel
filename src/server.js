@@ -13,7 +13,11 @@ import { WebSocketServer } from "ws"
 import YAML from "yaml"
 import { updateYamlPreservingComments } from "./config-yaml.js"
 import { pickNumericGroup, ffmpegPath } from "./bot-capabilities.js"
-import { gitTransport, repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
+import { repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
+import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configEvents, configGeneration, deliverCredential } from "./panel-config.js"
+import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
+import { safeDownload, secureGitTransport } from "./network-policy.js"
+import { auditEvent } from "./audit.js"
 import cfg from "../../../lib/config/config.js"
 import pluginsLoader from "../../../lib/plugins/loader.js"
 
@@ -74,6 +78,9 @@ const debugAudioCache = new Map()
 let debugAudioCacheBytes = 0
 const pluginRuleSnapshotCache = new WeakMap()
 let sessionSecret = ""
+let activeCredentialVersion = ""
+let securityPolicy = {}
+const devConnections = new Map()
 let sessionStoreWrite = Promise.resolve()
 const loginAttempts = new Map()
 const codeRequestAttempts = new Map()
@@ -81,7 +88,6 @@ const codeCheckAttempts = new Map()
 const quickLoginAttempts = new Map()
 const quickLogins = new Map()
 const supportCache = new Map()
-const pluginOperations = new Set()
 const PLUGIN_SUPPORT_ENTRIES = [
   { fileName: "elia.support.js", factoryName: "supportPanel" },
   { fileName: "guoba.support.js", factoryName: "supportGuoba" },
@@ -98,10 +104,10 @@ const logWatchTimers = new Map()
 
 const safeLogger = (level, message) => {
   try {
-    if (global.logger?.[level]) global.logger[level](message)
-    else console.log(message)
+    if (global.logger?.[level]) global.logger[level](redact(message))
+    else console.log(redact(message))
   } catch {
-    console.log(message)
+    console.log(redact(message))
   }
 }
 
@@ -240,7 +246,10 @@ function cacheDebugAudio(buffer) {
   return `/api/debug/audio/${token}`
 }
 
-function transcodeDebugAudio({ inputPath, inputBuffer, inputFormat }) {
+function transcodeDebugAudio(options) {
+  return withBudget("ffmpeg", 2, () => transcodeDebugAudioUnbounded(options))
+}
+function transcodeDebugAudioUnbounded({ inputPath, inputBuffer, inputFormat }) {
   return new Promise((resolve, reject) => {
     const args = ["-hide_banner", "-loglevel", "error", "-nostdin"]
     if (inputBuffer) args.push("-f", inputFormat, "-i", "pipe:0")
@@ -573,6 +582,7 @@ function resolveWorkspacePath(relativePath = ".") {
   if (!isInside(ROOT, absolute)) throw Object.assign(new Error("不能访问工作区以外的路径"), { status: 403 })
   if (isInside(DATA_DIR, absolute)) throw Object.assign(new Error("面板凭据与会话数据由面板保护，不能通过文件管理器访问"), { status: 403 })
   const segments = path.relative(ROOT, absolute).split(path.sep).filter(Boolean)
+  if (segments.some(segment => /[. ]$/.test(segment) || /~\d/.test(segment) || segment.includes(":"))) throw Object.assign(new Error("不能使用 Windows 路径别名"), { status: 403 })
   if (segments.some(segment => BLOCKED_SEGMENTS.has(segment.toLowerCase()))) {
     throw Object.assign(new Error("该目录由面板保护，不能通过文件管理器访问"), { status: 403 })
   }
@@ -580,6 +590,7 @@ function resolveWorkspacePath(relativePath = ".") {
 }
 
 async function rejectSymlinkPath(absolute) {
+  if (!isInside(ROOT, absolute)) throw Object.assign(new Error("路径超出工作区"), { status: 403 })
   const relative = path.relative(ROOT, absolute)
   let current = ROOT
   for (const segment of relative.split(path.sep).filter(Boolean)) {
@@ -587,33 +598,14 @@ async function rejectSymlinkPath(absolute) {
     try {
       const stat = await fs.lstat(current)
       if (stat.isSymbolicLink()) throw Object.assign(new Error("面板不跟随符号链接"), { status: 403 })
+      if (stat.isFile() && stat.nlink > 1) throw Object.assign(new Error("面板不操作硬链接文件"), { status: 403 })
+      const real = await fs.realpath(current)
+      if (!isInside(ROOT, real)) throw Object.assign(new Error("真实路径超出工作区"), { status: 403 })
+      if (!isInside(DATA_DIR, absolute)) resolveWorkspacePath(path.relative(ROOT, real))
     } catch (error) {
       if (error.code === "ENOENT") break
       throw error
     }
-  }
-}
-
-async function readPanelConfig() {
-  try {
-    const parsed = YAML.parse(await fs.readFile(PANEL_CONFIG, "utf8")) || {}
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("配置内容必须是 YAML 对象")
-    return parsed
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error
-    return { host: "127.0.0.1", port: 50882, publicUrl: "" }
-  }
-}
-
-async function writePanelConfig(config) {
-  await fs.mkdir(DATA_DIR, { recursive: true })
-  const temporaryFile = `${PANEL_CONFIG}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`
-  await fs.writeFile(temporaryFile, YAML.stringify(config), { encoding: "utf8", mode: 0o600, flag: "wx" })
-  try {
-    await fs.rename(temporaryFile, PANEL_CONFIG)
-  } catch (error) {
-    await fs.rm(temporaryFile, { force: true }).catch(() => {})
-    throw error
   }
 }
 
@@ -668,7 +660,8 @@ async function initializePassword() {
   const credential = await createPasswordCredential(generatedPassword)
   const { password: _plaintext, ...safeConfig } = config
   await writePanelConfig({ ...safeConfig, ...credential })
-  safeLogger("mark", `[EliaAdminPanel] 首次登录密码（仅显示本次）：${generatedPassword}`)
+  await deliverCredential("bootstrap", `${generatedPassword}\n`)
+  safeLogger("mark", "[EliaAdminPanel] 首次密码已写入受保护的 data/elia-admin-panel/credentials/bootstrap.txt，请在本机读取并登录")
 }
 
 async function verifyPanelPassword(submitted) {
@@ -678,7 +671,7 @@ async function verifyPanelPassword(submitted) {
     const salt = Buffer.from(config.passwordSalt, "hex")
     const expected = Buffer.from(config.passwordHash, "hex")
     const actual = await derivePassword(submitted, salt, config.passwordIterations)
-    return crypto.timingSafeEqual(actual, expected)
+    return crypto.timingSafeEqual(actual, expected) ? credentialVersion(config) : false
   }
   return false
 }
@@ -705,7 +698,7 @@ async function loadPersistedSessions() {
     const saved = JSON.parse(await fs.readFile(SESSION_STORE_FILE, "utf8"))
     if (!saved || typeof saved !== "object" || !Array.isArray(saved.sessions)) throw new Error("会话文件格式无效")
     const secretFingerprint = hashSecret(sessionSecret).toString("hex")
-    if (saved.secretFingerprint !== secretFingerprint) {
+    if (saved.secretFingerprint !== secretFingerprint || saved.credentialVersion !== activeCredentialVersion) {
       safeLogger("mark", "[AdminPanel] 登录 Secret 已更改，已撤销全部旧浏览器会话")
       await persistSessions()
       return
@@ -732,6 +725,7 @@ function persistSessions() {
     }
     const snapshot = JSON.stringify({
       secretFingerprint: hashSecret(sessionSecret).toString("hex"),
+      credentialVersion: activeCredentialVersion,
       sessions: [...sessions.entries()],
     })
     const temporaryFile = `${SESSION_STORE_FILE}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`
@@ -789,24 +783,17 @@ function parseCookies(header = "") {
 }
 
 function setSessionCookie(req, res, token) {
-  const secure = req.secure ? "; Secure" : ""
+  const secure = securityPolicy.cookieSecure === true || requestIsSecure(req, securityPolicy) ? "; Secure" : ""
   res.setHeader("Set-Cookie", `elia_panel_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${secure}`)
 }
 
 function clearSessionCookie(req, res) {
-  const secure = req.secure ? "; Secure" : ""
+  const secure = securityPolicy.cookieSecure === true || requestIsSecure(req, securityPolicy) ? "; Secure" : ""
   res.setHeader("Set-Cookie", `elia_panel_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`)
 }
 
 function checkOrigin(req, res, next) {
-  const origin = req.get("origin")
-  if (origin) {
-    try {
-      if (new URL(origin).host !== req.get("host")) return res.status(403).json({ error: "跨站请求已拒绝" })
-    } catch {
-      return res.status(403).json({ error: "来源地址无效" })
-    }
-  }
+  if (!originAllowed(req, securityPolicy)) return res.status(403).json({ error: "跨站请求已拒绝" })
   next()
 }
 
@@ -821,7 +808,9 @@ function requireAuth(req, res, next) {
   next()
 }
 
-async function issueSession(req, res) {
+async function issueSession(req, res, expectedVersion = activeCredentialVersion) {
+  await refreshSecurity()
+  if (expectedVersion !== activeCredentialVersion) throw Object.assign(new Error("凭据已变更，请重新登录"), { status: 401 })
   const sessionId = crypto.randomBytes(32).toString("base64url")
   const expiresAt = Math.floor((Date.now() + SESSION_TTL_MS) / 1000) * 1000
   const sessionIdHash = hashSecret(sessionId).toString("hex")
@@ -832,12 +821,19 @@ async function issueSession(req, res) {
     sessions.delete(sessionIdHash)
     throw error
   }
+  await refreshSecurity()
+  if (expectedVersion !== activeCredentialVersion || !sessions.has(sessionIdHash)) {
+    sessions.delete(sessionIdHash)
+    throw Object.assign(new Error("凭据已变更，请重新登录"), { status: 401 })
+  }
   setSessionCookie(req, res, signSessionToken(sessionId, expiresAt))
   return expiresAt
 }
 
 function allowAttempt(bucket, key, limit, windowMs) {
   const now = Date.now()
+  if (bucket.size >= 4096) for (const [id, value] of bucket) if (value.resetAt <= now) bucket.delete(id)
+  if (!bucket.has(key) && bucket.size >= 4096) return false
   const attempt = bucket.get(key)
   if (attempt && attempt.resetAt > now && attempt.count >= limit) return false
   const next = !attempt || attempt.resetAt <= now ? { count: 1, resetAt: now + windowMs } : { ...attempt, count: attempt.count + 1 }
@@ -978,6 +974,7 @@ async function listPluginConfigFiles(pluginDirectory) {
 }
 
 async function loadPluginSupport(pluginDirectory) {
+  await rejectSymlinkPath(pluginDirectory)
   // Elia 专属入口优先，其次是 Guoba 入口，最后兼容其他 *.support.js。
   const supportEntries = await fs.readdir(pluginDirectory, { withFileTypes: true })
   const supportFiles = supportEntries.filter(entry => entry.isFile() && entry.name.endsWith(".support.js")).map(entry => entry.name)
@@ -989,6 +986,7 @@ async function loadPluginSupport(pluginDirectory) {
   for (const fileName of orderedNames) {
     if (!supportFiles.includes(fileName)) continue
     const supportPath = path.join(pluginDirectory, fileName)
+    await rejectSymlinkPath(supportPath)
     const stat = await fs.stat(supportPath)
     if (stat.isFile()) {
       selected = { fileName, path: supportPath, stat }
@@ -1072,6 +1070,8 @@ async function findPluginSupport(id) {
     throw Object.assign(new Error("插件标识无效"), { status: 400 })
   }
   const directory = path.join(PLUGINS, id)
+  await rejectSymlinkPath(directory)
+  for (const entry of PLUGIN_SUPPORT_ENTRIES) await rejectSymlinkPath(path.join(directory, entry.fileName))
   if (!isInside(PLUGINS, directory)) throw Object.assign(new Error("插件路径无效"), { status: 400 })
   const support = await loadPluginSupport(directory)
   if (!support) {
@@ -1081,7 +1081,11 @@ async function findPluginSupport(id) {
   return support
 }
 
-async function writeBackupAndFile(absolute, contents) {
+async function writeBackupAndFile(absolute, contents, expectedVersion) {
+  return withLock(absolute, async () => {
+  await rejectSymlinkPath(absolute)
+  const previous = await fs.readFile(absolute, "utf8").catch(error => { if (error.code === "ENOENT") return ""; throw error })
+  requireVersion(expectedVersion, contentVersion(previous))
   const relative = path.relative(ROOT, absolute)
   try {
     const stat = await fs.stat(absolute)
@@ -1095,13 +1099,18 @@ async function writeBackupAndFile(absolute, contents) {
   }
   await fs.mkdir(path.dirname(absolute), { recursive: true })
   const temporary = `${absolute}.${crypto.randomBytes(6).toString("hex")}.tmp`
-  await fs.writeFile(temporary, contents, "utf8")
+  await fs.writeFile(temporary, contents, { encoding: "utf8", flag: "wx" })
   try {
+    await rejectSymlinkPath(absolute)
+    const latest = await fs.readFile(absolute, "utf8").catch(error => { if (error.code === "ENOENT") return ""; throw error })
+    requireVersion(expectedVersion, contentVersion(latest))
     await fs.rename(temporary, absolute)
   } catch (error) {
     await fs.rm(temporary, { force: true }).catch(() => {})
     throw error
   }
+  return contentVersion(contents)
+  })
 }
 
 function getAccountSummary() {
@@ -1296,13 +1305,15 @@ async function readLogSince(filePath, cursor, maxLines = 50, expectedIdentity = 
 }
 
 function sendLogPacket(socket, packet) {
+  if (!verifySessionToken(socket.logSessionToken)) return socket.close(4401, "登录已失效")
+  if (socket.bufferedAmount > 1024 * 1024) return socket.close(4408, "日志接收过慢")
   if (socket.readyState === 1) socket.send(JSON.stringify(packet))
 }
 
 async function sendLogCatchup(socket, recent = false) {
   const subscription = socket.logSubscription
-  if (!subscription || subscription.busy || socket.readyState !== 1) return
-  subscription.busy = true
+  if (!subscription || socket.logBusy || socket.readyState !== 1) return
+  socket.logBusy = true
   try {
     const filePath = path.join(LOGS_DIR, subscription.file)
     const previousCursor = subscription.cursor
@@ -1323,7 +1334,7 @@ async function sendLogCatchup(socket, recent = false) {
   } catch (error) {
     safeLogger("warn", `[AdminPanel] 读取日志增量失败：${error.message}`)
   } finally {
-    subscription.busy = false
+    socket.logBusy = false
   }
 }
 
@@ -1466,6 +1477,8 @@ function proxyNextRequest(req, res) {
 
 function proxyNextUpgrade(request, socket, head) {
   if (!nextDevPort) return socket.destroy()
+  devConnections.set(socket, request.headers.cookie)
+  socket.once("close", () => devConnections.delete(socket))
   const headers = { ...request.headers, host: `127.0.0.1:${nextDevPort}` }
   if (headers.origin) headers.origin = `http://127.0.0.1:${nextDevPort}`
   const proxy = http.request({
@@ -1476,6 +1489,11 @@ function proxyNextUpgrade(request, socket, head) {
     headers,
   })
   proxy.on("upgrade", (response, upstreamSocket, upstreamHead) => {
+    if (!verifySessionToken(parseCookies(request.headers.cookie).get("elia_panel_session"))) { upstreamSocket.destroy(); return socket.destroy() }
+    devConnections.set(socket, request.headers.cookie)
+    const timer = setInterval(() => { if (!verifySessionToken(parseCookies(request.headers.cookie).get("elia_panel_session"))) socket.destroy() }, 15_000)
+    timer.unref?.()
+    socket.on("close", () => { clearInterval(timer); devConnections.delete(socket); upstreamSocket.destroy() })
     const responseHeaders = Object.entries(response.headers).flatMap(([name, value]) =>
       Array.isArray(value) ? value.map(item => `${name}: ${item}`) : value ? [`${name}: ${value}`] : [],
     )
@@ -1499,6 +1517,18 @@ function proxyNextUpgrade(request, socket, head) {
 function attachLogWebSocket(server) {
   logWebSocketServer = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 })
   logHeartbeatTimer = setInterval(() => {
+    void refreshSecurity().catch(() => {
+      sessions.clear()
+      closeInvalidConnections()
+      safeLogger("warn", "[AdminPanel] 安全配置无法读取，已撤销当前会话")
+    })
+    const now = Date.now()
+    for (const bucket of [loginAttempts, codeRequestAttempts, codeCheckAttempts, quickLoginAttempts]) for (const [id, value] of bucket) if (value.resetAt <= now) bucket.delete(id)
+    for (const [code, expiresAt] of quickLogins) if (expiresAt <= now) quickLogins.delete(code)
+    if (loginCode && loginCode.expiresAt <= now) {
+      loginCode = null
+      void fs.rm(path.join(DATA_DIR, "credentials", "login-code.txt"), { force: true }).catch(() => {})
+    }
     for (const socket of logWebSocketServer.clients) {
       if (socket.readyState !== 1) continue
       if (socket.isAlive === false) {
@@ -1522,6 +1552,9 @@ function attachLogWebSocket(server) {
     sessionTimer.unref?.()
     socket.on("close", () => clearInterval(sessionTimer))
     socket.on("message", raw => {
+      const now = Date.now()
+      if (!socket.messageWindow || now >= socket.messageWindow.resetAt) socket.messageWindow = { count: 0, resetAt: now + 10_000 }
+      if (++socket.messageWindow.count > 30) return socket.close(4429, "消息过于频繁")
       if (!verifySessionToken(token)) {
         socket.close(4401, "登录已失效")
         return
@@ -1547,31 +1580,14 @@ function attachLogWebSocket(server) {
       }
     })
   })
-  server.on("upgrade", (request, socket, head) => {
+  server.on("upgrade", async (request, socket, head) => {
+    try { await refreshSecurity() } catch { socket.destroy(); return }
     let pathname
     try { pathname = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname } catch {
       socket.destroy()
       return
     }
-    if (pathname !== "/api/logs/ws") {
-      if (nextDevPort) proxyNextUpgrade(request, socket, head)
-      else socket.destroy()
-      return
-    }
-    const origin = request.headers.origin
-    if (origin) {
-      try {
-        if (new URL(origin).host !== request.headers.host) {
-          socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
-          socket.destroy()
-          return
-        }
-      } catch {
-        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
-        socket.destroy()
-        return
-      }
-    }
+    if (!originAllowed(request, securityPolicy)) return socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
     let token
     try { token = parseCookies(request.headers.cookie).get("elia_panel_session") } catch {
       socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")
@@ -1581,6 +1597,13 @@ function attachLogWebSocket(server) {
     if (!token || !verifySessionToken(token)) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
       socket.destroy()
+      return
+    }
+    const sameSession = [...logWebSocketServer.clients].filter(client => client.logSessionToken === token).length + [...devConnections.values()].filter(cookie => parseCookies(cookie).get("elia_panel_session") === token).length
+    if (logWebSocketServer.clients.size + devConnections.size >= 32 || sameSession >= 4) return socket.end("HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n")
+    if (pathname !== "/api/logs/ws") {
+      if (nextDevPort && ["/_next/hmr", "/_next/webpack-hmr"].includes(pathname)) proxyNextUpgrade(request, socket, head)
+      else socket.destroy()
       return
     }
     logWebSocketServer.handleUpgrade(request, socket, head, webSocket => {
@@ -1613,8 +1636,52 @@ async function restartBot() {
 }
 
 function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false, stdoutOnly = false) {
+  return withBudget("process", 4, () => runProcessUnbounded(command, args, timeoutMs, cwd, shell, stdoutOnly))
+}
+
+function closeInvalidConnections() {
+  for (const socket of logWebSocketServer?.clients || []) if (!verifySessionToken(socket.logSessionToken)) socket.close(4401, "登录已失效")
+  for (const [socket, cookie] of devConnections) if (!verifySessionToken(parseCookies(cookie).get("elia_panel_session"))) socket.destroy()
+}
+
+async function applySecurityConfig(config) {
+  if (activeCredentialVersion && (!hasPasswordCredential(config) || typeof config.secret !== "string" || Buffer.byteLength(config.secret, "utf8") < 32)) {
+    sessions.clear()
+    closeInvalidConnections()
+    throw new Error("面板安全配置无效，请在本机修复后重新登录")
+  }
+  securityPolicy = config
+  const version = credentialVersion(config)
+  if (!activeCredentialVersion || version === activeCredentialVersion) return
+  activeCredentialVersion = version
+  sessionSecret = config.secret
+  sessions.clear()
+  quickLogins.clear()
+  loginCode = null
+  closeInvalidConnections()
+  await persistSessions()
+  await fs.rm(path.join(DATA_DIR, "credentials", "login-code.txt"), { force: true })
+}
+
+async function refreshSecurity() {
+  for (;;) {
+    const generation = configGeneration()
+    const config = await readPanelConfig()
+    if (generation !== configGeneration()) continue
+    await applySecurityConfig(config)
+    return
+  }
+}
+const panelGitTransport = (url, options) => secureGitTransport(url, options, securityPolicy)
+const installPluginDependencies = id => withLock("workspace-pnpm-install", () => runProcess("pnpm", ["install", "--filter", `./plugins/${id}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32"))
+function runProcessUnbounded(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false, stdoutOnly = false) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, windowsHide: true, shell, stdio: ["ignore", "pipe", "pipe"] })
+    const env = { ...process.env }
+    if (command === "git") {
+      for (const key of Object.keys(env)) if (/^(?:https?_proxy|all_proxy|no_proxy|GIT_CONFIG.*|GIT_SSL_NO_VERIFY|GIT_ASKPASS)$/i.test(key)) delete env[key]
+      Object.assign(env, { GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null", GIT_TERMINAL_PROMPT: "0" })
+    }
+    const child = spawn(command, args, { cwd, env, windowsHide: true, shell, stdio: ["ignore", "pipe", "pipe"] })
     let output = ""
     let stdout = ""
     let timedOut = false
@@ -1658,9 +1725,9 @@ async function managedPluginDirectory(id) {
 }
 
 async function withPluginOperation(id, action) {
-  if (pluginOperations.has(id)) throw Object.assign(new Error("该插件已有操作正在进行"), { status: 409 })
-  pluginOperations.add(id)
-  try { return await action() } finally { pluginOperations.delete(id) }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) throw Object.assign(new Error("插件标识无效"), { status: 400 })
+  uploadName(id)
+  return withLock(path.join(PLUGINS, id), action)
 }
 
 function uploadName(value) {
@@ -1726,11 +1793,15 @@ async function validateCronWithRuntime(expression) {
 export async function startAdminPanel() {
   if (expressServer) return
   const settings = await readPanelSettings()
+  if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许绑定回环地址，请关闭 devMode 后远程部署")
   await fs.mkdir(DATA_DIR, { recursive: true })
   await fs.mkdir(LOGS_DIR, { recursive: true })
   sessionSecret = await loadSessionSecret()
-  await loadPersistedSessions()
   await initializePassword()
+  securityPolicy = await readPanelConfig()
+  activeCredentialVersion = credentialVersion(securityPolicy)
+  await loadPersistedSessions()
+  configEvents.on("changed", applySecurityConfig)
   const app = express()
   app.disable("x-powered-by")
   app.use((req, res, next) => {
@@ -1738,9 +1809,23 @@ export async function startAdminPanel() {
     res.setHeader("Referrer-Policy", "same-origin")
     res.setHeader("X-Frame-Options", "DENY")
     res.setHeader("Cache-Control", "no-store")
+    res.setHeader("Content-Security-Policy-Report-Only", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
     next()
   })
-  app.use(express.json({ limit: "3mb" }))
+  app.use(asyncRoute(async (req, res, next) => { await refreshSecurity(); next() }))
+  let activeUploads = 0
+  app.use((req, res, next) => {
+    if (!/^\/api\/(?:files\/upload|plugins\/install-script)\/?$/i.test(req.path)) return next()
+    requireAuth(req, res, () => checkOrigin(req, res, () => {
+    if (activeUploads >= 2) return res.status(429).json({ error: "上传并发已达上限" })
+    activeUploads++
+    let released = false
+    const release = () => { if (!released) { released = true; activeUploads-- } }
+    res.once("close", release); res.once("finish", release)
+    next()
+    }))
+  })
+  app.use("/api", express.json({ limit: "3mb" }))
 
   app.get("/api/auth/status", (req, res) => {
     const token = parseCookies(req.headers.cookie).get("elia_panel_session")
@@ -1753,38 +1838,41 @@ export async function startAdminPanel() {
   })
   app.post("/api/auth/login", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
-    const attempt = loginAttempts.get(ip) || { count: 0, resetAt: Date.now() + 15 * 60 * 1000 }
-    if (attempt.resetAt < Date.now()) {
-      attempt.count = 0
-      attempt.resetAt = Date.now() + 15 * 60 * 1000
-    }
-    if (attempt.count >= 10) return res.status(429).json({ error: "登录尝试次数过多，请 15 分钟后重试" })
+    if (!allowAttempt(loginAttempts, ip, 10, 15 * 60 * 1000)) return res.status(429).json({ error: "登录尝试次数过多，请 15 分钟后重试" })
+    const attemptWindow = loginAttempts.get(ip).resetAt
     const submitted = String(req.body?.password || "")
-    if (await verifyPanelPassword(submitted)) {
-      loginAttempts.delete(ip)
-      const expiresAt = await issueSession(req, res)
+    const version = await withBudget("password-kdf", 4, () => verifyPanelPassword(submitted))
+    if (version) {
+      const expiresAt = await issueSession(req, res, version)
+      const attempts = loginAttempts.get(ip)
+      if (attempts?.resetAt === attemptWindow) {
+        attempts.count = Math.max(0, attempts.count - 1)
+        if (!attempts.count) loginAttempts.delete(ip)
+      }
+      await fs.rm(path.join(DATA_DIR, "credentials", "bootstrap.txt"), { force: true })
       return res.json({ authenticated: true, expiresAt })
     }
-    attempt.count += 1
-    loginAttempts.set(ip, attempt)
     res.status(401).json({ error: "密码不正确" })
   }))
-  app.post("/api/auth/code/request", checkOrigin, (req, res) => {
+  app.post("/api/auth/code/request", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
-    if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请查看 Bot 控制台日志" })
+    if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请读取本机凭据文件" })
     if (!allowAttempt(codeRequestAttempts, ip, 3, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码请求过于频繁，请 15 分钟后再试" })
     const code = crypto.randomBytes(12).toString("base64url")
     loginCode = { value: code, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }
-    safeLogger("warn", `[AdminPanel] 验证码登录请求：验证码 ${code}，5 分钟内有效且只能使用一次。若非本人操作请忽略。`)
-    res.json({ ok: true, expiresIn: 300, message: "验证码已输出到 Bot 控制台日志，有效期 5 分钟" })
-  })
+    await deliverCredential("login-code", `验证码 ${code}\n有效期 5 分钟，只能使用一次\n`)
+    safeLogger("warn", "[AdminPanel] 验证码已写入本机 data/elia-admin-panel/credentials/login-code.txt，5 分钟有效")
+    res.json({ ok: true, expiresIn: 300, message: "请在 Bot 本机读取 data/elia-admin-panel/credentials/login-code.txt，有效期 5 分钟" })
+  }))
   app.post("/api/auth/code/check", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (!allowAttempt(codeCheckAttempts, ip, 12, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码尝试次数过多，请稍后再试" })
     const submitted = String(req.body?.code || "").trim()
     if (loginCode && loginCode.expiresAt > Date.now() && crypto.timingSafeEqual(hashSecret(submitted), hashSecret(loginCode.value))) {
+      const version = activeCredentialVersion
       loginCode = null
-      const expiresAt = await issueSession(req, res)
+      await fs.rm(path.join(DATA_DIR, "credentials", "login-code.txt"), { force: true })
+      const expiresAt = await issueSession(req, res, version)
       safeLogger("mark", "[AdminPanel] 验证码登录成功")
       return res.json({ authenticated: true, expiresAt })
     }
@@ -1807,6 +1895,7 @@ export async function startAdminPanel() {
   }))
   app.post("/api/auth/logout", checkOrigin, requireAuth, asyncRoute(async (req, res) => {
     sessions.delete(req.panelSession.sessionIdHash)
+    closeInvalidConnections()
     await persistSessions()
     clearSessionCookie(req, res)
     res.json({ ok: true })
@@ -1814,6 +1903,13 @@ export async function startAdminPanel() {
 
   app.use("/api", requireAuth)
   app.use("/api", checkOrigin)
+  app.use("/api", (req, res, next) => {
+    if (!["GET", "HEAD"].includes(req.method)) {
+      const session = req.panelSession.sessionIdHash
+      res.once("finish", () => { void auditEvent({ method: req.method, path: req.originalUrl.split("?")[0], status: res.statusCode, session }).catch(() => safeLogger("warn", "[AdminPanel] 安全审计记录写入失败")) })
+    }
+    next()
+  })
 
   app.post("/api/debug/message", asyncRoute(async (req, res) => {
     const message = typeof req.body?.message === "string" ? req.body.message : ""
@@ -1897,6 +1993,7 @@ export async function startAdminPanel() {
       let isHttpsUrl = false
       try { isHttpsUrl = new URL(value).protocol === "https:" } catch {}
       if ((!isBase64 && !isHttpsUrl) || value.length > 2_800_000) return res.status(400).json({ error: "头像需为 HTTPS 图片地址或有效的 base64 图片" })
+      if (isHttpsUrl) value = `base64://${(await withBudget("download", 4, () => safeDownload(value, 2 * 1024 * 1024))).toString("base64")}`
     } else if (field === "age") {
       value = Number(value)
       if (!Number.isInteger(value) || value < 1 || value > 120) return res.status(400).json({ error: "年龄需为 1 到 120 的整数" })
@@ -2036,15 +2133,19 @@ export async function startAdminPanel() {
   app.get("/api/config/:name", asyncRoute(async (req, res) => {
     if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
     const filePath = path.join(ROOT, "config", "config", req.params.name)
+    await rejectSymlinkPath(filePath)
     const content = await fs.readFile(filePath, "utf8")
     const name = req.params.name.replace(/\.yaml$/i, "")
     let defaults = null
-    try { defaults = YAML.parse(await fs.readFile(path.join(ROOT, "config", "default_config", req.params.name), "utf8")) } catch {}
-    res.json({ name: req.params.name, content, data: YAML.parse(content), defaults })
+    try { const defaultsPath = path.join(ROOT, "config", "default_config", req.params.name); await rejectSymlinkPath(defaultsPath); defaults = YAML.parse(await fs.readFile(defaultsPath, "utf8")) } catch {}
+    res.json({ name: req.params.name, content, data: YAML.parse(content), defaults, version: contentVersion(content) })
   }))
   app.put("/api/config/:name", asyncRoute(async (req, res) => {
     if (!/^[a-z0-9_-]+\.yaml$/i.test(req.params.name)) return res.status(400).json({ error: "配置文件名无效" })
     const filePath = path.join(ROOT, "config", "config", req.params.name)
+    await rejectSymlinkPath(filePath)
+    const previousContent = await fs.readFile(filePath, "utf8")
+    requireVersion(req.body?.version, contentVersion(previousContent))
     const rawContent = typeof req.body?.content === "string" ? req.body.content : null
     let content
     if (rawContent !== null) {
@@ -2062,10 +2163,10 @@ export async function startAdminPanel() {
     if (req.params.name.toLowerCase() === "qq.yaml" && (!Number.isInteger(parsed.platform) || parsed.platform < 1 || parsed.platform > 6)) {
       return res.status(400).json({ error: "QQ 登录设备类型必须设置为 1–6；即使跳过 ICQQ 登录也需要有效值" })
     }
-    await writeBackupAndFile(filePath, content.endsWith("\n") ? content : `${content}\n`)
+    const version = await writeBackupAndFile(filePath, content.endsWith("\n") ? content : `${content}\n`, req.body.version)
     const name = req.params.name.replace(/\.yaml$/i, "")
     if (cfg.config) cfg.config[`config.${name}`] = parsed
-    res.json({ ok: true, message: "已保存配置并刷新运行时缓存" })
+    res.json({ ok: true, version, message: "已保存配置并刷新运行时缓存" })
   }))
 
   app.get("/api/plugins", asyncRoute(async (req, res) => res.json({ plugins: await listPlugins() })))
@@ -2073,12 +2174,12 @@ export async function startAdminPanel() {
     res.json(await repositoryInfo(await managedPluginDirectory(req.params.id), runGitProcess))
   }))
   app.post("/api/plugins/:id/git/fetch", asyncRoute(async (req, res) => {
-    res.json(await withPluginOperation(req.params.id, async () => fetchRepository(await managedPluginDirectory(req.params.id), req.body || {}, runGitProcess, validateRemoteRepository)))
+    res.json(await withPluginOperation(req.params.id, async () => fetchRepository(await managedPluginDirectory(req.params.id), req.body || {}, runGitProcess, validateRemoteRepository, panelGitTransport)))
   }))
   app.post("/api/plugins/:id/git/update", asyncRoute(async (req, res) => {
     const result = await withPluginOperation(req.params.id, async () => {
       const directory = await managedPluginDirectory(req.params.id)
-      const result = await updateRepository(directory, req.body || {}, runGitProcess, validateRemoteRepository, path.join(DATA_DIR, "git-backups"))
+      const result = await updateRepository(directory, req.body || {}, runGitProcess, validateRemoteRepository, path.join(DATA_DIR, "git-backups"), panelGitTransport)
       for (const key of supportCache.keys()) if (isInside(directory, key)) supportCache.delete(key)
       return result
     })
@@ -2088,8 +2189,9 @@ export async function startAdminPanel() {
     const directory = await managedPluginDirectory(req.params.id)
     const file = path.join(directory, "package.json")
     await rejectSymlinkPath(file)
-    const manifest = JSON.parse(await fs.readFile(file, "utf8"))
-    res.json({ data: Object.fromEntries(["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"].map(key => [key, manifest[key] || {}])) })
+    const content = await fs.readFile(file, "utf8")
+    const manifest = JSON.parse(content)
+    res.json({ version: contentVersion(content), data: Object.fromEntries(["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"].map(key => [key, manifest[key] || {}])) })
   }))
   app.put("/api/plugins/:id/dependencies", asyncRoute(async (req, res) => {
     await withPluginOperation(req.params.id, async () => {
@@ -2098,15 +2200,16 @@ export async function startAdminPanel() {
       await rejectSymlinkPath(file)
       const dependencies = validateDependencies(req.body?.data)
       const manifest = JSON.parse(await fs.readFile(file, "utf8"))
-      await writeBackupAndFile(file, JSON.stringify({ ...manifest, ...dependencies }, null, 2) + "\n")
-      if (req.body?.install === true) await runProcess("pnpm", ["install", "--filter", `./plugins/${req.params.id}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32")
+      await writeBackupAndFile(file, JSON.stringify({ ...manifest, ...dependencies }, null, 2) + "\n", req.body?.version)
+      if (req.body?.install === true) await installPluginDependencies(req.params.id)
     })
     res.json({ ok: true, message: "依赖配置已保存并备份" })
   }))
   app.post("/api/plugins/install-script", express.raw({ type: "application/octet-stream", limit: MAX_TEXT_BYTES }), asyncRoute(async (req, res) => {
+    await withPluginOperation("example", async () => {
     const name = uploadName(req.query.name || req.body?.name)
     if (!name.toLowerCase().endsWith(".js")) return res.status(400).json({ error: "小插件文件名必须以 .js 结尾" })
-    const buffer = Buffer.isBuffer(req.body) ? req.body : await downloadScript(String(req.body?.url || ""), MAX_TEXT_BYTES)
+    const buffer = Buffer.isBuffer(req.body) ? req.body : await withBudget("download", 4, () => downloadScript(String(req.body?.url || ""), MAX_TEXT_BYTES))
     if (!buffer.length || buffer.length > MAX_TEXT_BYTES) return res.status(400).json({ error: "插件文件为空或超过 1.5 MB" })
     await fs.mkdir(DATA_DIR, { recursive: true })
     const checkFile = path.join(DATA_DIR, `script-check-${crypto.randomBytes(8).toString("hex")}.mjs`)
@@ -2120,21 +2223,28 @@ export async function startAdminPanel() {
     await fs.mkdir(directory, { recursive: true })
     const installedPath = await createUploadedFile(directory, name, buffer)
     res.json({ ok: true, path: installedPath, message: `已安装 ${installedPath}；重启 Bot 后加载` })
+    })
   }))
   app.get("/api/plugins/:id/config", asyncRoute(async (req, res) => {
     const support = await findPluginSupport(req.params.id)
     if (typeof support.configInfo?.getConfigData !== "function") return res.status(404).json({ error: "插件未提供 getConfigData()" })
-    res.json({ data: await support.configInfo.getConfigData() })
+    const data = await support.configInfo.getConfigData()
+    res.json({ data, version: contentVersion(JSON.stringify(data)) })
   }))
   app.put("/api/plugins/:id/config", asyncRoute(async (req, res) => {
+    await withPluginOperation(req.params.id, async () => {
     const support = await findPluginSupport(req.params.id)
-    if (typeof support.configInfo?.setConfigData !== "function") return res.status(404).json({ error: "插件未提供 setConfigData()" })
-    const result = await support.configInfo.setConfigData(req.body || {}, { Result: makeResult() })
+    if (typeof support.configInfo?.setConfigData !== "function" || typeof support.configInfo?.getConfigData !== "function") return res.status(404).json({ error: "插件未提供完整配置读写入口" })
+    const { _panelVersion, ...data } = req.body || {}
+    requireVersion(_panelVersion, contentVersion(JSON.stringify(await support.configInfo.getConfigData())))
+    const result = await support.configInfo.setConfigData(data, { Result: makeResult() })
     res.json(result && typeof result === "object" ? result : { ok: true, result, message: "保存成功" })
+    })
   }))
   app.post("/api/plugins/:id/action", asyncRoute(async (req, res) => {
     const support = await findPluginSupport(req.params.id)
-    const action = support.configInfo?.actions?.[req.body?.action]
+    const actions = support.configInfo?.actions || {}
+    const action = Object.hasOwn(actions, req.body?.action) ? actions[req.body.action] : null
     if (typeof action !== "function") return res.status(404).json({ error: "没有找到该插件操作" })
     const result = await action(req.body?.args, { Result: makeResult() })
     res.json(result && typeof result === "object" ? result : { ok: true, result, message: "操作完成" })
@@ -2145,21 +2255,30 @@ export async function startAdminPanel() {
     const installDependencies = req.body?.installDependencies === true
     const restartAfterInstall = req.body?.restartBot === true
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name) || name === "..") return res.status(400).json({ error: "插件目录名无效" })
+    await withPluginOperation(name, async () => {
     const target = path.join(PLUGINS, name)
-    try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在` }) } catch (error) { if (error.code !== "ENOENT") throw error }
+    await rejectSymlinkPath(target)
+    try { await fs.lstat(target); return res.status(409).json({ error: `plugins/${name} 已存在` }) } catch (error) { if (error.code !== "ENOENT") throw error }
+    const stagingRoot = path.join(DATA_DIR, "install-staging")
+    await fs.mkdir(stagingRoot, { recursive: true })
+    const staging = await fs.mkdtemp(path.join(stagingRoot, "clone-"))
+    const repository = path.join(staging, "repository")
     try {
-      const transport = gitTransport(url, req.body)
-      await runProcess("git", [...transport.args, "clone", "--depth", "1", "--single-branch", transport.url, target])
-      await runProcess("git", ["remote", "set-url", "origin", url], 30_000, target)
-      const entries = await fs.readdir(target)
+      const transport = await panelGitTransport(url, req.body)
+      await runProcess("git", [...transport.args, "clone", "--depth", "1", "--single-branch", "--", transport.url, repository])
+      await runProcess("git", ["remote", "set-url", "origin", url], 30_000, repository)
+      const entries = await fs.readdir(repository)
       if (!entries.includes("index.js") && !entries.some(entry => entry.endsWith(".js"))) throw new Error("仓库克隆成功，但未找到 Yunzai 插件入口文件")
+      await rejectSymlinkPath(target)
+      try { await fs.lstat(target); throw Object.assign(new Error("同名插件已存在"), { status: 409 }) } catch (error) { if (error.code !== "ENOENT") throw error }
+      await fs.rename(repository, target)
       let hasPackage = false
       try { await fs.access(path.join(target, "package.json")); hasPackage = true } catch {}
       let dependenciesInstalled = false
       let dependencyInstallFailed = false
       if (installDependencies && hasPackage) {
         try {
-          await runProcess("pnpm", ["install", "--filter", `./plugins/${name}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32")
+          await installPluginDependencies(name)
           dependenciesInstalled = true
         } catch (error) {
           dependencyInstallFailed = true
@@ -2190,10 +2309,11 @@ export async function startAdminPanel() {
           restartTimer.unref?.()
         })
       }
-    } catch (error) {
-      await fs.rm(target, { recursive: true, force: true }).catch(() => {})
-      throw error
+    } finally {
+      if (path.dirname(staging) !== stagingRoot || !path.basename(staging).startsWith("clone-")) throw new Error("暂存目录边界错误")
+      await fs.rm(staging, { recursive: true, force: true })
     }
+    })
   }))
   app.get("/api/plugins/archives", asyncRoute(async (req, res) => {
     const archiveRoot = path.join(DATA_DIR, "archived-plugins")
@@ -2208,7 +2328,7 @@ export async function startAdminPanel() {
     const id = req.params.id
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id) || id.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "此插件不能禁用" })
     await withPluginOperation(id, async () => {
-      const source = path.join(PLUGINS, id)
+      const source = await managedPluginDirectory(id)
       const stat = await fs.lstat(source)
       if (!stat.isDirectory() || stat.isSymbolicLink()) return res.status(400).json({ error: "目标不是普通插件目录" })
       const archiveRoot = path.join(DATA_DIR, "archived-plugins")
@@ -2223,11 +2343,15 @@ export async function startAdminPanel() {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*--\d+$/.test(archiveId)) return res.status(400).json({ error: "归档编号无效" })
     const name = archiveId.replace(/--\d+$/, "")
     if (name.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "不能恢复到面板自身目录" })
+    await withPluginOperation(name, async () => {
     const archivePath = path.join(DATA_DIR, "archived-plugins", archiveId)
+    await rejectSymlinkPath(archivePath)
     const target = path.join(PLUGINS, name)
-    try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在，无法覆盖` }) } catch (error) { if (error.code !== "ENOENT") throw error }
+    await rejectSymlinkPath(target)
+    try { await fs.lstat(target); return res.status(409).json({ error: `plugins/${name} 已存在，无法覆盖` }) } catch (error) { if (error.code !== "ENOENT") throw error }
     await fs.rename(archivePath, target)
     res.json({ ok: true, message: `已恢复到 plugins/${name}；重启 Bot 后加载` })
+    })
   }))
 
   app.get("/api/files", asyncRoute(async (req, res) => {
@@ -2275,7 +2399,7 @@ export async function startAdminPanel() {
     if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
     const content = await fs.readFile(absolute, "utf8")
     if (content.includes("\0")) return res.status(415).json({ error: "二进制文件不能在面板中编辑" })
-    res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/"), content, size: stat.size, modifiedAt: stat.mtime.toISOString() })
+    res.json({ path: path.relative(ROOT, absolute).split(path.sep).join("/"), content, version: contentVersion(content), size: stat.size, modifiedAt: stat.mtime.toISOString() })
   }))
   app.get("/api/files/image", asyncRoute(async (req, res) => {
     const relative = String(req.query.path || "")
@@ -2343,8 +2467,8 @@ export async function startAdminPanel() {
     await rejectSymlinkPath(absolute)
     const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
     if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
-    await writeBackupAndFile(absolute, content)
-    res.json({ ok: true, message: "文件已保存；自动备份保存在 data/elia-admin-panel/backups" })
+    const version = await writeBackupAndFile(absolute, content, req.body?.version)
+    res.json({ ok: true, version, message: "文件已保存；自动备份保存在 data/elia-admin-panel/backups" })
   }))
   app.post("/api/files/upload", express.raw({ type: "application/octet-stream", limit: MAX_UPLOAD_BYTES }), asyncRoute(async (req, res) => {
     if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: "请上传二进制文件内容" })
@@ -2384,7 +2508,7 @@ export async function startAdminPanel() {
   app.use("/api", (req, res) => res.status(404).json({ error: "API 不存在" }))
   if (settings.devMode) {
     await startNextDevServer()
-    app.use((req, res) => proxyNextRequest(req, res))
+    app.use(checkOrigin, (req, res, next) => devRequestNeedsAuth(req) ? requireAuth(req, res, next) : next(), (req, res) => proxyNextRequest(req, res))
   } else {
     app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
     app.use((req, res, next) => {
@@ -2411,7 +2535,7 @@ export async function startAdminPanel() {
     stopNextDevServer()
     throw error
   }
-  expressServer.once("close", stopNextDevServer)
+  expressServer.once("close", () => { stopNextDevServer(); configEvents.removeListener("changed", applySecurityConfig) })
   attachLogWebSocket(expressServer)
   startLogDirectoryWatcher()
   const address = expressServer.address()

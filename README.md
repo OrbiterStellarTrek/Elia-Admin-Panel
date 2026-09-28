@@ -39,18 +39,18 @@ pnpm install --filter elia-admin-panel --ignore-scripts
 pnpm --filter elia-admin-panel build
 ```
 
-构建后重启 Bot，面板默认地址为 `http://127.0.0.1:50882`。首次启动会生成随机密码，并仅在 Bot 控制台显示一次；配置文件只保存该密码的随机盐和 PBKDF2 哈希，不保存明文。之后重启不会重新生成密码。
+构建后重启 Bot，面板默认地址为 `http://127.0.0.1:50882`。首次随机密码写入受保护的 `data/elia-admin-panel/credentials/bootstrap.txt`；在 Bot 本机读取后登录，首次密码登录成功会删除该交付文件。配置文件只保存随机盐和 PBKDF2 哈希；普通日志和 stdout 不包含首次密码，之后重启不会重新生成密码。
 
 面板栏目可以通过固定地址直接打开：`/config/`（配置中心）、`/plugins/`（插件控制）、`/files/`（文件管理）、`/logs/`（运行日志）、`/debug/`（消息调试）；`/` 为运行概览。选中的配置文件、插件和文件路径分别保存在 `?file=`、`?plugin=`、`?path=` 中，刷新或复制网址后仍能回到对应位置。
 
 ## 登录方式
 
-- **验证码登录**：打开登录页点击“获取验证码”，再从运行 Bot 的控制台日志中复制验证码。验证码 5 分钟有效、只能使用一次；每个来源 IP 每 15 分钟最多请求 3 次，连续输错 10 次会作废。
+- **验证码登录**：点击“获取验证码”，在 Bot 本机读取 `data/elia-admin-panel/credentials/login-code.txt`。验证码 5 分钟有效、只能使用一次；每个来源 IP 每 15 分钟最多请求 3 次，连续输错 10 次会作废。
 - **主人快捷地址**：主人私聊 Bot 发送 `#elia登录`（群内发送也会私聊主人返回地址）。地址 3 分钟有效且只能使用一次，Bot 重启后未使用的地址失效。
 - **面板密码**：在 EliaAdminPanel 插件配置中设置新密码（至少 12 个字符）；密码框默认留空，读取配置时不会回显密码。保存后立即生效，并以独立随机盐和 PBKDF2 哈希写入配置。忘记密码时可先用验证码或主人快捷地址登录，再在插件配置中重设。
-- **浏览器会话**：登录后只在 HttpOnly Cookie 中保留临时令牌，不保存面板密码；令牌固定有效 12 小时。签名 Secret 和会话摘要保存在 `data/elia-admin-panel/`，所以 Bot 重启后尚未过期的令牌仍然有效；退出登录会撤销令牌。修改插件配置中的“浏览器会话 Secret”并重启 Bot 后，旧令牌签名失效，需要重新登录。Secret 配置只写不回显，留空不修改。
+- **浏览器会话**：使用 HttpOnly、SameSite=Strict Cookie，令牌有效 12 小时；未轮换凭据的有效会话可跨重启保留。退出登录立即撤销对应 HTTP/WS；通过 Elia 或 Guoba 修改密码/Secret，立即撤销全部 HTTP、日志 WS、HMR、快捷码和持久会话，阻断旧密码在途登录。首次升级到加固版会要求旧会话重新登录。
 
-验证码由服务端写入 Bot 日志，不会通过网页响应返回。请勿公开 Bot 控制台日志或转发主人快捷地址。
+验证码和首次密码仅通过本机受保护文件交付，不通过网页响应、普通日志或 stdout 返回。Windows 的 Node 文件 mode 不能替代 ACL，请从 Yunzai 根目录运行 `plugins/EliaAdminPanel/scripts/secure-local-storage.ps1`，并确认实际 Bot 运行账号拥有权限。请勿转发主人快捷地址。
 
 ## 面板设置
 
@@ -60,9 +60,17 @@ pnpm --filter elia-admin-panel build
 
 默认只监听本机回环地址。若需要从其他设备访问，可将 `host` 改为 `0.0.0.0`，在“面板密码”中设置高强度密码，并通过防火墙限制访问来源。不要将默认随机密码或管理端口直接暴露到公网。
 
-浏览器会话 Secret 首次启动时会自动生成并保存到 `data/elia-admin-panel/config.yaml`；会话存储在同目录的 `sessions.json`，仅保存随机会话 ID 的 SHA-256 摘要和到期时间。可在插件配置页填写新的“浏览器会话 Secret”来轮换；要求至少 32 个 UTF-8 字节，保存后重启 Bot，所有旧浏览器令牌都会失效。面板设置直接由配置文件管理，不依赖 `YUNZAI_PANEL_PUBLIC_URL`、`YUNZAI_PANEL_PASSWORD` 或 `YUNZAI_PANEL_SECRET` 环境变量。
+浏览器会话 Secret 首次启动时自动生成。会话存储仅包含随机 ID 的摘要、到期时间和凭据版本；新 Secret 至少需要 32 个 UTF-8 字节，保存后立即撤销旧会话。面板设置直接由配置文件管理，不依赖 `YUNZAI_PANEL_PUBLIC_URL`、`YUNZAI_PANEL_PASSWORD` 或 `YUNZAI_PANEL_SECRET` 环境变量。
 
 如果面板通过反向代理、端口映射或域名访问，在“公网访问地址”中填写一个或多个外部站点根地址（不含子路径），每行一个或用逗号分隔，例如 `https://bot.example.com`。主人快捷登录会使用这些地址生成链接；留空时根据监听地址生成本机或局域网地址。监听在 `127.0.0.1` 时只生成本机地址。
+
+## 安全部署与保存
+
+HTTPS 反向代理需要设置 `trustedProxies`（精确 IP/CIDR）和 `publicUrl`；代理应覆盖 `X-Forwarded-Proto`，而不是透传客户端值。公网部署建议同时启用 `cookieSecure: true`。来源检查采用完整 origin；不可信转发头不会改变 Cookie 的传输属性。本机 HTTP 开发可保持 `cookieSecure: false`。
+
+Git 常规代理仅允许使用运维在受保护 YAML 中批准的固定 IP 地址，例如 `approvedProxyUrls: ["http://127.0.0.1:7890"]`；不会继承进程环境的隐式代理。获批代理属于可信出站边界，运维应在代理侧限制目的地址、DNS 和重定向。HTTPS 前缀代理仍须满足公网 DNS 校验；直连和前缀 Git 禁止重定向并固定解析地址。Git 需支持 `http.curloptResolve`。
+
+配置、普通文件和依赖保存必须携带读取时的版本；旧版本返回 409，缺版本返回 428，前端已经同步适配。具体变更、回归入口及尚未完成的部署事项见 [加固记录](docs/SECURITY_HARDENING.md)。
 
 ## Guoba 兼容
 
