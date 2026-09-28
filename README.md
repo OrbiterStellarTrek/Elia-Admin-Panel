@@ -8,12 +8,26 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 - 配置中心：以表单编辑 `config/config/*.yaml`，也能切换到 YAML 源码；表单保存会尽量保留 YAML 注释和格式，更新 Yunzai 配置缓存，并校验 `qq.yaml` 的登录设备类型为 1-6。
 - 插件控制：列表分为大插件目录和小插件单文件；大插件优先读取 `*.support.js` 提供图形化配置，小插件可直接编辑源码。插件配置可使用 `EasyCron` 控件编辑并校验 5 段或 6 段 Cron 表达式，显示下次执行时间。大插件没有 support 入口时，会预览插件 `config/` 或 `configs/` 目录中的配置文件。可从 HTTPS 仓库安装插件，并选择安装依赖或在安装成功后重启 Bot；依赖安装不会执行第三方生命周期脚本。HTTPS 和跳过依赖生命周期脚本都不构成代码沙箱；安装的插件会由 Yunzai 加载，请先审查代码并只安装可信来源。
 - 插件正则排查：按群组、消息类型、插件、处理方法或正则搜索规则，并用测试消息检查命中；可将对应插件加入群组禁用配置。排查会实例化插件类以读取规则，插件构造函数可能执行代码，请仅对可信插件使用。
-- 消息调试：将模拟私聊或群聊事件送入插件处理链，并在面板捕获回复。模拟事件按主人身份运行，群聊还模拟群主和管理员；虽然捕获的回复不会直接发送到 QQ，插件若自行调用真实 Bot 或外部服务仍可能产生实际副作用。音频调试需要 FFmpeg；若 FFmpeg 不在 `PATH` 中，可通过 `ELIA_FFMPEG_PATH` 指定可执行文件路径。
-- 文件管理：在工作区中浏览并编辑 YAML、JSON、JS/TS、Markdown、CSS、HTML 等文本文件。单个文件限制 1.5 MB，保存前自动备份到 `data/elia-admin-panel/backups/`。
+- 消息调试：将模拟私聊或群聊事件送入插件处理链，并在面板捕获回复。模拟事件按主人身份运行，群聊还模拟群主和管理员；虽然捕获的回复不会直接发送到 QQ，插件若自行调用真实 Bot 或外部服务仍可能产生实际副作用。音频调试需要 FFmpeg；FFmpeg 直接读取 Yunzai 的 `config/config/bot.yaml` 中的 `ffmpeg_path`（通过 `cfg.bot` 获取）；留空时使用 `PATH` 中的 `ffmpeg`。修改配置后下一次转码即使用新值。
+- 文件管理：在工作区中浏览并编辑 YAML、JSON、JS/TS、Markdown、CSS、HTML 等文本文件。文本编辑单个文件限制 1.5 MB；支持向当前目录上传文件，每个文件最多 20 MB，不覆盖同名文件。保存前自动备份到 `data/elia-admin-panel/backups/`。
 - 运行日志：查看 command 和 error 日志末尾内容。
 - 进程操作：仅在检测到 ksr 重启令牌或 PM2 托管时提供重启按钮。
 
 文件管理器将 `.git`、`node_modules`、Next 构建目录及面板内部凭据数据目录排除在浏览和编辑之外；拒绝符号链接和工作区外路径。
+
+## 设置和插件管理
+
+“其他设置”中的主人 QQ 号支持从好友列表选择；私聊放行正则可以打开插件正则排查，搜索、测试并选择私聊规则，点击“保存更改”后生效。Yunzai 的放行配置只保存正则字符串，不支持 flags，带 flags 的规则需手动调整。QQBot-Plugin 官方账号按 `account.adapter.id === "QQBot"` 识别，面板不会尝试向它查询常规数字群；混合账号优先从普通账号的群缓存查找。
+
+第三方 support 表单支持 `Select` 的 `multiple`、`tags` 模式和 `CheckboxGroup`，选项未提供 `label` 时显示 `value`；多选保存为数组，tags 可添加自定义值。大插件按 support 入口、扫描到配置文件、无配置的顺序排列；无配置插件默认折叠，可手动展开。
+
+- **禁用/启用**：禁用后将整个目录保留到面板数据目录，重启 Bot 后停止加载；可从“已禁用插件”重新启用。面板自身不能禁用。
+- **依赖编辑**：含 `package.json` 的插件可编辑 dependencies、devDependencies、peerDependencies 和 optionalDependencies，保存前备份；可选随后安装依赖，跳过生命周期脚本。
+- **手动更新**：有公开 HTTPS origin 的 Git 插件可选择或输入分支、commit；获取远端后展示分支及最多 80 条提交。可使用常规 HTTP/SOCKS 代理或 `https://gh-proxy.com` 形式的链接前缀代理。代理只用于此次 Git 下载，不写入 origin。发现本地修改或未跟踪文件时停止更新。
+- **历史裁剪**：更新时可将独立 `.git` 裁剪成只含所选最新提交的浅仓库；原 Git 数据保存在 `data/elia-admin-panel/git-backups/`。普通分支更新会通过 Git 备份引用保留原分支提交；指定 commit 后处于游离 HEAD。不支持裁剪 Git worktree 的 `.git` 文件、存在关联 worktree 或已初始化子模块的仓库。
+- **单 JS 安装**：从小插件区上传 `.js` 或指定 HTTPS 文件直链，安装到 `plugins/example/`，最多 1.5 MB；拒绝重定向、HTML 网页和语法错误，不覆盖同名文件。重启后加载。
+
+上传继续遵守工作区、符号链接、面板凭据目录和 `.git` 等受保护目录的限制。二进制文件可以上传并在列表查看，无法在线编辑。
 
 ## 安装与构建
 
@@ -102,3 +116,7 @@ export function supportPanel() {
 ## 开源许可
 
 本项目使用 GNU GPL v3，许可全文见 [LICENSE](LICENSE)，与 Elia-Yunzai 使用相同的开源许可。
+
+## 开发验证
+
+`pnpm --dir plugins/EliaAdminPanel test` 执行代理、输入校验、官方账号、FFmpeg 和真实临时 Git 仓库的回归测试。构建后，可在已安装 Puppeteer 的 Yunzai 根目录运行 `node --experimental-vm-modules plugins/EliaAdminPanel/tests/panel-smoke.mjs`，验证真实 API 和浏览器交互。冒烟测试使用临时工作区及模拟账号，不修改正在运行的 Bot 配置或插件。

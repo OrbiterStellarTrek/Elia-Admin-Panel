@@ -12,6 +12,8 @@ import express from "express"
 import { WebSocketServer } from "ws"
 import YAML from "yaml"
 import { updateYamlPreservingComments } from "./config-yaml.js"
+import { pickNumericGroup, ffmpegPath } from "./bot-capabilities.js"
+import { gitTransport, repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
 import cfg from "../../../lib/config/config.js"
 import pluginsLoader from "../../../lib/plugins/loader.js"
 
@@ -36,7 +38,7 @@ const MAX_DEBUG_FORWARD_FETCHES_PER_EVENT = 3
 const MAX_DEBUG_FORWARD_NODES = 20
 const DEBUG_AUDIO_CACHE_TTL_MS = 10 * 60 * 1000
 const DEBUG_AUDIO_CACHE_MAX_BYTES = 32 * 1024 * 1024
-const FFMPEG_PATH = process.env.ELIA_FFMPEG_PATH || (process.platform === "win32" && existsSync("E:\\ffmpeg\\ffmpeg.exe") ? "E:\\ffmpeg\\ffmpeg.exe" : "ffmpeg")
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 const MAX_LOG_TAIL_BYTES = 512 * 1024
 const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
@@ -79,6 +81,7 @@ const codeCheckAttempts = new Map()
 const quickLoginAttempts = new Map()
 const quickLogins = new Map()
 const supportCache = new Map()
+const pluginOperations = new Set()
 const PLUGIN_SUPPORT_ENTRIES = [
   { fileName: "elia.support.js", factoryName: "supportPanel" },
   { fileName: "guoba.support.js", factoryName: "supportGuoba" },
@@ -244,7 +247,7 @@ function transcodeDebugAudio({ inputPath, inputBuffer, inputFormat }) {
     else args.push("-i", inputPath)
     args.push("-map", "0:a:0", "-vn", "-ac", "1", "-ar", "24000", "-t", "180", "-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1")
 
-    const child = spawn(FFMPEG_PATH, args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
+    const child = spawn(ffmpegPath(cfg), args, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] })
     const chunks = []
     let outputBytes = 0
     let stderr = ""
@@ -458,7 +461,7 @@ function createPanelDebugEvent({ message, userId, messageType, groupId, replies 
   const client = bot[bot.uin] || bot
   let forwardContact = null
   try {
-    if (messageType === "group" && /^\d+$/.test(groupId)) forwardContact = client.pickGroup(Number(groupId))
+    if (messageType === "group" && /^\d+$/.test(groupId)) forwardContact = pickNumericGroup(client, groupId)
     else if (messageType === "private" && /^\d+$/.test(userId)) forwardContact = client.pickFriend(Number(userId))
   } catch {}
   const forwardContext = { count: 0, contact: forwardContact }
@@ -919,6 +922,9 @@ async function formatPluginEntry(name, title, directory, support = null, metadat
     directory,
     sourcePath: metadata.sourcePath || "",
     hasSupport: Boolean(support),
+    hasSupportFile: Boolean(metadata.hasSupportFile),
+    hasGit: Boolean(metadata.hasGit),
+    hasPackage: Boolean(metadata.hasPackage),
     configFiles: metadata.configFiles || [],
     hasConfig: typeof configInfo.getConfigData === "function" && Array.isArray(configInfo.schemas),
     schemas: Array.isArray(configInfo.schemas) ? JSON.parse(JSON.stringify(configInfo.schemas)) : [],
@@ -1041,6 +1047,9 @@ async function listPlugins() {
         kind: "large",
         sourcePath: `plugins/${entry.name}`,
         configFiles,
+        hasSupportFile: children.some(child => child.isFile() && child.name.endsWith(".support.js")),
+        hasGit: children.some(child => child.name === ".git"),
+        hasPackage: children.some(child => child.isFile() && child.name === "package.json"),
       }))
       continue
     }
@@ -1054,7 +1063,8 @@ async function listPlugins() {
       }
     }
   }
-  return result.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "large" ? -1 : 1) || a.title.localeCompare(b.title, "zh-CN"))
+  const rank = entry => entry.hasSupportFile ? 0 : entry.configFiles.length ? 1 : 2
+  return result.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "large" ? -1 : 1) || rank(a) - rank(b) || a.title.localeCompare(b.title, "zh-CN"))
 }
 
 async function findPluginSupport(id) {
@@ -1602,13 +1612,14 @@ async function restartBot() {
   throw Object.assign(new Error("当前没有可识别的守护进程，面板未强制结束 Bot。请通过外部进程管理器重启。"), { status: 409 })
 }
 
-function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false) {
+function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false, stdoutOnly = false) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, windowsHide: true, shell, stdio: ["ignore", "pipe", "pipe"] })
     let output = ""
+    let stdout = ""
     let timedOut = false
     const collect = chunk => { if (output.length < 160_000) output += chunk.toString() }
-    child.stdout.on("data", collect)
+    child.stdout.on("data", chunk => { if (stdout.length < 160_000) stdout += chunk.toString(); collect(chunk) })
     child.stderr.on("data", collect)
     const timeout = setTimeout(() => { timedOut = true; child.kill() }, timeoutMs)
     child.once("error", error => { clearTimeout(timeout); reject(error) })
@@ -1616,10 +1627,12 @@ function runProcess(command, args, timeoutMs = 120_000, cwd = ROOT, shell = fals
       clearTimeout(timeout)
       if (timedOut) return reject(new Error(`命令执行超过 ${Math.ceil(timeoutMs / 60_000)} 分钟，已停止`))
       if (code !== 0) return reject(new Error(output.trim() || `命令退出码 ${code}`))
-      resolve(output.trim())
+      resolve((stdoutOnly ? stdout : output).trim())
     })
   })
 }
+
+const runGitProcess = (command, args, timeoutMs, cwd) => runProcess(command, args, timeoutMs, cwd, false, true)
 
 function validateRemoteRepository(input) {
   let url
@@ -1634,6 +1647,35 @@ function validateRemoteRepository(input) {
   url.search = ""
   url.hash = ""
   return { url: url.toString().replace(/\/$/, ""), name }
+}
+
+async function managedPluginDirectory(id) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id)) throw Object.assign(new Error("插件标识无效"), { status: 400 })
+  const directory = path.join(PLUGINS, id)
+  await rejectSymlinkPath(directory)
+  if (!(await fs.lstat(directory)).isDirectory()) throw Object.assign(new Error("目标不是插件目录"), { status: 400 })
+  return directory
+}
+
+async function withPluginOperation(id, action) {
+  if (pluginOperations.has(id)) throw Object.assign(new Error("该插件已有操作正在进行"), { status: 409 })
+  pluginOperations.add(id)
+  try { return await action() } finally { pluginOperations.delete(id) }
+}
+
+function uploadName(value) {
+  const name = String(value || "")
+  if (!name || name.length > 160 || /[\\/:<>"|?*\x00-\x1f]/.test(name) || name === "." || name === ".." || /[. ]$/.test(name) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) throw Object.assign(new Error("上传文件名无效"), { status: 400 })
+  return name
+}
+
+async function createUploadedFile(directory, name, buffer) {
+  const absolute = resolveWorkspacePath(path.relative(ROOT, path.join(directory, uploadName(name))))
+  await rejectSymlinkPath(absolute)
+  if (!(await fs.stat(directory)).isDirectory()) throw Object.assign(new Error("上传目标不是目录"), { status: 400 })
+  try { await fs.writeFile(absolute, buffer, { flag: "wx" }) }
+  catch (error) { if (error.code === "EEXIST") throw Object.assign(new Error("同名文件已存在，请修改文件名后上传"), { status: 409 }); throw error }
+  return path.relative(ROOT, absolute).split(path.sep).join("/")
 }
 
 function makeResult() {
@@ -1891,7 +1933,7 @@ export async function startAdminPanel() {
     } catch {}
     const getGroupName = id => {
       try {
-        const group = global.Bot?.pickGroup?.(Number(id))
+        const group = pickNumericGroup(global.Bot, id)
         return String(group?.name || group?.group_name || global.Bot?.gl?.get?.(Number(id))?.group_name || id)
       } catch { return String(global.Bot?.gl?.get?.(Number(id))?.group_name || id) }
     }
@@ -1941,12 +1983,9 @@ export async function startAdminPanel() {
     }
     let groupName = "全局"
     if (groupId !== "default") {
-      if (typeof global.Bot?.pickGroup !== "function") return res.status(503).json({ error: "当前 Yunzai 暂不支持获取群信息" })
       let group
-      try { group = global.Bot.pickGroup(Number(groupId)) }
-      catch { return res.status(404).json({ error: `无法获取群 ${groupId}` }) }
-      if (!group) return res.status(404).json({ error: `无法获取群 ${groupId}` })
-      groupName = String(group.name || group.group_name || groupId)
+      try { group = pickNumericGroup(global.Bot, groupId) } catch {}
+      groupName = String(group?.name || group?.group_name || groupId)
     }
     const pluginNames = [...new Set((pluginsLoader.priority || [])
       .map(plugin => plugin?.name)
@@ -1980,7 +2019,7 @@ export async function startAdminPanel() {
     } catch {}
     const groups = [...groupIds].map(id => {
       let group
-      try { group = global.Bot?.pickGroup?.(Number(id)) } catch {}
+      try { group = pickNumericGroup(global.Bot, id) } catch {}
       if (!group) {
         try { group = groupCache?.get?.(Number(id)) || groupCache?.get?.(id) } catch {}
       }
@@ -2030,6 +2069,58 @@ export async function startAdminPanel() {
   }))
 
   app.get("/api/plugins", asyncRoute(async (req, res) => res.json({ plugins: await listPlugins() })))
+  app.get("/api/plugins/:id/git", asyncRoute(async (req, res) => {
+    res.json(await repositoryInfo(await managedPluginDirectory(req.params.id), runGitProcess))
+  }))
+  app.post("/api/plugins/:id/git/fetch", asyncRoute(async (req, res) => {
+    res.json(await withPluginOperation(req.params.id, async () => fetchRepository(await managedPluginDirectory(req.params.id), req.body || {}, runGitProcess, validateRemoteRepository)))
+  }))
+  app.post("/api/plugins/:id/git/update", asyncRoute(async (req, res) => {
+    const result = await withPluginOperation(req.params.id, async () => {
+      const directory = await managedPluginDirectory(req.params.id)
+      const result = await updateRepository(directory, req.body || {}, runGitProcess, validateRemoteRepository, path.join(DATA_DIR, "git-backups"))
+      for (const key of supportCache.keys()) if (isInside(directory, key)) supportCache.delete(key)
+      return result
+    })
+    res.json({ ok: true, ...result })
+  }))
+  app.get("/api/plugins/:id/dependencies", asyncRoute(async (req, res) => {
+    const directory = await managedPluginDirectory(req.params.id)
+    const file = path.join(directory, "package.json")
+    await rejectSymlinkPath(file)
+    const manifest = JSON.parse(await fs.readFile(file, "utf8"))
+    res.json({ data: Object.fromEntries(["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"].map(key => [key, manifest[key] || {}])) })
+  }))
+  app.put("/api/plugins/:id/dependencies", asyncRoute(async (req, res) => {
+    await withPluginOperation(req.params.id, async () => {
+      const directory = await managedPluginDirectory(req.params.id)
+      const file = path.join(directory, "package.json")
+      await rejectSymlinkPath(file)
+      const dependencies = validateDependencies(req.body?.data)
+      const manifest = JSON.parse(await fs.readFile(file, "utf8"))
+      await writeBackupAndFile(file, JSON.stringify({ ...manifest, ...dependencies }, null, 2) + "\n")
+      if (req.body?.install === true) await runProcess("pnpm", ["install", "--filter", `./plugins/${req.params.id}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32")
+    })
+    res.json({ ok: true, message: "依赖配置已保存并备份" })
+  }))
+  app.post("/api/plugins/install-script", express.raw({ type: "application/octet-stream", limit: MAX_TEXT_BYTES }), asyncRoute(async (req, res) => {
+    const name = uploadName(req.query.name || req.body?.name)
+    if (!name.toLowerCase().endsWith(".js")) return res.status(400).json({ error: "小插件文件名必须以 .js 结尾" })
+    const buffer = Buffer.isBuffer(req.body) ? req.body : await downloadScript(String(req.body?.url || ""), MAX_TEXT_BYTES)
+    if (!buffer.length || buffer.length > MAX_TEXT_BYTES) return res.status(400).json({ error: "插件文件为空或超过 1.5 MB" })
+    await fs.mkdir(DATA_DIR, { recursive: true })
+    const checkFile = path.join(DATA_DIR, `script-check-${crypto.randomBytes(8).toString("hex")}.mjs`)
+    try {
+      await fs.writeFile(checkFile, buffer)
+      try { await runProcess(process.execPath, ["--check", checkFile], 30_000) }
+      catch { throw Object.assign(new Error("JavaScript 语法检查失败，请检查插件源码"), { status: 400 }) }
+    } finally { await fs.rm(checkFile, { force: true }) }
+    const directory = path.join(PLUGINS, "example")
+    await rejectSymlinkPath(directory)
+    await fs.mkdir(directory, { recursive: true })
+    const installedPath = await createUploadedFile(directory, name, buffer)
+    res.json({ ok: true, path: installedPath, message: `已安装 ${installedPath}；重启 Bot 后加载` })
+  }))
   app.get("/api/plugins/:id/config", asyncRoute(async (req, res) => {
     const support = await findPluginSupport(req.params.id)
     if (typeof support.configInfo?.getConfigData !== "function") return res.status(404).json({ error: "插件未提供 getConfigData()" })
@@ -2057,7 +2148,9 @@ export async function startAdminPanel() {
     const target = path.join(PLUGINS, name)
     try { await fs.access(target); return res.status(409).json({ error: `plugins/${name} 已存在` }) } catch (error) { if (error.code !== "ENOENT") throw error }
     try {
-      await runProcess("git", ["clone", "--depth", "1", "--single-branch", url, target])
+      const transport = gitTransport(url, req.body)
+      await runProcess("git", [...transport.args, "clone", "--depth", "1", "--single-branch", transport.url, target])
+      await runProcess("git", ["remote", "set-url", "origin", url], 30_000, target)
       const entries = await fs.readdir(target)
       if (!entries.includes("index.js") && !entries.some(entry => entry.endsWith(".js"))) throw new Error("仓库克隆成功，但未找到 Yunzai 插件入口文件")
       let hasPackage = false
@@ -2111,17 +2204,19 @@ export async function startAdminPanel() {
       .sort((a, b) => b.id.localeCompare(a.id))
     res.json({ archives })
   }))
-  app.post("/api/plugins/:id/archive", asyncRoute(async (req, res) => {
+  app.post(["/api/plugins/:id/disable", "/api/plugins/:id/archive"], asyncRoute(async (req, res) => {
     const id = req.params.id
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id) || id.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "此插件不能归档" })
-    const source = path.join(PLUGINS, id)
-    const stat = await fs.lstat(source)
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return res.status(400).json({ error: "目标不是普通插件目录" })
-    const archiveRoot = path.join(DATA_DIR, "archived-plugins")
-    await fs.mkdir(archiveRoot, { recursive: true })
-    const archiveId = `${id}--${Date.now()}`
-    await fs.rename(source, path.join(archiveRoot, archiveId))
-    res.json({ ok: true, archiveId, message: `插件 ${id} 已移入可恢复归档；重启 Bot 后卸载生效` })
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id) || id.toLowerCase() === "eliaadminpanel") return res.status(400).json({ error: "此插件不能禁用" })
+    await withPluginOperation(id, async () => {
+      const source = path.join(PLUGINS, id)
+      const stat = await fs.lstat(source)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) return res.status(400).json({ error: "目标不是普通插件目录" })
+      const archiveRoot = path.join(DATA_DIR, "archived-plugins")
+      await fs.mkdir(archiveRoot, { recursive: true })
+      const archiveId = `${id}--${Date.now()}`
+      await fs.rename(source, path.join(archiveRoot, archiveId))
+      res.json({ ok: true, archiveId, message: `插件 ${id} 已禁用，文件已保留；重启 Bot 后生效，可随时重新启用` })
+    })
   }))
   app.post("/api/plugins/archives/:archiveId/restore", asyncRoute(async (req, res) => {
     const archiveId = req.params.archiveId
@@ -2156,6 +2251,8 @@ export async function startAdminPanel() {
           files.push({ name: entry.name, path: relativePath, type: "file", size: childStat.size })
         } else if (childStat.size <= MAX_PREVIEW_IMAGE_BYTES && IMAGE_MIME_TYPES.has(extension)) {
           files.push({ name: entry.name, path: relativePath, type: "image", size: childStat.size })
+        } else {
+          files.push({ name: entry.name, path: relativePath, type: "binary", size: childStat.size })
         }
       }
     }
@@ -2248,6 +2345,13 @@ export async function startAdminPanel() {
     if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
     await writeBackupAndFile(absolute, content)
     res.json({ ok: true, message: "文件已保存；自动备份保存在 data/elia-admin-panel/backups" })
+  }))
+  app.post("/api/files/upload", express.raw({ type: "application/octet-stream", limit: MAX_UPLOAD_BYTES }), asyncRoute(async (req, res) => {
+    if (!Buffer.isBuffer(req.body)) return res.status(400).json({ error: "请上传二进制文件内容" })
+    const directory = resolveWorkspacePath(String(req.query.path || "."))
+    await rejectSymlinkPath(directory)
+    const uploadedPath = await createUploadedFile(directory, req.query.name, req.body)
+    res.json({ ok: true, path: uploadedPath, message: "文件已上传" })
   }))
 
   app.get("/api/logs", asyncRoute(async (req, res) => {

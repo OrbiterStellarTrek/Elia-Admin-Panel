@@ -23,6 +23,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { SchemaOptions } from "@/components/schema-options"
+import { PluginTools, ScriptInstaller, ProxyFields } from "@/components/plugin-tools"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 
 const MonacoCodeEditor = dynamic(
@@ -626,7 +628,7 @@ function PageIntro({ actions }: { actions: PageAction[] }) {
   </div>
 }
 
-function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
+function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = [] }: { api: Api; notify: any; confirm: Confirm; onSelect?: (pattern: string) => void; selectedPatterns?: string[] }) {
   const [open, setOpen] = useState(false)
   const [groupId, setGroupId] = useState("default")
   const [groups, setGroups] = useState<{ id: string; name: string }[]>([{ id: "default", name: "全局" }])
@@ -635,7 +637,7 @@ function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; co
   const [blockedPluginNames, setBlockedPluginNames] = useState<string[]>([])
   const [search, setSearch] = useState("")
   const [testMessage, setTestMessage] = useState("")
-  const [messageType, setMessageType] = useState<"group" | "private">("group")
+  const [messageType, setMessageType] = useState<"group" | "private">(onSelect ? "private" : "group")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [scanErrors, setScanErrors] = useState<any[]>([])
@@ -670,6 +672,7 @@ function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; co
   const filteredRules = rules.filter(rule => {
     const searchable = `${rule.pluginName} ${rule.sourcePlugin} ${rule.sourceKey} ${rule.fnc} ${rule.pattern}/${rule.flags} ${rule.event} ${rule.pluginEvent}`.toLowerCase()
     if (query && !searchable.includes(query)) return false
+    if (onSelect && (!eventMatches(rule.pluginEvent) || !eventMatches(rule.event) || rule.regexError)) return false
     if (!hasTestMessage) return true
     if (!eventMatches(rule.pluginEvent) || (rule.event && !eventMatches(rule.event)) || rule.regexError) return false
     try {
@@ -706,22 +709,22 @@ function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; co
   }
 
   return <>
-    <Button type="button" size="icon" className="fixed bottom-16 right-4 z-40 sm:bottom-[72px] sm:right-6" aria-label="插件正则排查帮助" title="排查插件正则匹配" onClick={() => setOpen(true)}><CircleHelp /></Button>
+    <Button type="button" size={onSelect ? "sm" : "icon"} variant={onSelect ? "outline" : "default"} className={onSelect ? "" : "fixed bottom-16 right-4 z-40 sm:bottom-[72px] sm:right-6"} aria-label={onSelect ? "选择私聊放行正则" : "插件正则排查帮助"} title="排查插件正则匹配" onClick={() => setOpen(true)}><CircleHelp />{onSelect && "从插件正则中选择"}</Button>
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
         <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] flex h-[min(88dvh,820px)] w-[calc(100%-1.5rem)] max-w-4xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-white shadow-2xl focus:outline-none sm:w-[calc(100%-3rem)]">
           <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5">
-            <div><Dialog.Title className="text-lg font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">查找当前是哪个傻逼给你匹配的正则，可以直接快速屏蔽这个插件</Dialog.Description></div>
+            <div><Dialog.Title className="text-lg font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">{onSelect ? "选择私聊规则加入放行名单，点击保存更改后生效。Yunzai 使用不带 flags 的正则，含 flags 的规则需要手动调整。" : "查找插件正则匹配，可快速屏蔽对应插件"}</Dialog.Description></div>
             <div className="flex shrink-0 items-center gap-1"><Button type="button" size="icon" variant="ghost" aria-label="刷新插件规则" title="刷新插件规则" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭插件正则排查"><X className="size-4" /></Button></Dialog.Close></div>
           </div>
           <div className="grid shrink-0 gap-4 border-b border-border bg-slate-50/60 px-6 py-4 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(180px,1fr)_minmax(210px,1.2fr)_auto]">
-            <div className="min-w-0 space-y-2"><Label className="text-xs">屏蔽作用范围</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-10 bg-white text-sm"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent className="z-[70]">{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? "全局" : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select></div>
+            <div className="min-w-0 space-y-2"><Label className="text-xs">{onSelect ? "规则范围" : "屏蔽作用范围"}</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-10 bg-white text-sm"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent className="z-[70]">{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? "全局" : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select></div>
             <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-search" className="text-xs">搜索插件、子插件或正则</Label><div className="relative"><Search className="absolute left-3 top-3 size-4 text-slate-400" /><Input id="plugin-rule-search" className="h-10 pl-9 text-sm" placeholder="名称、处理方法、正则内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
             <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-message" className="text-xs">测试消息（可选）</Label><Input id="plugin-rule-message" className="h-10 text-sm" maxLength={512} placeholder="粘贴触发的原始消息（最多 512 字）" value={testMessage} onChange={event => setTestMessage(event.target.value)} /></div>
-            <div className="space-y-2"><Label className="text-xs">消息类型</Label><div role="group" aria-label="消息类型" className="flex h-10 items-center rounded-md border border-border bg-white p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} onClick={() => setMessageType(type)} className={`flex-1 rounded px-2.5 py-1 text-xs transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div></div>
+            <div className="space-y-2"><Label className="text-xs">消息类型</Label><div role="group" aria-label="消息类型" className="flex h-10 items-center rounded-md border border-border bg-white p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <button key={type} type="button" aria-pressed={messageType === type} disabled={Boolean(onSelect && type === "group")} onClick={() => setMessageType(type)} className={`flex-1 rounded px-2.5 py-1 text-xs transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div></div>
           </div>
-          <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border bg-white px-6 py-2 text-[11px] text-muted-foreground"><span className="font-medium text-slate-600">{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>禁用按 Yunzai 实际匹配的插件名称写入 group.yaml</span></div>
+          <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border bg-white px-6 py-2 text-[11px] text-muted-foreground"><span className="font-medium text-slate-600">{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>{onSelect ? "加入后点击保存更改，写入私聊放行名单" : "禁用按 Yunzai 实际匹配的插件名称写入 group.yaml"}</span></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
             {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs text-rose-700">{error}</p>}
             {loading ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-5 animate-spin" />正在读取当前已加载插件</div>
@@ -735,8 +738,8 @@ function PluginMatchHelper({ api, notify, confirm }: { api: Api; notify: any; co
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div className="flex min-w-0 flex-wrap items-center gap-2"><span className="text-sm font-semibold text-slate-800">{rule.pluginName}</span>{rule.enabled ? <Badge className="border-0 bg-emerald-50 text-emerald-700">当前启用</Badge> : <Badge className="border-0 bg-slate-100 text-slate-600">当前未启用</Badge>}{hasTestMessage && <Badge className="border-0 bg-amber-50 text-amber-800">命中测试消息</Badge>}</div>
                         <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                        {sourceNames.length > 1 && <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || nameBlocked} onClick={() => void quickDisable(rule, "name")}>屏蔽此子插件</Button>}
-                        <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || !sourceNeedsBlock} onClick={() => void quickDisable(rule, sourceNames.length > 1 ? "source" : "name")}>{sourceNames.length > 1 ? "屏蔽整个插件" : "屏蔽插件"}</Button>
+                        {onSelect ? <Button type="button" size="sm" variant="outline" disabled={Boolean(rule.regexError || rule.flags || selectedPatterns.includes(rule.pattern))} title={rule.flags ? "Yunzai 的私聊放行正则不支持 flags，请手动调整" : undefined} onClick={() => onSelect(rule.pattern)}>{selectedPatterns.includes(rule.pattern) ? "已添加" : "加入私聊放行"}</Button> : <>{sourceNames.length > 1 && <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || nameBlocked} onClick={() => void quickDisable(rule, "name")}>屏蔽此子插件</Button>}
+                        <Button type="button" size="sm" variant="outline" className="h-8 px-2.5" disabled={busy || !sourceNeedsBlock} onClick={() => void quickDisable(rule, sourceNames.length > 1 ? "source" : "name")}>{sourceNames.length > 1 ? "屏蔽整个插件" : "屏蔽插件"}</Button></>}
                         </div>
                       </div>
                       <code className="block w-full break-all rounded-md bg-slate-50 px-3 py-2.5 font-mono text-xs leading-5 text-slate-700">/{rule.pattern}/{rule.flags}</code>
@@ -1236,7 +1239,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           const mutuallyExclusiveValues = mutuallyExclusiveName && Array.isArray(activeGroupSettings[mutuallyExclusiveName]) ? activeGroupSettings[mutuallyExclusiveName] : undefined
           return <ConfigField key={key} name={key} value={value} defaultValue={defaultValue} path={[activeGroupSection, key]} onChange={update} depth={1} pluginNames={key === "enable" || key === "disable" ? pluginNameOptions : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveName ? configFieldLabel(mutuallyExclusiveName) : undefined} />
         })}</div>}
-        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <ConfigField key={key} name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} />)}</div>}
+        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <Fragment key={key}><ConfigField name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} />{key === "disableAdopt" && <PluginMatchHelper api={api} notify={notify} confirm={confirm} selectedPatterns={Array.isArray(value) ? value : []} onSelect={pattern => update([key], [...new Set([...(Array.isArray(value) ? value : []), pattern])])} />}</Fragment>)}</div>}
         {!loading && !data && !error && <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">选择左侧配置文件开始编辑</div>}
         </CardContent>
       </Card>
@@ -1592,6 +1595,7 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, plu
     <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
     <div className="min-w-0">{selectOptions ? <Select value={selectValue} onValueChange={selected => onChange(path, numericConfigSelectFields.has(name) ? Number(selected) : selected)}><SelectTrigger aria-label={label} className={` ${hasValidSelection ? "border-border/80" : "border-amber-400 text-amber-800"}`}><SelectValue placeholder="未设置，请选择" /></SelectTrigger><SelectContent>{!hasValidSelection && selectValue && <SelectItem value={selectValue} disabled>无效值：{selectValue}，请选择</SelectItem>}{selectOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
       : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
+      : name === "masterQQ" ? <ConfigListField name={name} label={label} value={Array.isArray(value) ? value : value == null ? [] : [value]} forceItemType="number" forceAvatarKind="qq" friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} onChange={next => onChange(path, next)} />
       : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
       : listField(name) && typeof value === "string" ? <StringListField name={name} label={label} value={value} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
@@ -1640,6 +1644,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const [smallSearch, setSmallSearch] = useState("")
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState("")
+  const [installProxy, setInstallProxy] = useState({ proxyMode: "none", proxy: "" })
+  const [showUnconfigured, setShowUnconfigured] = useState(false)
   const [installName, setInstallName] = useState("")
   const [installDependencies, setInstallDependencies] = useState(false)
   const [restartAfterInstall, setRestartAfterInstall] = useState(false)
@@ -1669,6 +1675,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     try {
       const [result, archiveResult] = await Promise.all([api("/api/plugins"), api("/api/plugins/archives")])
       setPlugins(result.plugins); setArchives(archiveResult.archives)
+      if (selected) setSelected(result.plugins.find((plugin: any) => plugin.id === selected.id) || null)
       if (!selected && result.plugins.length) {
         const requested = routeQuery("plugin")
         setSelected(result.plugins.find((plugin: any) => plugin.id === requested) || result.plugins[0])
@@ -1818,7 +1825,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     if (!await confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n${installOptions.join("\n")}`)) return
     setBusy(true)
     try {
-      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
+      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ ...installProxy, url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
       setShowInstall(false); setInstallUrl(""); setInstallName(""); setInstallDependencies(false); setRestartAfterInstall(false)
       await refresh()
       notify("success", result.message)
@@ -1827,10 +1834,10 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   }
   async function archivePlugin() {
     if (!selected || selected.directory.includes("/") || selected.id.toLowerCase() === "eliaadminpanel") return
-    if (!await confirm(`将“${selected.title}”移入可恢复归档？\n\n归档后重启 Bot 即可卸载；插件文件保存在 data/elia-admin-panel/archived-plugins，可随时恢复。`)) return
+    if (!await confirm(`禁用“${selected.title}”？\n\n重启 Bot 后停止加载；插件文件将完整保留，可随时重新启用。`)) return
     setBusy(true)
     try {
-      const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/archive`, { method: "POST", body: "{}" })
+      const result = await api(`/api/plugins/${encodeURIComponent(selected.id)}/disable`, { method: "POST", body: "{}" })
       setSelected(null); setData({}); await refresh(); notify("success", result.message)
     } catch (reason) { notify("error", (reason as Error).message) }
     finally { setBusy(false) }
@@ -1881,7 +1888,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <div className={`absolute inset-0 z-20 hidden flex-col rounded-2xl border border-border bg-white p-2 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <Button size="icon" variant="ghost" className="mx-auto mb-2 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight /></Button>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-            <div aria-label="大插件" className="space-y-1">{largePlugins.map(renderCompactPlugin)}</div>
+            <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}<Button size="icon" variant="ghost" aria-label="展开无配置插件" onClick={() => setShowUnconfigured(value => !value)}><ChevronDown /></Button></div>
             <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
         </div>
@@ -1890,18 +1897,18 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span><Button size="icon" variant="ghost" className="hidden size-7 xl:inline-flex" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-              {shownLarge.map(renderPlugin)}
+              {shownLarge.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length).map(renderPlugin)}{shownLarge.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length) && <div><Button type="button" size="sm" variant="ghost" className="w-full justify-between" onClick={() => setShowUnconfigured(value => !value)}>无配置插件（{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).length}）<ChevronDown className={showUnconfigured ? "rotate-180" : ""} /></Button>{(showUnconfigured || largeSearch.trim()) && shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).map(renderPlugin)}</div>}
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
           </Card>
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-none border-t-0">
-            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{smallPlugins.length}</Badge></span></div>
+            <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{smallPlugins.length}</Badge></span><ScriptInstaller api={api} notify={notify} onInstalled={refresh} /></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {shownSmall.map(renderPlugin)}
               {!loading && !shownSmall.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
-            {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-slate-500">可恢复归档 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>恢复</Button></div>)}</div>}
+            {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-slate-500">已禁用插件 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>启用</Button></div>)}</div>}
           </Card>
         </div>
         </div>
@@ -1917,7 +1924,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
             {!sourceFullscreen && selected?.author && <div className="mt-1 text-[11px] text-muted-foreground">作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</div>}
             {(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 truncate">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}
           </div>
-          <div className="flex shrink-0 gap-2">{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />归档插件</Button>}</div>
+          <div className="flex flex-wrap justify-end gap-2">{selected?.kind === "large" && <PluginTools key={selected.id} plugin={selected} api={api} notify={notify} confirm={confirm} onUpdated={refresh} />}{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />禁用插件</Button>}</div>
         </CardHeader>
         {hasSchemaGroupTabs && <div role="group" aria-label="插件配置分组" className="flex gap-1 overflow-x-auto border-b border-border bg-card px-5">
           {schemaGroups.map((group, index) => <button key={`${group.label}-${index}`} type="button" aria-pressed={index === activeSchemaGroup} onClick={() => setActiveSchemaGroup(index)} className={`shrink-0 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${index === activeSchemaGroup ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{group.label}</button>)}
@@ -1945,6 +1952,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <form onSubmit={installPlugin} className="space-y-3">
           <div className="space-y-1.5"><Label htmlFor="plugin-install-url" className="text-xs">HTTPS 仓库地址</Label><Input id="plugin-install-url" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /></div>
           <div className="space-y-1.5"><Label htmlFor="plugin-install-name" className="text-xs">插件目录名</Label><Input id="plugin-install-name" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="可选，默认使用仓库名" /></div>
+          <ProxyFields value={installProxy} onChange={setInstallProxy} />
           <div className="grid grid-cols-1 divide-y divide-border rounded-lg border border-border/70 px-3 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
             <div className="flex items-center justify-between gap-3 py-3 sm:pr-3"><Label htmlFor="plugin-install-dependencies" className="text-xs">安装对应依赖</Label><Switch id="plugin-install-dependencies" checked={installDependencies} onCheckedChange={setInstallDependencies} /></div>
             <div className="flex items-center justify-between gap-3 py-3 sm:pl-3"><Label htmlFor="plugin-restart-after-install" className="text-xs">重启 Bot</Label><Switch id="plugin-restart-after-install" checked={restartAfterInstall} onCheckedChange={setRestartAfterInstall} /></div>
@@ -2044,7 +2052,7 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
     <div className="pt-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
     <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
-      : component === "RadioGroup" || component === "Select" ? <div className="flex flex-wrap gap-2">{options.map((option: any) => { const optionValue = typeof option === "object" ? option.value : option; const optionLabel = typeof option === "object" ? option.label : option; return <button key={String(optionValue)} type="button" onClick={() => onChange(optionValue)} className={`rounded-lg border px-3 py-2 text-xs transition ${value === optionValue ? "border-indigo-300 bg-indigo-50 font-medium text-indigo-700" : "border-border bg-white text-slate-600 hover:bg-slate-50"}`}>{optionLabel}</button> })}</div>
+      : component === "RadioGroup" || component === "Select" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} />
       : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />
       : Array.isArray(value) ? <ConfigListField name={schema.field} label={label} value={value} forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} forceItemType="string" forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
@@ -2064,6 +2072,8 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
+  const uploadInput = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [search, setSearch] = useState("")
   const [error, setError] = useState("")
@@ -2108,6 +2118,7 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
   }, [editorFullscreen])
   async function openFile(entry: any) {
     if (dirty && !await confirm("当前文件有未保存修改，继续切换吗？")) return
+    if (entry.type === "binary") { notify("info", "文件已上传，当前类型不支持在线编辑或预览"); return }
     if (entry.type === "image") {
       setCurrent(entry); setContent(""); setDirty(false); setError(""); setImageLightbox(false); setRouteQuery("path", entry.path)
       return
@@ -2116,6 +2127,19 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
     try { const result = await api(`/api/files/read?path=${encodeURIComponent(entry.path)}`); setCurrent(result); setContent(result.content); setDirty(false); setRouteQuery("path", entry.path) }
     catch (reason) { reportFileError(reason) }
     finally { setLoading(false) }
+  }
+  async function uploadFiles(files: FileList | null) {
+    if (!files?.length) return
+    if (dirty && !await confirm("上传后将刷新目录，当前文件有未保存修改，继续吗？")) return
+    setUploading(true)
+    try {
+      for (const file of Array.from(files)) {
+        if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} 超过 20 MB`)
+        await api(`/api/files/upload?path=${encodeURIComponent(directory)}&name=${encodeURIComponent(file.name)}`, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file })
+      }
+      notify("success", "文件已上传")
+    } catch (reason) { notify("error", (reason as Error).message) }
+    finally { setUploading(false); if (uploadInput.current) uploadInput.current.value = ""; await browse(directory) }
   }
   const save = useCallback(async () => {
     if (!current || !dirty || saving || savingRef.current) return
@@ -2130,7 +2154,8 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
   const crumbs = directory === "." ? [] : directory.split("/")
   const selectedImageUrl = current?.type === "image" ? `/api/files/image?path=${encodeURIComponent(current.path)}` : ""
   return <>
-    <PageIntro actions={[{ label: "保存文件", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存文件" title="保存文件" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存文件"}</Button> }]} />
+    <input ref={uploadInput} type="file" multiple className="hidden" aria-label="选择上传文件" onChange={event => void uploadFiles(event.target.files)} />
+    <PageIntro actions={[{ label: "上传文件", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="上传文件" title="上传到当前目录（每个文件最多 20 MB）" disabled={uploading} onClick={() => uploadInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{!iconOnly && "上传文件"}</Button> }, { label: "保存文件", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存文件" title="保存文件" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存文件"}</Button> }]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
     <Card className={editorFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none border-0" : "overflow-hidden"}><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex min-w-0 items-center gap-1 text-xs"><button onClick={() => browse(".", true)} className={`rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>工作区</button>{crumbs.map((crumb, index) => { const path = crumbs.slice(0, index + 1).join("/"); return <span key={path} className="flex items-center gap-1"><ChevronRight className="size-3 text-slate-300" /><button onClick={() => browse(path, true)} className={`max-w-32 truncate rounded-md px-1.5 py-1 ${index === crumbs.length - 1 ? "font-semibold text-indigo-700" : "text-muted-foreground hover:bg-muted"}`}>{crumb}</button></span> })}</div><div className="flex w-full items-center gap-2 sm:w-auto"><div className="relative min-w-0 flex-1 sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="筛选当前目录…" value={search} onChange={event => setSearch(event.target.value)} /></div>{editorFullscreen && <Button size="sm" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}</div></div>
       <div className={`grid ${editorFullscreen ? "min-h-0 flex-1 grid-rows-[minmax(150px,32vh)_minmax(0,1fr)] xl:grid-rows-1" : "min-h-[600px]"} xl:grid-cols-[320px_minmax(0,1fr)]`}><div className="min-h-0 border-b border-border xl:border-b-0 xl:border-r"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400"><span className="flex items-center gap-1.5">文件浏览器{loading && <LoaderCircle role="status" aria-label="正在加载" className="size-3.5 animate-spin text-indigo-500" />}</span><span>{entries.length} 项</span></div><div className={`${editorFullscreen ? "h-[calc(32vh-44px)] max-h-none xl:h-[calc(100%-44px)]" : "max-h-[550px]"} overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <button onClick={() => browse(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".", true)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50"><ArrowLeft className="size-3.5" />上级目录</button>}{filtered.map(entry => <button key={entry.path} onClick={() => entry.type === "directory" ? browse(entry.path, true) : openFile(entry)} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}><span className={`${entry.type === "directory" ? "text-amber-500" : entry.type === "image" ? "text-sky-500" : "text-slate-400"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : entry.type === "image" ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type !== "directory" && <span className="text-[9px] text-slate-400">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-slate-300" />}</button>)}{!loading && !filtered.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>

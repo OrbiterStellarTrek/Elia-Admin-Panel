@@ -12,7 +12,8 @@
   "scripts": {
     "build": "next build --webpack",
     "dev": "next dev --webpack",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
