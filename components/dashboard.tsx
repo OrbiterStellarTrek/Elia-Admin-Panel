@@ -569,7 +569,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
+        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-0 lg:px-9 lg:pb-32" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
@@ -2034,7 +2034,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         </div>
       </div>
       <Card className={sourceFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-none border-0" : selected?.kind === "small" ? "flex min-h-0 min-w-0 flex-col" : "min-w-0"}>
-        <div className={sourceFullscreen ? "hidden" : "sticky top-0 z-20 bg-card"}>
+        <div className={sourceFullscreen ? "hidden" : "sticky top-px z-20 bg-card"}>
         <CardHeader className="flex-row items-start justify-between border-b border-border/70 bg-card pb-4">
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
