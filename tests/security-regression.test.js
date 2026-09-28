@@ -130,10 +130,17 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       await new Promise(resolve => tcpServer.listen(0, "127.0.0.1", resolve))
       const localPort = tcpServer.address().port
       for (const host of ["127.0.0.1", "localhost", "2130706433", "0x7f000001"]) assert.equal((await call("/api/plugins/install-script", { name: "audit.js", url: `https://${host}:${localPort}/a.js` }, cookie)).status, 400)
-      let avatarCalls = 0
-      global.Bot.uin = [10001]; global.Bot[10001] = { uin: 10001, setAvatar() { avatarCalls++; return true } }
+      let avatarCalls = 0, receivedAvatarBytes = 0
+      global.Bot.uin = [10001]; global.Bot[10001] = { uin: 10001, setAvatar(value) { avatarCalls++; receivedAvatarBytes = Buffer.from(value.slice("base64://".length), "base64").byteLength; return true } }
       assert.equal((await call("/api/accounts/10001/profile", { field: "avatar", value: `https://127.0.0.1:${localPort}/a.png` }, cookie, "PATCH")).status, 400)
       assert.equal(avatarCalls, 0); assert.equal(localConnections, 0)
+      const maxAvatarBytes = 1_500_000
+      const atLimit = `base64://${Buffer.alloc(maxAvatarBytes).toString("base64")}`
+      assert.equal((await call("/api/accounts/10001/profile", { field: "avatar", value: atLimit }, cookie, "PATCH")).status, 200)
+      assert.equal(receivedAvatarBytes, maxAvatarBytes)
+      const overLimit = `base64://${Buffer.alloc(maxAvatarBytes + 1).toString("base64")}`
+      assert.equal((await call("/api/accounts/10001/profile", { field: "avatar", value: overLimit }, cookie, "PATCH")).status, 400)
+      assert.equal(avatarCalls, 1)
       global.Bot.uin = []; delete global.Bot[10001]
     })
     await t.test("配置和文件版本冲突返回 409，缺版本返回 428，注释被保留", async () => {

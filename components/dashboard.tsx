@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import * as Dialog from "@radix-ui/react-dialog"
+import Cropper, { type Area } from "react-easy-crop"
 import {
   Activity, ArrowDownToLine, ArrowLeft, ArrowRight, Bell, Bot, Braces, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
@@ -22,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { SchemaOptions } from "@/components/schema-options"
 import { PluginTools, ScriptInstaller, ProxyFields } from "@/components/plugin-tools"
@@ -33,6 +35,7 @@ const MonacoCodeEditor = dynamic(
 )
 
 type SecretInputProps = Omit<React.ComponentProps<typeof Input>, "type">
+const MAX_AVATAR_BYTES = 1_500_000
 
 function SecretInput({ className, ...props }: SecretInputProps) {
   const [visible, setVisible] = useState(false)
@@ -421,9 +424,12 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       noticeExitTimer.current = window.setTimeout(() => setNotice(null), 500)
     }, 4200)
   }, [])
-  const navigateTo = useCallback((nextSection: Section) => {
+  const navigateTo = useCallback((nextSection: Section, accountId?: string) => {
     if (nextSection === "files") setFileManagerPath(".")
-    window.history.pushState(null, "", sectionPath(nextSection))
+    const target = nextSection === "accounts" && accountId
+      ? `${sectionPath(nextSection)}?account=${encodeURIComponent(accountId)}`
+      : sectionPath(nextSection)
+    window.history.pushState(null, "", target)
     setSection(nextSection)
     setSidebarOpen(false)
   }, [])
@@ -535,7 +541,6 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
               return <button key={item.id} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-[#2c3448] text-blue-200" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
                 <Icon className={`size-[18px] shrink-0 ${selected ? "text-blue-300" : "text-slate-500 group-hover:text-slate-300"}`} />
                 <span className="min-w-0 flex-1 text-[13px] font-medium">{item.label}</span>
-                {selected && <span aria-hidden="true" className="size-1.5 rounded-full bg-blue-300" />}
               </button>
             })}
           </nav>
@@ -760,7 +765,7 @@ function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: t
   return <Card><CardContent className="flex items-start justify-between p-5"><div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-2 text-[23px] font-semibold tracking-tight">{value}</div><div className="mt-1 text-[11px] text-muted-foreground">{detail}</div></div><div className={`grid size-10 place-items-center rounded-xl ${palette[tone]}`}><Icon className="size-[18px]" /></div></CardContent></Card>
 }
 
-function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; confirm: Confirm; navigate: (section: Section) => void }) {
+function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; confirm: Confirm; navigate: (section: Section, accountId?: string) => void }) {
   const [status, setStatus] = useState<any>(null)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
@@ -809,7 +814,7 @@ function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; c
           <InfoTile icon={HardDrive} label="主机名称" value={status?.host || "读取中"} />
           <InfoTile icon={Database} label="面板地址" value={status?.panel ? `${status.panel.host}:${status.panel.port}` : "读取中"} />
         </div>
-        <div className="mt-5 border-t border-border pt-4"><div className="mb-3 text-xs font-semibold">机器人账号</div>{status?.accounts?.length ? <div className="space-y-2">{status.accounts.map((account: any) => <div key={account.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-3"><div className="flex items-center gap-3"><div className="relative grid size-9 place-items-center overflow-hidden rounded-full bg-white text-indigo-600 shadow-sm"><Bot className="size-4" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></div><div><div className="text-sm font-medium">{account.nickname || `账号 ${account.id}`}</div><div className="mt-0.5 text-[11px] text-muted-foreground">QQ {account.id}</div></div></div><Badge className={account.online ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}>{account.status}</Badge></div>)}</div> : <div className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">当前没有可显示的机器人账号</div>}</div>
+        <div className="mt-5 border-t border-border pt-4"><div className="mb-3 flex items-center justify-between gap-3"><div className="text-xs font-semibold">机器人账号</div><button type="button" onClick={() => navigate("accounts")} title="前往账号管理" className="inline-flex shrink-0 items-center gap-1 rounded-md px-1 py-1 text-xs font-medium text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">管理账号<ChevronRight className="size-3.5" /></button></div>{status?.accounts?.length ? <div className="space-y-2">{status.accounts.map((account: any) => <button key={account.id} type="button" onClick={() => navigate("accounts", String(account.id))} aria-label={`管理账号 ${account.nickname || `账号 ${account.id}`}，QQ ${account.id}`} title="管理此账号" className="group flex w-full items-center justify-between rounded-xl bg-slate-50 px-3.5 py-3 text-left transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span className="flex min-w-0 items-center gap-3"><span className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-white text-indigo-600 shadow-sm"><Bot className="size-4" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">QQ {account.id}</span></span></span><span className="flex shrink-0 items-center gap-2"><Badge className={account.online ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}>{account.status}</Badge><ChevronRight className="size-4 text-slate-300 transition group-hover:text-indigo-500" /></span></button>)}</div> : <div className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">当前没有可显示的机器人账号</div>}</div>
       </CardContent></Card>
       <div className="space-y-5">
         <Card><CardHeader><CardTitle>快速入口</CardTitle><CardDescription>常用的控制功能</CardDescription></CardHeader><CardContent className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-1">{[
@@ -830,6 +835,11 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
   const [drafts, setDrafts] = useState({ nickname: "", signature: "", sex: "unknown", age: "" })
   const [avatarDraft, setAvatarDraft] = useState("")
   const [avatarPreview, setAvatarPreview] = useState("")
+  const [cropSource, setCropSource] = useState("")
+  const [crop, setCrop] = useState({ x: 0, y: 0 })
+  const [zoom, setZoom] = useState(1)
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
+  const [applyingCrop, setApplyingCrop] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -854,6 +864,10 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
     }
   }, [api])
 
+  useEffect(() => {
+    const requestedAccountId = routeQuery("account")
+    if (requestedAccountId) setSelectedId(requestedAccountId)
+  }, [])
   useEffect(() => { void refresh() }, [refresh])
 
   const activeAccount = accounts.find(account => account.id === selectedId)
@@ -871,7 +885,15 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
   useEffect(() => {
     setAvatarDraft("")
     setAvatarPreview("")
+    setCropSource("")
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
   }, [activeAccount?.id])
+  useEffect(() => {
+    if (!cropSource.startsWith("blob:")) return
+    return () => URL.revokeObjectURL(cropSource)
+  }, [cropSource])
 
   const pendingUpdates: { field: AccountProfileField; value: string }[] = []
   if (activeAccount && draftAccountId === activeAccount.id) {
@@ -922,17 +944,62 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
     input.value = ""
     if (!file) return
     if (!file.type.startsWith("image/")) return notify("error", "请选择图片文件")
-    if (file.size > 1_500_000) return notify("error", "头像图片不能超过 1.5 MB")
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "")
+    setCropSource(URL.createObjectURL(file))
+    setCrop({ x: 0, y: 0 })
+    setZoom(1)
+    setCroppedAreaPixels(null)
+  }
+
+  async function applyAvatarCrop() {
+    if (!cropSource || !croppedAreaPixels || applyingCrop) return
+    setApplyingCrop(true)
+    try {
+      const image = new Image()
+      image.src = cropSource
+      await image.decode()
+      const canvas = document.createElement("canvas")
+      const context = canvas.getContext("2d")
+      if (!context) throw new Error("当前浏览器不支持图片裁剪")
+      let croppedBlob: Blob | null = null
+      for (const outputSize of [512, 384, 256, 192, 128]) {
+        canvas.width = outputSize
+        canvas.height = outputSize
+        context.fillStyle = "#fff"
+        context.fillRect(0, 0, outputSize, outputSize)
+        context.drawImage(
+          image,
+          croppedAreaPixels.x,
+          croppedAreaPixels.y,
+          croppedAreaPixels.width,
+          croppedAreaPixels.height,
+          0,
+          0,
+          outputSize,
+          outputSize,
+        )
+        for (const quality of [0.9, 0.82, 0.74, 0.66, 0.58, 0.5]) {
+          croppedBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/jpeg", quality))
+          if (croppedBlob && croppedBlob.size <= MAX_AVATAR_BYTES) break
+        }
+        if (croppedBlob && croppedBlob.size <= MAX_AVATAR_BYTES) break
+      }
+      if (!croppedBlob || croppedBlob.size > MAX_AVATAR_BYTES) throw new Error("裁剪后的图片仍超过 1.5 MB，请选择其他图片")
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ""))
+        reader.onerror = () => reject(new Error("无法读取裁剪后的头像"))
+        reader.readAsDataURL(croppedBlob)
+      })
       const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1)
-      if (!encoded) return notify("error", "无法读取所选图片")
+      if (!encoded) throw new Error("无法生成裁剪后的头像")
       setAvatarPreview(dataUrl)
       setAvatarDraft(`base64://${encoded}`)
+      setCropSource("")
+    } catch (reason) {
+      notify("error", (reason as Error).message || "裁剪头像失败")
+    } finally {
+      setApplyingCrop(false)
     }
-    reader.onerror = () => notify("error", "无法读取所选图片")
-    reader.readAsDataURL(file)
   }
 
   const canEdit = (field: AccountProfileField) => Boolean(activeAccount?.capabilities[field]) && !saving
@@ -964,7 +1031,7 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
             <div className="divide-y divide-border px-5 sm:px-6">
               <div className="flex flex-wrap items-center gap-4 py-5">
                 <span className="relative grid size-16 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500"><UserRound className="size-7" /><img key={activeAccount.profile.avatar} src={avatarPreview || activeAccount.profile.avatar} alt="账号头像" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span>
-                <div className="min-w-0 flex-1"><Label className="text-sm font-medium">头像</Label><p className="mt-1 text-xs text-muted-foreground">JPG、PNG、WebP，最大 1.5 MB</p></div>
+                <div className="min-w-0 flex-1"><Label className="text-sm font-medium">头像</Label><p className="mt-1 text-xs text-muted-foreground">JPG、PNG、WebP，裁切后自动压缩至 1.5 MB 以内</p></div>
                 <input ref={avatarInput} type="file" accept="image/*" aria-label="选择账号头像" className="sr-only" disabled={!canEdit("avatar")} onChange={chooseAvatar} />
                 <div className="flex w-full gap-2 sm:w-auto">
                   <Button type="button" variant="outline" className="flex-1 sm:flex-none" disabled={!canEdit("avatar")} title={canEdit("avatar") ? "选择新头像" : "当前适配器不支持修改此资料"} onClick={() => avatarInput.current?.click()}><Upload />选择图片</Button>
@@ -983,6 +1050,42 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
             </div>
           </section>}
         </div>}
+    {cropSource && <Dialog.Root open onOpenChange={open => { if (!open) setCropSource("") }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-[2px]" />
+        <Dialog.Content className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-white p-5 shadow-2xl focus:outline-none">
+          <div className="flex items-start justify-between gap-4">
+            <div><Dialog.Title className="text-base font-semibold">裁剪头像</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">调整图片位置与缩放，圆形区域将作为头像。</Dialog.Description></div>
+            <Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭头像裁剪"><X /></Button></Dialog.Close>
+          </div>
+          <div className="relative mx-auto mt-4 aspect-[4/3] w-full max-w-[420px] overflow-hidden rounded-xl bg-slate-950">
+            <Cropper
+              image={cropSource}
+              crop={crop}
+              zoom={zoom}
+              rotation={0}
+              aspect={1}
+              cropShape="round"
+              minZoom={1}
+              maxZoom={3}
+              zoomSpeed={0.2}
+              onCropChange={setCrop}
+              onZoomChange={setZoom}
+              onCropComplete={(_, areaPixels) => setCroppedAreaPixels(areaPixels)}
+            />
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <Label className="shrink-0 text-xs">缩放</Label>
+            <Slider id="avatar-crop-zoom" aria-label="缩放" min={1} max={3} step={0.01} value={[zoom]} onValueChange={value => setZoom(value[0] ?? 1)} className="flex-1 cursor-pointer" />
+            <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{zoom.toFixed(2)}×</span>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={applyingCrop} onClick={() => setCropSource("")}>取消</Button>
+            <Button type="button" disabled={!croppedAreaPixels || applyingCrop} onClick={() => void applyAvatarCrop()}>{applyingCrop ? <LoaderCircle className="animate-spin" /> : <Check />}应用裁剪</Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>}
   </>
 }
 

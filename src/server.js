@@ -2028,11 +2028,21 @@ export async function startAdminPanel() {
       if ((!value && field === "nickname") || value.length > maxLength) return res.status(400).json({ error: `${field === "nickname" ? "昵称" : "个性签名"}长度不符合要求` })
     } else if (field === "avatar") {
       value = typeof value === "string" ? value.trim() : ""
-      const isBase64 = /^base64:\/\/[A-Za-z0-9+/=_-]+$/.test(value)
+      const maxAvatarBytes = 1_500_000
+      const avatarError = "头像需为 HTTPS 图片地址或有效的 base64 图片，且不能超过 1.5 MB"
+      const base64Payload = value.startsWith("base64://") ? value.slice("base64://".length) : ""
+      const isBase64 = /^base64:\/\/[A-Za-z0-9+\/_-]+={0,2}$/.test(value)
       let isHttpsUrl = false
       try { isHttpsUrl = new URL(value).protocol === "https:" } catch {}
-      if ((!isBase64 && !isHttpsUrl) || value.length > 2_800_000) return res.status(400).json({ error: "头像需为 HTTPS 图片地址或有效的 base64 图片" })
-      if (isHttpsUrl) value = `base64://${(await withBudget("download", 4, () => safeDownload(value, 2 * 1024 * 1024))).toString("base64")}`
+      if (!isBase64 && !isHttpsUrl) return res.status(400).json({ error: avatarError })
+      if (isBase64) {
+        const normalizedPayload = base64Payload.replace(/-/g, "+").replace(/_/g, "/")
+        const decodedAvatar = Buffer.from(normalizedPayload, "base64")
+        const canonicalPayload = decodedAvatar.toString("base64")
+        const validBase64 = normalizedPayload === canonicalPayload || normalizedPayload === canonicalPayload.replace(/=+$/, "")
+        if (!validBase64 || decodedAvatar.byteLength > maxAvatarBytes) return res.status(400).json({ error: avatarError })
+      }
+      if (isHttpsUrl) value = `base64://${(await withBudget("download", 4, () => safeDownload(value, maxAvatarBytes))).toString("base64")}`
     } else if (field === "age") {
       value = Number(value)
       if (!Number.isInteger(value) || value < 1 || value > 120) return res.status(400).json({ error: "年龄需为 1 到 120 的整数" })
