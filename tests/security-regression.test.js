@@ -195,9 +195,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       await assert.rejects(module.namespace.issueSession({ socket: {}, headers: {} }, { setHeader() {} }, oldVersion), { status: 401 })
       const next = await call("/api/auth/login", { password: newPassword }); assert.equal(next.status, 200)
       cookie = next.cookie.split(";")[0]
-      // Guoba uses the same credential save implementation and immediate event.
-      const { supportGuoba } = await import("../guoba.support.js")
-      const support = supportGuoba(), data = await support.configInfo.getConfigData()
+      const { supportPanel } = await import("../elia.support.js")
+      const support = supportPanel(), data = await support.configInfo.getConfigData()
       const changed = await support.configInfo.setConfigData({ ...data, password: newPassword + "2" }, { Result: { ok: (_data, message) => ({ code: 0, message }), error: message => ({ code: -1, message }) } })
       assert.equal(changed.code, 0)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie)).status, 401)
