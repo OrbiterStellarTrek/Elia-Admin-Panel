@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import * as Dialog from "@radix-ui/react-dialog"
+import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { LoaderCircle, X } from "lucide-react"
+import { LoaderCircle, Upload, X } from "lucide-react"
 
 type Api = (url: string, init?: RequestInit) => Promise<any>
 type Proxy = { proxyMode: string; proxy: string }
@@ -80,6 +81,56 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
   const [url, setUrl] = useState("")
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const dragDepth = useRef(0)
+  const selectUploadFile = useCallback((nextFile: File | null) => {
+    if (!nextFile) return
+    if (!nextFile.name.toLowerCase().endsWith(".js")) return notify("error", "仅支持 .js 文件")
+    setFile(nextFile)
+    setName(nextFile.name)
+  }, [notify])
+
+  useEffect(() => {
+    if (!open || mode !== "upload") return
+    const isFileDrag = (event: DragEvent) => Array.from(event.dataTransfer?.types || []).includes("Files")
+    const handleDragEnter = (event: DragEvent) => {
+      if (!isFileDrag(event)) return
+      event.preventDefault()
+      dragDepth.current += 1
+      setDragActive(true)
+    }
+    const handleDragOver = (event: DragEvent) => {
+      if (!isFileDrag(event)) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"
+    }
+    const handleDragLeave = (event: DragEvent) => {
+      if (!isFileDrag(event)) return
+      event.preventDefault()
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (!dragDepth.current) setDragActive(false)
+    }
+    const handleDrop = (event: DragEvent) => {
+      if (!isFileDrag(event)) return
+      event.preventDefault()
+      dragDepth.current = 0
+      setDragActive(false)
+      selectUploadFile(event.dataTransfer?.files.item(0) || null)
+    }
+    window.addEventListener("dragenter", handleDragEnter)
+    window.addEventListener("dragover", handleDragOver)
+    window.addEventListener("dragleave", handleDragLeave)
+    window.addEventListener("drop", handleDrop)
+    return () => {
+      window.removeEventListener("dragenter", handleDragEnter)
+      window.removeEventListener("dragover", handleDragOver)
+      window.removeEventListener("dragleave", handleDragLeave)
+      window.removeEventListener("drop", handleDrop)
+      dragDepth.current = 0
+    }
+  }, [open, mode, selectUploadFile])
+
   async function submit(event: React.FormEvent) {
     event.preventDefault(); setBusy(true)
     try {
@@ -88,5 +139,38 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
       notify("success", result.message); setOpen(false); setFile(null); setUrl(""); setName(""); await onInstalled()
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
   }
-  return <><Button variant="outline" onClick={() => setOpen(true)}>安装单 JS 插件</Button><ToolDialog open={open} onOpenChange={setOpen} title="安装单 JS 插件" description="安装到 plugins/example；支持本地上传或 HTTPS 文件直链，不覆盖同名文件。重启后加载。"><form onSubmit={submit} className="space-y-4"><select aria-label="安装方式" value={mode} onChange={event => setMode(event.target.value)} className="h-10 w-full rounded-lg border px-3"><option value="upload">上传 JS 文件</option><option value="url">HTTPS 文件直链</option></select>{mode === "upload" ? <Input aria-label="选择 JS 文件" type="file" accept=".js" required onChange={event => { const file = event.target.files?.[0] || null; setFile(file); if (file) setName(file.name) }} /> : <Input aria-label="JS 文件直链" type="url" placeholder="https://example.com/plugin.js" value={url} required onChange={event => { setUrl(event.target.value); if (!name) { try { const last = new URL(event.target.value).pathname.split("/").pop(); if (last?.endsWith(".js")) setName(last) } catch {} } }} />}<Label>安装文件名</Label><Input aria-label="安装文件名" value={name} required pattern=".+\.js" placeholder="plugin.js" onChange={event => setName(event.target.value)} /><Button type="submit" disabled={busy}>{busy && <LoaderCircle className="animate-spin" />}安装</Button></form></ToolDialog></>
+  return <>
+    <Button variant="outline" onClick={() => { dragDepth.current = 0; setDragActive(false); setOpen(true) }}>安装单 JS 插件</Button>
+    <ToolDialog open={open} onOpenChange={value => { if (!value && !busy) { dragDepth.current = 0; setDragActive(false); setOpen(false) } }} title="安装单 JS 插件" description="安装到 plugins/example；支持本地上传或 HTTPS 文件直链，不覆盖同名文件。重启后加载。">
+      <form onSubmit={submit} className="space-y-4">
+        <div role="tablist" aria-label="安装方式" className="grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+          <button type="button" role="tab" aria-selected={mode === "upload"} disabled={busy} onClick={() => setMode("upload")} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "upload" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>上传 JS 文件</button>
+          <button type="button" role="tab" aria-selected={mode === "url"} disabled={busy} onClick={() => { dragDepth.current = 0; setDragActive(false); setMode("url") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "url" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>HTTPS 文件直链</button>
+        </div>
+        {mode === "upload" ? <div className="space-y-2">
+          <Label htmlFor="install-script-file">本地 JS 文件</Label>
+          <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-slate-50/70 p-3">
+            <Button type="button" variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}><Upload />选择文件</Button>
+            <span className={`min-w-0 flex-1 truncate text-sm ${file ? "text-slate-700" : "text-muted-foreground"}`} title={file?.name || "尚未选择 JS 文件"}>{file?.name || "尚未选择 JS 文件"}</span>
+            {file && <Button type="button" size="icon" variant="ghost" disabled={busy} aria-label="移除已选择文件" title="移除已选择文件" onClick={() => { setFile(null); setName(current => current === file.name ? "" : current); if (fileInput.current) fileInput.current.value = "" }}><X /></Button>}
+          </div>
+          <input ref={fileInput} id="install-script-file" className="sr-only" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
+        </div> : <div className="space-y-2">
+          <Label htmlFor="install-script-url">HTTPS 文件直链</Label>
+          <Input id="install-script-url" aria-label="JS 文件直链" type="url" placeholder="https://example.com/plugin.js" value={url} required onChange={event => { setUrl(event.target.value); if (!name) { try { const last = new URL(event.target.value).pathname.split("/").pop(); if (last?.endsWith(".js")) setName(last) } catch {} } }} />
+        </div>}
+        <div className="space-y-2">
+          <Label htmlFor="install-script-name">安装文件名</Label>
+          <Input id="install-script-name" aria-label="安装文件名" value={name} required pattern=".+\.js" placeholder="plugin.js" onChange={event => setName(event.target.value)} />
+        </div>
+        <Button type="submit" disabled={busy}>{busy && <LoaderCircle className="animate-spin" />}安装</Button>
+      </form>
+    </ToolDialog>
+    {open && mode === "upload" && dragActive && typeof document !== "undefined" && createPortal(
+      <div role="status" aria-live="polite" className="pointer-events-none fixed inset-3 z-[1000] grid place-items-center rounded-2xl border-2 border-dashed border-indigo-400 bg-slate-950/20 backdrop-blur-[2px]">
+        <div className="flex items-center gap-3 rounded-xl bg-white px-5 py-4 text-sm font-medium text-slate-700 shadow-xl"><Upload className="size-5 text-indigo-600" />松开鼠标即可添加 JS 文件</div>
+      </div>,
+      document.body,
+    )}
+  </>
 }
