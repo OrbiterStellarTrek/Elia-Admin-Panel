@@ -35,7 +35,14 @@ export async function repositoryInfo(directory, run) {
   const branch = await run("git", ["branch", "--show-current"], 30_000, directory)
   const refs = await run("git", ["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"], 30_000, directory)
   const history = await run("git", ["log", "-80", "--all", "--format=%H%x09%s"], 30_000, directory)
-  return { available: true, remote, head, branch, branches: [...new Set(refs.split("\n").map(ref => ref.trim().replace(/^origin\//, "")).filter(ref => ref && ref !== "HEAD"))], commits: history.split("\n").filter(Boolean).map(line => { const [hash, ...message] = line.split("\t"); return { hash, message: message.join("\t") } }) }
+  const tips = await run("git", ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(subject)", "refs/remotes/origin"], 30_000, directory)
+  const dirty = Boolean(await run("git", ["status", "--porcelain", "--untracked-files=all"], 30_000, directory))
+  const branchTips = tips.split("\n").filter(Boolean).flatMap(line => {
+    const [name, hash, ...message] = line.split("\t")
+    const nameWithoutPrefix = name.replace(/^refs\/remotes\/origin\//, "")
+    return nameWithoutPrefix === "HEAD" ? [] : [{ name: nameWithoutPrefix, hash, message: message.join("\t") }]
+  })
+  return { available: true, remote, head, branch, dirty, branchTips, branches: [...new Set(refs.split("\n").map(ref => ref.trim().replace(/^origin\//, "")).filter(ref => ref && ref !== "HEAD"))], commits: history.split("\n").filter(Boolean).map(line => { const [hash, ...message] = line.split("\t"); return { hash, message: message.join("\t") } }) }
 }
 
 export async function fetchRepository(directory, options, run, validateRemote, transportFor = gitTransport) {

@@ -463,7 +463,7 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
         </CardContent>
       </Card>
       </div>
-      {(codeToast || securityEntranceWarning) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
+      {(codeToast || securityEntranceWarning) && <div className="fixed right-4 top-4 z-[1100] flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
         {securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
         {codeToast && <Toast exiting={codeToastExiting} onExited={() => { setCodeToast(""); setCodeToastExiting(false) }} className="flex items-start gap-2.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-card px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300 shadow-xl"><Check className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{codeToast}</span></Toast>}
       </div>}
@@ -727,7 +727,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
           {section === "rules" && <PluginMatchHelper api={api} notify={notify} confirm={confirm} page />}
         </main>
       </div>
-      {(notice || (authenticated && securityEntranceWarningDeadline !== null)) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
+      {(notice || (authenticated && securityEntranceWarningDeadline !== null)) && <div className="fixed right-4 top-4 z-[1100] flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
         {authenticated && securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
         {notice && <Toast exiting={notice.exiting} onExited={() => setNotice(current => current?.exiting ? null : current)} aria-live="polite" className={`flex items-start gap-2.5 rounded-lg border bg-card px-4 py-3 text-sm shadow-xl ${notice.kind === "error" ? "border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300" : notice.kind === "success" ? "border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300" : "border-border text-foreground"}`}><span className="mt-0.5 shrink-0">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span><span className="min-w-0 break-words [overflow-wrap:anywhere]">{notice.message}</span></Toast>}
       </div>}

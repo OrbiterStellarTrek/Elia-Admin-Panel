@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { DependencyEditor, type DependencyData } from "@/components/dependency-editor"
 import { Switch } from "@/components/ui/switch"
+import { Collapse } from "@/components/ui/motion"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EditableCombobox } from "@/components/ui/editable-combobox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { LoaderCircle, Upload, X } from "lucide-react"
+import { ArrowRight, Check, ChevronDown, GitBranch, GitCommitHorizontal, LoaderCircle, RefreshCw, Upload, X } from "lucide-react"
 
 type Api = (url: string, init?: RequestInit) => Promise<any>
 type Proxy = { proxyMode: string; proxy: string }
@@ -21,9 +22,9 @@ export function ProxyFields({ value, onChange }: { value: Proxy; onChange: (valu
   return <div className="space-y-2"><Label>下载代理</Label><Select value={value.proxyMode} onValueChange={proxyMode => onChange({ ...value, proxyMode })}><SelectTrigger aria-label="代理类型"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">不使用代理</SelectItem><SelectItem value="standard">常规 HTTP / SOCKS 代理</SelectItem><SelectItem value="prefix">链接前缀代理</SelectItem></SelectContent></Select>{value.proxyMode !== "none" && <Input aria-label="代理地址" value={value.proxy} onChange={event => onChange({ ...value, proxy: event.target.value })} placeholder={value.proxyMode === "prefix" ? "https://gh-proxy.com" : "http://127.0.0.1:7890"} required />}</div>
 }
 
-function ToolDialog({ open, onOpenChange, title, description, children }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode }) {
+function ToolDialog({ open, onOpenChange, title, description, children, wide = false }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode; wide?: boolean }) {
   const triggerRef = useRef<HTMLElement | null>(null)
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-neutral-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl"><div className="mb-4 flex justify-between gap-3"><div className="min-w-0 break-words"><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" className="shrink-0" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-neutral-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className={`admin-dialog-content admin-tool-dialog fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] ${wide ? "max-w-4xl" : "max-w-xl"} -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl`}><div className="mb-4 flex justify-between gap-3"><div className="min-w-0 break-words"><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" className="shrink-0" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
 export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugin: any; api: Api; notify: Notify; confirm: (message: string) => Promise<boolean>; onUpdated: () => void | Promise<void> }) {
@@ -33,47 +34,100 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   const [kind, setKind] = useState("branch")
   const [ref, setRef] = useState("")
   const [prune, setPrune] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [proxy, setProxy] = useState<Proxy>({ proxyMode: "none", proxy: "" })
   const [dependencies, setDependencies] = useState<DependencyData>({})
   const [dependencyVersion, setDependencyVersion] = useState("")
   const [install, setInstall] = useState(false)
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState("")
+  const [activity, setActivity] = useState<"fetch" | "update" | null>(null)
   async function load(tool: "git" | "dependencies") {
     setBusy(true)
     try {
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${tool === "git" ? "git" : "dependencies"}`)
       if (tool === "dependencies") setDependencyVersion(result.version)
-      if (tool === "git") { setInfo(result); setRef(result.branch || result.head); setKind(result.branch ? "branch" : "commit"); setPrune(false) }
+      if (tool === "git") {
+        const defaultBranch = result.branch || ["main", "master"].find(branch => result.branches?.includes(branch)) || result.branches?.[0]
+        setInfo(result); setRef(defaultBranch || result.head); setKind(defaultBranch ? "branch" : "commit"); setPrune(false); setAdvancedOpen(false); setCheckedAt(null); setFetchError("")
+      }
       else { setDependencies(result.data); setInstall(false) }
       setOpen(tool)
+      if (tool === "git") await fetchRefs()
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
   }
   async function fetchRefs() {
-    setBusy(true)
-    try { setInfo(await api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify(proxy) })); notify("success", "已获取远端分支和提交") }
-    catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
+    setBusy(true); setActivity("fetch"); setFetchError(""); setCheckedAt(null)
+    try { setInfo(await api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify(proxy) })); setCheckedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); notify("success", "已刷新远端版本，请确认目标版本后更新") }
+    catch (error) { setFetchError((error as Error).message); notify("error", (error as Error).message) } finally { setBusy(false); setActivity(null) }
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (open === "git" && !await confirm(`将 ${plugin.title} 更新到${kind === "branch" ? "分支" : "提交"} ${ref}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
-    setBusy(true)
+    if (open === "git" && (busy || info?.dirty || !ref.trim())) return
+    if (open === "git" && !await confirm(`将 ${plugin.title} 从 ${info?.head?.slice(0, 12)} 更新到${kind === "branch" ? "分支最新版" : "指定提交"} ${ref.trim()}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
+    setBusy(true); setActivity("update")
     try {
       const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: dependencies, install, version: dependencyVersion }
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${open === "git" ? "git/update" : "dependencies"}`, { method: open === "git" ? "POST" : "PUT", body: JSON.stringify(body) })
       notify("success", result.message); setOpen(null); await onUpdated()
-    } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
+    } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false); setActivity(null) }
   }
+  const selectedCommit = ref.trim() ? info?.commits?.find((commit: any) => commit.hash.startsWith(ref.trim())) : undefined
+  const target = kind === "branch" ? info?.branchTips?.find((branch: any) => branch.name === ref.trim()) : selectedCommit
+  const sameVersion = target?.hash === info?.head
   return <>
     {plugin.hasPackage && <Button variant="outline" disabled={busy} onClick={() => load("dependencies")}>编辑依赖</Button>}
     {plugin.hasGit && <Button variant="outline" disabled={busy} onClick={() => load("git")}>手动更新</Button>}
-    <ToolDialog open={open !== null} onOpenChange={value => { if (!value && !busy) setOpen(null) }} title={open === "git" ? "手动更新插件" : "编辑插件依赖"} description={open === "git" ? "选择或输入分支、commit；存在本地修改时会停止更新。" : "按依赖类型编辑包与版本；从 registry.npmmirror.com 查询真实版本，保存前自动备份。"}>
-      <form onSubmit={submit} className="space-y-4">{open === "git" ? <>
-        <p className="break-all text-xs text-muted-foreground">当前：{info?.branch || "游离提交"} · {info?.head?.slice(0, 12)}</p>
-        <div className="flex gap-2"><Button type="button" variant={kind === "branch" ? "secondary" : "outline"} onClick={() => { setKind("branch"); setRef(info?.branch || info?.branches?.[0] || "") }}>分支</Button><Button type="button" variant={kind === "commit" ? "secondary" : "outline"} onClick={() => { setKind("commit"); setRef(info?.head || "") }}>commit</Button></div>
-        <Label htmlFor={`update-ref-${plugin.id}`}>目标{kind === "branch" ? "分支" : "commit"}</Label><EditableCombobox id={`update-ref-${plugin.id}`} label={kind === "branch" ? "目标分支" : "目标提交"} value={ref} onValueChange={setRef} placeholder={kind === "branch" ? "输入或选择分支" : "输入或选择提交哈希"} options={kind === "branch" ? (info?.branches || []).map((branch: string) => ({ value: branch, label: branch })) : (info?.commits || []).map((commit: any) => ({ value: commit.hash, label: `${commit.hash.slice(0, 12)} · ${commit.message}` }))} required />
-        <ProxyFields value={proxy} onChange={setProxy} /><Button type="button" variant="outline" disabled={busy} onClick={fetchRefs}>获取远端分支与提交</Button>
-        <div className="flex items-center justify-between gap-3"><Label htmlFor={`prune-${plugin.id}`}>裁剪 .git，仅保留最新一个提交</Label><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div>
-      </> : <><DependencyEditor value={dependencies} onChange={setDependencies} disabled={busy} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
-      <Button type="submit" disabled={busy}>{busy && <LoaderCircle className="animate-spin" />}{open === "git" ? "更新到所选版本" : "保存依赖"}</Button></form>
+    <ToolDialog open={open !== null} onOpenChange={value => { if (!value && !busy) setOpen(null) }} wide={open === "git" && kind === "commit"} title={open === "git" ? "更新插件" : "编辑插件依赖"} description={open === "git" ? `为 ${plugin.title} 选择更新版本，重启 Bot 后生效。` : "按依赖类型编辑包与版本；从 registry.npmmirror.com 查询真实版本，保存前自动备份。"}>
+      <form onSubmit={submit} className="space-y-4">{open === "git" ? <div className="admin-plugin-update-layout min-w-0" data-history-open={kind === "commit"}>
+        <div className="min-w-0 space-y-4" aria-label="更新设置">
+        <div className="rounded-xl border bg-muted/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs text-muted-foreground">当前安装版本</span><span className="inline-flex items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs"><GitBranch className="size-3.5" />{info?.branch || "指定提交"}</span></div>
+          <div className="mt-2 flex items-center gap-2"><GitCommitHorizontal className="size-4 text-muted-foreground" /><code className="text-sm font-medium">{info?.head?.slice(0, 12)}</code></div>
+          {info?.commits?.find((commit: any) => commit.hash === info.head)?.message && <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{info.commits.find((commit: any) => commit.hash === info.head).message}</p>}
+        </div>
+        <fieldset disabled={busy} className="min-w-0 space-y-3">
+          <legend className="mb-2 text-sm font-medium">更新方式</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {[{ value: "branch", title: "分支最新版", hint: "获取分支最新代码", icon: GitBranch }, { value: "commit", title: "指定历史版本", hint: "从历史记录中选择", icon: GitCommitHorizontal }].map(option => <label key={option.value} className={`flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors focus-within:ring-2 focus-within:ring-ring ${kind === option.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}>
+              <input type="radio" name={`update-kind-${plugin.id}`} value={option.value} checked={kind === option.value} onChange={() => { setKind(option.value); setRef(option.value === "branch" ? info?.branch || info?.branches?.[0] || "" : info?.head || "") }} className="sr-only" />
+              <option.icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block text-sm font-medium">{option.title}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{option.hint}</span></span><span className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border ${kind === option.value ? "border-primary bg-primary text-primary-foreground" : "border-input"}`}>{kind === option.value && <Check className="size-3" />}</span>
+            </label>)}
+          </div>
+          <div className="space-y-2"><Label htmlFor={`update-ref-${plugin.id}`}>{kind === "branch" ? "更新分支" : "提交哈希"}</Label><EditableCombobox id={`update-ref-${plugin.id}`} label={kind === "branch" ? "目标分支" : "目标提交"} value={ref} onValueChange={setRef} placeholder={kind === "branch" ? "输入或选择分支" : "输入 7 至 40 位提交哈希"} options={kind === "branch" ? (info?.branches || []).map((branch: string) => ({ value: branch, label: `${branch}${branch === info?.branch ? "（当前分支）" : ""}` })) : (info?.commits || []).map((commit: any) => ({ value: commit.hash, label: `${commit.hash.slice(0, 12)} · ${commit.message}` }))} required /></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-muted-foreground" role="status">{activity === "fetch" ? "正在获取远端版本…" : checkedAt ? `远端版本已刷新 · ${checkedAt}` : "尚未检查远端，记录来自本地缓存"}</p><Button type="button" size="sm" variant="outline" onClick={fetchRefs}>{activity === "fetch" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}检查更新</Button></div>
+          {fetchError && <p role="alert" className="break-words text-xs leading-5 text-destructive">检查失败：{fetchError}。可在高级选项中设置下载代理后重试。</p>}
+          <div className="rounded-xl border bg-muted/30 p-3" aria-live="polite"><div className="flex items-center gap-2 text-sm font-medium"><ArrowRight className="size-4" />{kind === "branch" ? `更新到 ${ref.trim() || "所选分支"} 最新版` : "切换到所选历史版本"}</div><p className="mt-2 break-words text-xs leading-5 text-muted-foreground">{target ? target.message : kind === "branch" ? "执行更新时会获取该分支的最新代码。" : "可从提交历史选择版本，或填写已知的提交哈希。"}</p>{(target?.hash || kind === "commit" && ref.trim()) && <code className="mt-2 block break-all text-xs">{info?.head?.slice(0, 12)} → {(target?.hash || ref.trim()).slice(0, 12)}</code>}{sameVersion && <p className="mt-2 text-xs text-muted-foreground">{kind === "commit" ? "所选提交就是当前安装版本。" : checkedAt ? "与本次检查记录中的当前版本一致。" : "与本地缓存中的当前版本一致，请先检查更新。"}</p>}</div>
+          <div className="overflow-hidden rounded-xl border">
+            <button type="button" aria-expanded={advancedOpen} aria-controls={`update-advanced-${plugin.id}`} onClick={() => setAdvancedOpen(value => !value)} className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">高级选项<span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">{prune ? "裁剪历史已开启" : "代理与历史"}<ChevronDown className={`size-4 transition-transform duration-300 motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} /></span></button>
+            <div id={`update-advanced-${plugin.id}`}><Collapse open={advancedOpen}><fieldset disabled={!advancedOpen || busy} className="min-w-0 space-y-4 border-t p-3"><ProxyFields value={proxy} onChange={value => { setProxy(value); setCheckedAt(null) }} /><div className="flex items-start justify-between gap-4"><div className="space-y-1"><Label htmlFor={`prune-${plugin.id}`}>仅保留一个提交</Label><p className="text-xs leading-5 text-muted-foreground">减少 .git 占用；原提交历史会备份，默认保留完整历史。</p></div><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div></fieldset></Collapse></div>
+          </div>
+        </fieldset>
+        <p className={`text-xs leading-5 ${info?.dirty ? "text-destructive" : "text-muted-foreground"}`} role={info?.dirty ? "alert" : undefined}>{info?.dirty ? "检测到本地修改或未跟踪文件，请先处理后再更新。" : "存在本地修改时会停止更新；更新完成后需重启 Bot。"}</p>
+        </div>
+        <div className="admin-plugin-history-shell" data-open={kind === "commit"} inert={kind !== "commit"} aria-hidden={kind !== "commit"}>
+        <div className="admin-plugin-history-inner">
+        <section aria-label="提交历史" className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-muted/20">
+          <div className="shrink-0 space-y-2 border-b p-4">
+            <h3 className="flex items-center gap-2 text-sm font-medium"><GitCommitHorizontal className="size-4" />提交历史<span className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">{info?.commits?.length || 0}</span></h3>
+            <p className="text-xs leading-5 text-muted-foreground">点击记录即可选择版本，并同步更新目标。</p>
+          </div>
+          <div className="max-h-80 min-h-0 flex-1 overflow-y-auto md:max-h-none">
+            {(info?.commits || []).map((commit: any) => {
+              const selected = target?.hash === commit.hash
+              return <button type="button" key={commit.hash} disabled={busy} aria-pressed={selected} onClick={() => { setKind("commit"); setRef(commit.hash) }} className={`flex w-full items-start gap-3 border-b p-4 text-left text-xs transition-colors last:border-0 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50 ${selected ? "bg-primary/5" : ""}`}>
+                <GitCommitHorizontal className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1"><span className="block break-words text-sm leading-6">{commit.message}</span><span className="mt-1 flex flex-wrap items-center gap-2"><code className="text-muted-foreground">{commit.hash.slice(0, 12)}</code>{commit.hash === info?.head && <span className="rounded border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">当前版本</span>}{selected && <span className="text-[10px] font-medium">已选择</span>}</span></span>
+                {selected && <Check className="mt-1 size-4 shrink-0" />}
+              </button>
+            })}
+            {!info?.commits?.length && <p className="p-6 text-center text-xs leading-6 text-muted-foreground">暂无提交记录，可检查更新获取远端历史。</p>}
+          </div>
+        </section>
+        </div>
+        </div>
+      </div> : <><DependencyEditor value={dependencies} onChange={setDependencies} disabled={busy} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
+      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t bg-card px-5 pb-5 pt-4"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(null)}>取消</Button><Button type="submit" disabled={busy || open === "git" && (!ref.trim() || info?.dirty)}>{activity === "update" && <LoaderCircle className="animate-spin" />}{open === "git" ? activity === "update" ? "正在更新…" : kind === "branch" ? "更新到分支最新版" : "更新到此版本" : "保存依赖"}</Button></div></form>
     </ToolDialog>
   </>
 }

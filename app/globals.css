@@ -480,6 +480,47 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   to { opacity: 0; transform: translate(var(--popover-enter-x), var(--popover-enter-y)) scale(.97); }
 }
 .admin-version-details { animation: admin-fade-in var(--motion-normal) ease-out both; }
+.admin-tool-dialog { transition: max-width var(--motion-layout) var(--ease-layout); }
+.admin-plugin-update-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  transition: gap var(--motion-layout) var(--ease-layout);
+}
+.admin-plugin-update-layout[data-history-open="true"] { gap: 20px; }
+.admin-plugin-history-shell {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  translate: 12px 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: grid-template-rows var(--motion-layout) var(--ease-layout),
+    opacity var(--motion-normal) ease, translate var(--motion-layout) var(--ease-layout),
+    visibility 0s linear var(--motion-layout);
+}
+.admin-plugin-history-shell[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  translate: 0 0;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+.admin-plugin-history-inner { min-height: 0; min-width: 0; overflow: hidden; }
+@media (min-width: 768px) {
+  /* Let the settings column determine height; history scrolls within that height. */
+  .admin-plugin-history-shell { contain: size; }
+  .admin-plugin-update-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+    transition: grid-template-columns var(--motion-layout) var(--ease-layout),
+      gap var(--motion-layout) var(--ease-layout);
+  }
+  .admin-plugin-update-layout[data-history-open="true"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .admin-popover-content[data-state], .admin-version-details { animation: none; }
 }
