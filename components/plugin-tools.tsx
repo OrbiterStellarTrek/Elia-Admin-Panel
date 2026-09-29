@@ -20,7 +20,7 @@ export function ProxyFields({ value, onChange }: { value: Proxy; onChange: (valu
 
 function ToolDialog({ open, onOpenChange, title, description, children }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode }) {
   const triggerRef = useRef<HTMLElement | null>(null)
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-slate-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-white p-5 shadow-2xl"><div className="mb-4 flex justify-between gap-3"><div><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-neutral-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl"><div className="mb-4 flex justify-between gap-3"><div><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
 export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugin: any; api: Api; notify: Notify; confirm: (message: string) => Promise<boolean>; onUpdated: () => void | Promise<void> }) {
@@ -144,15 +144,15 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
     <Button variant="outline" onClick={() => { dragDepth.current = 0; setDragActive(false); setOpen(true) }}>安装单 JS 插件</Button>
     <ToolDialog open={open} onOpenChange={value => { if (!value && !busy) { dragDepth.current = 0; setDragActive(false); setOpen(false) } }} title="安装单 JS 插件" description="安装到 plugins/example；支持本地上传或 HTTPS 文件直链，不覆盖同名文件。重启后加载。">
       <form onSubmit={submit} className="space-y-4">
-        <div role="tablist" aria-label="安装方式" className="grid grid-cols-2 rounded-xl bg-slate-100 p-1">
-          <button type="button" role="tab" aria-selected={mode === "upload"} disabled={busy} onClick={() => setMode("upload")} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "upload" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>上传 JS 文件</button>
-          <button type="button" role="tab" aria-selected={mode === "url"} disabled={busy} onClick={() => { dragDepth.current = 0; setDragActive(false); setMode("url") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "url" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>HTTPS 文件直链</button>
+        <div role="tablist" aria-label="安装方式" className="grid grid-cols-2 rounded-xl bg-muted p-1">
+          <button type="button" role="tab" aria-selected={mode === "upload"} disabled={busy} onClick={() => setMode("upload")} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "upload" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>上传 JS 文件</button>
+          <button type="button" role="tab" aria-selected={mode === "url"} disabled={busy} onClick={() => { dragDepth.current = 0; setDragActive(false); setMode("url") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "url" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>HTTPS 文件直链</button>
         </div>
         {mode === "upload" ? <div className="space-y-2">
           <Label htmlFor="install-script-file">本地 JS 文件</Label>
-          <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-slate-50/70 p-3">
+          <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-muted/70 p-3">
             <Button type="button" variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}><Upload />选择文件</Button>
-            <span className={`min-w-0 flex-1 truncate text-sm ${file ? "text-slate-700" : "text-muted-foreground"}`} title={file?.name || "尚未选择 JS 文件"}>{file?.name || "尚未选择 JS 文件"}</span>
+            <span className={`min-w-0 flex-1 truncate text-sm ${file ? "text-foreground" : "text-muted-foreground"}`} title={file?.name || "尚未选择 JS 文件"}>{file?.name || "尚未选择 JS 文件"}</span>
             {file && <Button type="button" size="icon" variant="ghost" disabled={busy} aria-label="移除已选择文件" title="移除已选择文件" onClick={() => { setFile(null); setName(current => current === file.name ? "" : current); if (fileInput.current) fileInput.current.value = "" }}><X /></Button>}
           </div>
           <input ref={fileInput} id="install-script-file" className="sr-only" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
@@ -168,8 +168,8 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
       </form>
     </ToolDialog>
     {open && mode === "upload" && dragActive && typeof document !== "undefined" && createPortal(
-      <div role="status" aria-live="polite" className="pointer-events-none fixed inset-3 z-[1000] grid place-items-center rounded-2xl border-2 border-dashed border-indigo-400 bg-slate-950/20 backdrop-blur-[2px]">
-        <div className="flex items-center gap-3 rounded-xl bg-white px-5 py-4 text-sm font-medium text-slate-700 shadow-xl"><Upload className="size-5 text-indigo-600" />松开鼠标即可添加 JS 文件</div>
+      <div role="status" aria-live="polite" className="pointer-events-none fixed inset-3 z-[1000] grid place-items-center rounded-2xl border-2 border-dashed border-primary bg-neutral-950/20 backdrop-blur-[2px]">
+        <div className="flex items-center gap-3 rounded-xl bg-card px-5 py-4 text-sm font-medium text-foreground shadow-xl"><Upload className="size-5 text-foreground" />松开鼠标即可添加 JS 文件</div>
       </div>,
       document.body,
     )}

@@ -52,18 +52,18 @@ export function FieldHelp({ label, message }: { label: string; message: string }
   }, [open, place])
   return <>
     <button ref={trigger} type="button" aria-label={`${label}说明`} aria-describedby={open ? id : undefined}
-      className="relative -top-1 inline-grid size-4 shrink-0 self-start place-items-center rounded text-slate-400 transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="relative -top-1 inline-grid size-4 shrink-0 self-start place-items-center rounded text-neutral-400 transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onPointerEnter={event => { if (event.pointerType !== "touch") { cancel(); timer.current = setTimeout(() => setOpen(true), 180) } }}
       onPointerDown={() => { clickWasOpen.current = open }} onPointerLeave={close} onFocus={show} onBlur={close}
       onClick={event => { cancel(); if (event.detail === 0) show(); else setOpen(!clickWasOpen.current) }}
     ><CircleHelp className="size-3" /></button>
     {open && createPortal(<div ref={content} id={id} role="tooltip"
-      className="admin-field-tooltip fixed z-[100] w-max max-w-[min(320px,calc(100vw-32px))] rounded-lg text-xs leading-5 text-slate-100 shadow-lg"
+      className="admin-field-tooltip fixed z-[100] w-max max-w-[min(320px,calc(100vw-32px))] rounded-lg text-xs leading-5 text-neutral-100 shadow-lg"
       style={{ left: position.left, top: position.top }} onPointerEnter={cancel} onPointerLeave={close}
     >
-      <div className="relative z-10 max-h-[calc(100dvh-32px)] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 [overflow-wrap:anywhere]">{message}</div>
+      <div className="relative z-10 max-h-[calc(100dvh-32px)] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 [overflow-wrap:anywhere]">{message}</div>
       <span aria-hidden="true" data-tooltip-arrow={position.side}
-        className={`pointer-events-none absolute z-20 size-2 -translate-x-1/2 rotate-45 bg-slate-900 ${position.side === "above" ? "-bottom-1 border-b border-r border-slate-700" : "-top-1 border-l border-t border-slate-700"}`}
+        className={`pointer-events-none absolute z-20 size-2 -translate-x-1/2 rotate-45 bg-neutral-900 ${position.side === "above" ? "-bottom-1 border-b border-r border-neutral-700" : "-top-1 border-l border-t border-neutral-700"}`}
         style={{ left: position.arrowLeft }} />
     </div>, document.body)}
   </>

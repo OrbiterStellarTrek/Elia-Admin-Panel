@@ -1,6 +1,6 @@
 {
   "name": "elia-admin-panel",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "桌面优先的独立 Yunzai WebUI 管理面板",

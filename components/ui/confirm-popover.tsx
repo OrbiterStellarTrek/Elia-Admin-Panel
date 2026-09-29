@@ -46,16 +46,16 @@ export function ConfirmPopover({ anchor, title, message, confirmLabel, onCancel,
     }
   }, [anchor, onCancel, place])
   return createPortal(<div ref={content} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} aria-describedby={`${id}-message`}
-    className="admin-field-tooltip fixed z-[100] w-64 max-w-[calc(100vw-32px)] rounded-xl bg-slate-900 text-slate-100 shadow-xl"
+    className="admin-field-tooltip fixed z-[100] w-64 max-w-[calc(100vw-32px)] rounded-xl bg-popover text-popover-foreground shadow-xl"
     style={{ left: position.left, top: position.top }}>
-    <div className="relative z-10 max-h-[calc(100dvh-32px)] overflow-auto rounded-xl border border-slate-700 bg-slate-900 p-3.5">
+    <div className="relative z-10 max-h-[calc(100dvh-32px)] overflow-auto rounded-xl border border-border bg-popover p-3.5">
       <p id={`${id}-title`} className="text-xs font-semibold">{title}</p>
-      <p id={`${id}-message`} className="mt-1.5 text-xs leading-5 text-slate-300">{message}</p>
+      <p id={`${id}-message`} className="mt-1.5 text-xs leading-5 text-muted-foreground">{message}</p>
       <div className="mt-3 flex justify-end gap-2">
-        <button ref={cancel} type="button" onClick={onCancel} className="rounded-md px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">取消</button>
-        <button type="button" onClick={onConfirm} className="rounded-md bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">{confirmLabel}</button>
+        <button ref={cancel} type="button" onClick={onCancel} className="rounded-md px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">取消</button>
+        <button type="button" onClick={onConfirm} className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{confirmLabel}</button>
       </div>
     </div>
-    <span aria-hidden="true" className={`pointer-events-none absolute z-20 size-2 -translate-x-1/2 rotate-45 bg-slate-900 ${position.above ? "-bottom-1 border-b border-r border-slate-700" : "-top-1 border-l border-t border-slate-700"}`} style={{ left: position.arrowLeft }} />
+    <span aria-hidden="true" className={`pointer-events-none absolute z-20 size-2 -translate-x-1/2 rotate-45 bg-popover ${position.above ? "-bottom-1 border-b border-r border-border" : "-top-1 border-l border-t border-border"}`} style={{ left: position.arrowLeft }} />
   </div>, document.body)
 }

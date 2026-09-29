@@ -47,6 +47,6 @@ export function FrontendUpdater({ api, notify }: {
       </Button>
       {updated && <Button type="button" size="sm" onClick={() => window.location.reload()}><RefreshCw />刷新使用新版本</Button>}
     </div>
-    {error && <p role="alert" className="break-words text-xs leading-5 text-rose-600">{error}</p>}
+    {error && <p role="alert" className="break-words text-xs leading-5 text-rose-600 dark:text-rose-300">{error}</p>}
   </CardContent></Card>
 }

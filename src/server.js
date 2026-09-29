@@ -2702,7 +2702,7 @@ export async function startAdminPanel() {
     app.use("/_next/static", express.static(path.join(FRONTEND_BACKUP_DIR, "_next/static"), { index: false, maxAge: "1h", fallthrough: true }))
     app.use((req, res, next) => {
       if (req.path.startsWith("/_next/")) return res.status(404).send("静态资源不存在，请刷新页面")
-      const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug)\/?$/)?.[1]
+      const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug|rules)\/?$/)?.[1]
       const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
       fs.access(entry)
         .then(() => res.sendFile(entry))

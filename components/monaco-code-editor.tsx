@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
+import { useTheme } from "@/components/theme-provider"
 import * as monaco from "monaco-editor"
 import "monaco-editor/language/css/monaco.contribution.js"
 import "monaco-editor/language/html/monaco.contribution.js"
@@ -40,6 +41,7 @@ export function MonacoCodeEditor({
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
   const language = editorLanguageForPath(path)
+  const { resolvedTheme } = useTheme()
 
   useEffect(() => {
     const host = hostRef.current
@@ -66,7 +68,7 @@ export function MonacoCodeEditor({
       bracketPairColorization: { enabled: true },
       guides: { bracketPairs: true, indentation: true },
       renderLineHighlight: "line",
-      theme: "vs",
+      theme: document.documentElement.classList.contains("dark") ? "vs-dark" : "vs",
     })
     editorRef.current = editor
     const changeSubscription = model.onDidChangeContent(() => onChange(model.getValue()))
@@ -80,6 +82,10 @@ export function MonacoCodeEditor({
     // A new file receives its own model and undo history.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, language])
+
+  useEffect(() => {
+    monaco.editor.setTheme(resolvedTheme === "dark" ? "vs-dark" : "vs")
+  }, [resolvedTheme])
 
   useEffect(() => {
     editorRef.current?.updateOptions({ readOnly })
