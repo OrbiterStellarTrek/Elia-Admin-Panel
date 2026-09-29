@@ -18,7 +18,7 @@ import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configE
 import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
 import { safeDownload, secureGitTransport } from "./network-policy.js"
 import { auditEvent } from "./audit.js"
-import { ensureFrontendBuild } from "./frontend-build.js"
+import { ensureFrontendBuild, frontendBuildInfo, updateFrontendBuild } from "./frontend-build.js"
 import cfg from "../../../lib/config/config.js"
 import pluginsLoader from "../../../lib/plugins/loader.js"
 
@@ -32,6 +32,7 @@ const PANEL_CONFIG = path.join(DATA_DIR, "config.yaml")
 const LOGS_DIR = path.join(ROOT, "logs")
 const SESSION_STORE_FILE = path.join(DATA_DIR, "sessions.json")
 const STATIC_DIR = path.join(PANEL_DIR, "out")
+const FRONTEND_BACKUP_DIR = path.join(DATA_DIR, "frontend-previous-out")
 const MAX_TEXT_BYTES = 1_500_000
 const MAX_PREVIEW_IMAGE_BYTES = 20 * 1024 * 1024
 const MAX_PREVIEW_AUDIO_BYTES = 20 * 1024 * 1024
@@ -1949,7 +1950,7 @@ export async function startAdminPanel() {
   const settings = await readPanelSettings()
   if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许本地访问，请关闭 devMode 后再继续后续操作")
   if (!settings.devMode) {
-    const releaseTag = await ensureFrontendBuild(PANEL_DIR)
+    const releaseTag = await ensureFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR })
     if (releaseTag) safeLogger("info", `[AdminPanel] 未检测到前端构建产物，已从 GitHub Release ${releaseTag} 初始化`)
   }
   await fs.mkdir(DATA_DIR, { recursive: true })
@@ -2670,6 +2671,21 @@ export async function startAdminPanel() {
     const log = await readLogTail(path.join(LOGS_DIR, selected))
     res.json({ files, selected, content: log.entries.map(entry => entry.text).join("\n"), entries: log.entries, cursor: log.cursor, identity: log.identity })
   }))
+  app.get("/api/frontend/status", asyncRoute(async (req, res) => {
+    res.json({ mode: settings.devMode ? "development" : "release", installed: await frontendBuildInfo(PANEL_DIR) })
+  }))
+  app.post("/api/frontend/update", asyncRoute(async (req, res) => {
+    if (settings.devMode) return res.status(409).json({ error: "当前正在使用开发源码，请关闭开发模式并重启 Bot 后更新发布版前端" })
+    try {
+      const result = await updateFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR })
+      res.json({ ok: true, ...result, message: result.updated ? "前端已更新，刷新页面后使用新版本" : "前端已是最新版本，无需更新" })
+    } catch (error) {
+      if (error.status === 409) throw error
+      safeLogger("warn", `[AdminPanel] ${error.message}`)
+      res.status(502).json({ error: error.message })
+    }
+  }))
+
   app.post("/api/runtime/restart", asyncRoute(async (req, res) => {
     const message = await restartBot()
     res.json({ ok: true, message })
@@ -2680,8 +2696,12 @@ export async function startAdminPanel() {
     await startNextDevServer()
     app.use(checkOrigin, (req, res, next) => devRequestNeedsAuth(req) ? requireAuth(req, res, next) : next(), (req, res) => proxyNextRequest(req, res))
   } else {
-    app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true }))
+    app.use(express.static(STATIC_DIR, { index: false, maxAge: "1h", fallthrough: true, setHeaders: (res, file) => {
+      if (file.endsWith(".html")) res.setHeader("Cache-Control", "no-store")
+    } }))
+    app.use("/_next/static", express.static(path.join(FRONTEND_BACKUP_DIR, "_next/static"), { index: false, maxAge: "1h", fallthrough: true }))
     app.use((req, res, next) => {
+      if (req.path.startsWith("/_next/")) return res.status(404).send("静态资源不存在，请刷新页面")
       const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug)\/?$/)?.[1]
       const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
       fs.access(entry)

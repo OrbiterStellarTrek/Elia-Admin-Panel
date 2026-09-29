@@ -4,6 +4,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import dynamic from "next/dynamic"
 import { Collapse, useExitPresence } from "@/components/ui/motion"
 import { Toast } from "@/components/ui/toast"
+import { FieldHelp } from "@/components/ui/field-help"
+import { FrontendUpdater } from "@/components/frontend-updater"
 import * as Dialog from "@radix-ui/react-dialog"
 import Cropper, { type Area } from "react-easy-crop"
 import {
@@ -927,6 +929,7 @@ function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; c
         <div className="mt-5 border-t border-border pt-4"><div className="mb-3 flex items-center justify-between gap-3"><div className="text-xs font-semibold">机器人账号</div><button type="button" onClick={() => navigate("accounts")} title="前往账号管理" className="inline-flex shrink-0 items-center gap-1 rounded-md px-1 py-1 text-xs font-medium text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">管理账号<ChevronRight className="size-3.5" /></button></div>{status?.accounts?.length ? <div className="space-y-2">{status.accounts.map((account: any) => <button key={account.id} type="button" onClick={() => navigate("accounts", String(account.id))} aria-label={`管理账号 ${account.nickname || `账号 ${account.id}`}，QQ ${account.id}`} title="管理此账号" className="group flex w-full items-center justify-between rounded-xl bg-slate-50 px-3.5 py-3 text-left transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><span className="flex min-w-0 items-center gap-3"><span className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-white text-indigo-600 shadow-sm"><Bot className="size-4" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">QQ {account.id}</span></span></span><span className="flex shrink-0 items-center gap-2"><Badge className={account.online ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-500"}>{account.status}</Badge><ChevronRight className="size-4 text-slate-300 transition group-hover:text-indigo-500" /></span></button>)}</div> : <div className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">当前没有可显示的机器人账号</div>}</div>
       </CardContent></Card>
       <div className="space-y-5">
+        <FrontendUpdater api={api} notify={notify} />
         <Card><CardHeader><CardTitle>快速入口</CardTitle><CardDescription>常用的控制功能</CardDescription></CardHeader><CardContent className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-1">{[
           { icon: FileCog, title: "编辑运行配置", desc: "Bot、群组与系统 YAML 配置", section: "config" as Section },
           { icon: Plug, title: "管理插件设置", desc: "加载插件提供的兼容配置项", section: "plugins" as Section },
@@ -2205,7 +2208,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           : selected.hasConfig ? <div key={`${selected.id}-${activeSchemaGroup}`} className="admin-fields-enter space-y-3.5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => {
             if (item.kind === "panel") {
               const multi = item.items.length > 1
-              return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border/70 bg-border/60 shadow-[0_1px_2px_rgba(28,29,58,0.04)] ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }) => <div key={schema.field} className="min-w-0 bg-card px-4 py-3 transition-colors hover:bg-indigo-50/25">{renderSchemaField(schema, index, true)}</div>)}</div>
+              return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border/70 bg-border/60 shadow-[0_1px_2px_rgba(28,29,58,0.04)] ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }) => <div key={schema.field} className="min-w-0 bg-card px-4 py-2 transition-colors hover:bg-indigo-50/25">{renderSchemaField(schema, index, true)}</div>)}</div>
             }
             return <div key={`block-${item.schema.field}`} className="min-w-0">{renderSchemaField(item.schema, item.index)}</div>
           })}</div>
@@ -2318,23 +2321,23 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   const component = String(schema.component || "Input")
   const props = schema.componentProps || {}
   const label = schema.label || schema.field
-  const help = schema.bottomHelpMessage || schema.helpMessage
+  const help = [...new Set([schema.helpMessage, schema.bottomHelpMessage].filter(Boolean))].join("\n")
   const options: any[] = props.options || []
   const listWidget = component === "GTags" || component === "CheckboxGroup" || component === "GSelectFriend" || component === "GSelectGroup"
   const forceAvatarKind = component === "GSelectFriend" ? "qq" : component === "GSelectGroup" ? "group" : undefined
   const textValue = typeof value === "string" ? value : value == null ? "" : String(value)
   const colorInput = component === "ColorPicker" || component === "GColorPicker" || (component === "Input" && String(label).includes("颜色") && (!props.type || props.type === "text"))
-  if (compactCard && component === "Switch") return <div className="flex min-h-12 items-center justify-between gap-3 py-1">
-    <div className="min-w-0"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
+  if (compactCard && component === "Switch") return <div className="flex min-h-9 items-center justify-between gap-3">
+    <div className="min-w-0"><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
     <div className="flex shrink-0 items-center gap-2"><span className={`text-[10px] font-medium ${value ? "text-indigo-600" : "text-slate-400"}`}>{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
   </div>
-  if (compactCard) return <div className="space-y-1.5 py-0.5">
-    <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
+  if (compactCard) return <div className="space-y-1">
+    <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
     {component === "InputNumber" ? <Input className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={onChange} /> : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
   </div>
-  return <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/40 p-3.5 transition-colors hover:border-indigo-200/80 hover:bg-indigo-50/30">
-    <div><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{help}</p>}</div>
-    <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} />{schema.bottomHelpMessage && <span className="hidden">{schema.bottomHelpMessage}</span>}</div>
+  return <div className="space-y-1.5 rounded-xl border border-border/70 bg-slate-50/40 px-3.5 py-3 transition-colors hover:border-indigo-200/80 hover:bg-indigo-50/30">
+    <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
+    <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border/80 px-3"><span className="text-xs text-slate-500">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
       : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} />
       : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />

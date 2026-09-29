@@ -3,3 +3,5 @@ out/
 node_modules/
 *.tsbuildinfo
 next-env.d.ts
+.elia-admin-panel-build-*/
+.elia-admin-panel-previous-out/

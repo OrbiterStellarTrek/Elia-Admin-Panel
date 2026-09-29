@@ -24,6 +24,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), "elia-security-regression-"))
   const sockets = new Set(), logs = [], cloneWaiters = []
   const devMode = process.env.PANEL_SECURITY_DEV === "1"
+  let frontendCalls = 0, failFrontend = false
   let module, tcpServer, devChild, pauseClones = false, failClone = false, localConnections = 0
   const mockSpawn = (command, args) => {
     if (devMode && command === process.execPath && args.includes("dev")) {
@@ -91,6 +92,15 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       let imported
       if (specifier.endsWith("lib/config/config.js")) imported = { default: cfg }
       else if (specifier.endsWith("lib/plugins/loader.js")) imported = { default: { priority: [], checkDisable() { return true }, async deal() {} } }
+      else if (specifier === "./frontend-build.js") imported = {
+        ensureFrontendBuild: async () => null,
+        frontendBuildInfo: async () => ({ release: "sha-fixture", digest: "sha256:" + "a".repeat(64) }),
+        updateFrontendBuild: async () => {
+          frontendCalls++
+          if (failFrontend) throw new Error("SHA-256 校验失败")
+          return { updated: frontendCalls === 1, release: "sha-fixture", digest: "sha256:" + "a".repeat(64) }
+        },
+      }
       else if (specifier === "node:child_process") imported = { spawn: mockSpawn }
       else if (specifier === "./network-policy.js") imported = { ...network, secureGitTransport: (url, options, policy) => network.secureGitTransport(url, options, policy, input => network.resolvePublicUrl(input, { lookup: async () => [{ address: "8.8.8.8", family: 4 }] })) }
       else imported = await import(specifier.startsWith(".") ? new URL(specifier, pathToFileURL(serverFile)).href : specifier)
@@ -115,7 +125,7 @@ export async function stopFixture() { configEvents.removeListener("changed", app
         const method = match[1].toUpperCase(), endpoint = route[1].replace(/:[A-Za-z]+/g, "fixture")
         assert.equal((await call(endpoint, method === "GET" ? undefined : {}, "", method)).status, 401, endpoint); routes++
       }
-      assert.equal(routes, 36)
+      assert.equal(routes, 38)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie, "GET", { origin: "https://attacker.invalid" })).status, 403)
       assert.equal((await wsConnect(wsBase + "/api/logs/ws")).status, 401)
       assert.equal((await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie, origin: "https://attacker.invalid" } })).status, 403)
@@ -156,6 +166,32 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.equal((await call("/api/accounts/10001/profile", { field: "avatar", value: overLimit }, cookie, "PATCH")).status, 400)
       assert.equal(avatarCalls, 1)
       global.Bot.uin = []; delete global.Bot[10001]
+    })
+    await t.test("前端更新接口返回更新或无变化结果，校验失败与开发模式不会安装", async () => {
+      const status = await call("/api/frontend/status", undefined, cookie)
+      assert.equal(status.status, 200)
+      assert.equal(status.data.mode, devMode ? "development" : "release")
+      if (devMode) {
+        assert.equal((await call("/api/frontend/update", {}, cookie)).status, 409)
+        assert.equal(frontendCalls, 0)
+      } else {
+        const first = await call("/api/frontend/update", {}, cookie)
+        assert.equal(first.status, 200)
+        assert.equal(first.data.updated, true)
+        assert.equal((await call("/api/frontend/update", {}, cookie)).data.updated, false)
+        failFrontend = true
+        const failed = await call("/api/frontend/update", {}, cookie)
+        assert.equal(failed.status, 502)
+        assert.match(failed.data.error, /SHA-256/)
+        failFrontend = false
+        const oldChunk = path.join(fixture, "data/elia-admin-panel/frontend-previous-out/_next/static/chunks/fixture-old-chunk.js")
+        await fs.mkdir(path.dirname(oldChunk), { recursive: true })
+        await fs.writeFile(oldChunk, "old chunk")
+        const oldAsset = await fetch(base + "/_next/static/chunks/fixture-old-chunk.js")
+        assert.equal(oldAsset.status, 200)
+        assert.equal(await oldAsset.text(), "old chunk")
+        assert.equal((await fetch(base + "/_next/static/chunks/fixture-nonexistent.js")).status, 404)
+      }
     })
     await t.test("配置和文件版本冲突返回 409，缺版本返回 428，注释被保留", async () => {
       const config = await call("/api/config/other.yaml", undefined, cookie)

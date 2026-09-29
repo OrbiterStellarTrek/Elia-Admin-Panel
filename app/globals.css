@@ -355,6 +355,8 @@ button, input, textarea { font: inherit; }
   .file-manager-fullscreen > .rounded-2xl > .grid { grid-template-rows: minmax(0, 1fr); }
 }
 
+.admin-field-tooltip { animation: admin-fade-in var(--motion-fast) ease-out; }
+
 /* Form groups fade only when mounted/switched, never on keystrokes or polling. */
 .admin-fields-enter > * { animation: admin-fade-in var(--motion-layout) ease-out backwards; }
 .admin-fields-enter > :nth-child(2) { animation-delay: 20ms; }
