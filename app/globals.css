@@ -393,15 +393,18 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   min-height: 0;
   flex: 1 1 0%;
 }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(2) { min-height: 0; }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(2) > div.flex-1 { min-height: 0; }
+.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(3) { min-height: 0; }
+.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(3) > div.flex-1 { min-height: 0; }
 
 @media (min-width: 640px) {
   .file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 1rem; }
 }
 
 @media (min-width: 1280px) {
-  .file-manager-fullscreen > .rounded-2xl > .grid { grid-template-rows: minmax(0, 1fr); }
+  .file-manager-fullscreen > .rounded-2xl > .grid {
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(220px, min(var(--file-list-width, 320px), calc(100% - 328px))) 8px minmax(0, 1fr);
+  }
 }
 
 .admin-field-tooltip { animation: admin-fade-in var(--motion-fast) ease-out; }

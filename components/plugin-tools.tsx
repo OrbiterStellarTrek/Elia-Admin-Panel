@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { EditableCombobox } from "@/components/ui/editable-combobox"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LoaderCircle, Upload, X } from "lucide-react"
 
 type Api = (url: string, init?: RequestInit) => Promise<any>
@@ -15,7 +18,7 @@ type Proxy = { proxyMode: string; proxy: string }
 type Notify = (kind: "success" | "error", message: string) => void
 
 export function ProxyFields({ value, onChange }: { value: Proxy; onChange: (value: Proxy) => void }) {
-  return <div className="space-y-2"><Label>下载代理</Label><select aria-label="代理类型" className="h-10 w-full rounded-lg border px-3 text-sm" value={value.proxyMode} onChange={event => onChange({ ...value, proxyMode: event.target.value })}><option value="none">不使用代理</option><option value="standard">常规 HTTP / SOCKS 代理</option><option value="prefix">链接前缀代理</option></select>{value.proxyMode !== "none" && <Input aria-label="代理地址" value={value.proxy} onChange={event => onChange({ ...value, proxy: event.target.value })} placeholder={value.proxyMode === "prefix" ? "https://gh-proxy.com" : "http://127.0.0.1:7890"} required />}</div>
+  return <div className="space-y-2"><Label>下载代理</Label><Select value={value.proxyMode} onValueChange={proxyMode => onChange({ ...value, proxyMode })}><SelectTrigger aria-label="代理类型"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">不使用代理</SelectItem><SelectItem value="standard">常规 HTTP / SOCKS 代理</SelectItem><SelectItem value="prefix">链接前缀代理</SelectItem></SelectContent></Select>{value.proxyMode !== "none" && <Input aria-label="代理地址" value={value.proxy} onChange={event => onChange({ ...value, proxy: event.target.value })} placeholder={value.proxyMode === "prefix" ? "https://gh-proxy.com" : "http://127.0.0.1:7890"} required />}</div>
 }
 
 function ToolDialog({ open, onOpenChange, title, description, children }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode }) {
@@ -66,7 +69,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
       <form onSubmit={submit} className="space-y-4">{open === "git" ? <>
         <p className="break-all text-xs text-muted-foreground">当前：{info?.branch || "游离提交"} · {info?.head?.slice(0, 12)}</p>
         <div className="flex gap-2"><Button type="button" variant={kind === "branch" ? "secondary" : "outline"} onClick={() => { setKind("branch"); setRef(info?.branch || info?.branches?.[0] || "") }}>分支</Button><Button type="button" variant={kind === "commit" ? "secondary" : "outline"} onClick={() => { setKind("commit"); setRef(info?.head || "") }}>commit</Button></div>
-        <Label htmlFor={`update-ref-${plugin.id}`}>目标{kind === "branch" ? "分支" : "commit"}</Label><Input id={`update-ref-${plugin.id}`} list={`update-refs-${plugin.id}`} value={ref} onChange={event => setRef(event.target.value)} placeholder={kind === "branch" ? "输入或选择分支" : "输入或选择提交哈希"} required /><datalist id={`update-refs-${plugin.id}`}>{kind === "branch" ? info?.branches?.map((branch: string) => <option key={branch} value={branch} />) : info?.commits?.map((commit: any) => <option key={commit.hash} value={commit.hash}>{commit.message}</option>)}</datalist>
+        <Label htmlFor={`update-ref-${plugin.id}`}>目标{kind === "branch" ? "分支" : "commit"}</Label><EditableCombobox id={`update-ref-${plugin.id}`} label={kind === "branch" ? "目标分支" : "目标提交"} value={ref} onValueChange={setRef} placeholder={kind === "branch" ? "输入或选择分支" : "输入或选择提交哈希"} options={kind === "branch" ? (info?.branches || []).map((branch: string) => ({ value: branch, label: branch })) : (info?.commits || []).map((commit: any) => ({ value: commit.hash, label: `${commit.hash.slice(0, 12)} · ${commit.message}` }))} required />
         <ProxyFields value={proxy} onChange={setProxy} /><Button type="button" variant="outline" disabled={busy} onClick={fetchRefs}>获取远端分支与提交</Button>
         <div className="flex items-center justify-between gap-3"><Label htmlFor={`prune-${plugin.id}`}>裁剪 .git，仅保留最新一个提交</Label><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div>
       </> : <><Textarea aria-label="依赖 JSON" className="min-h-72 font-mono text-xs" value={dependencies} onChange={event => setDependencies(event.target.value)} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
@@ -144,10 +147,7 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
     <Button variant="outline" onClick={() => { dragDepth.current = 0; setDragActive(false); setOpen(true) }}>安装单 JS 插件</Button>
     <ToolDialog open={open} onOpenChange={value => { if (!value && !busy) { dragDepth.current = 0; setDragActive(false); setOpen(false) } }} title="安装单 JS 插件" description="安装到 plugins/example；支持本地上传或 HTTPS 文件直链，不覆盖同名文件。重启后加载。">
       <form onSubmit={submit} className="space-y-4">
-        <div role="tablist" aria-label="安装方式" className="grid grid-cols-2 rounded-xl bg-muted p-1">
-          <button type="button" role="tab" aria-selected={mode === "upload"} disabled={busy} onClick={() => setMode("upload")} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "upload" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>上传 JS 文件</button>
-          <button type="button" role="tab" aria-selected={mode === "url"} disabled={busy} onClick={() => { dragDepth.current = 0; setDragActive(false); setMode("url") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "url" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>HTTPS 文件直链</button>
-        </div>
+        <Tabs value={mode} onValueChange={value => { dragDepth.current = 0; setDragActive(false); setMode(value) }}><TabsList aria-label="安装方式" className="grid w-full grid-cols-2"><TabsTrigger value="upload" disabled={busy}>上传 JS 文件</TabsTrigger><TabsTrigger value="url" disabled={busy}>HTTPS 文件直链</TabsTrigger></TabsList></Tabs>
         {mode === "upload" ? <div className="space-y-2">
           <Label htmlFor="install-script-file">本地 JS 文件</Label>
           <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-muted/70 p-3">
@@ -155,7 +155,7 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
             <span className={`min-w-0 flex-1 truncate text-sm ${file ? "text-foreground" : "text-muted-foreground"}`} title={file?.name || "尚未选择 JS 文件"}>{file?.name || "尚未选择 JS 文件"}</span>
             {file && <Button type="button" size="icon" variant="ghost" disabled={busy} aria-label="移除已选择文件" title="移除已选择文件" onClick={() => { setFile(null); setName(current => current === file.name ? "" : current); if (fileInput.current) fileInput.current.value = "" }}><X /></Button>}
           </div>
-          <input ref={fileInput} id="install-script-file" className="sr-only" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
+          <Input ref={fileInput} id="install-script-file" className="sr-only" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
         </div> : <div className="space-y-2">
           <Label htmlFor="install-script-url">HTTPS 文件直链</Label>
           <Input id="install-script-url" aria-label="JS 文件直链" type="url" placeholder="https://example.com/plugin.js" value={url} required onChange={event => { setUrl(event.target.value); if (!name) { try { const last = new URL(event.target.value).pathname.split("/").pop(); if (last?.endsWith(".js")) setName(last) } catch {} } }} />
