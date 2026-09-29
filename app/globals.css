@@ -400,7 +400,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   .file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 1rem; }
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 768px) {
   .file-manager-fullscreen > .rounded-2xl > .grid {
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: minmax(220px, min(var(--file-list-width, 320px), calc(100% - 328px))) 8px minmax(0, 1fr);
@@ -438,4 +438,48 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   }
   .admin-button:hover:not(:disabled), .admin-button:active:not(:disabled),
   .admin-nav > button > svg, [data-slot="slider"] [role="slider"]:active { scale: 1; translate: none; }
+}
+
+.installer-tab-indicator {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  width: calc((100% - 8px) / 2);
+  border-radius: 6px;
+  background: var(--background);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .1);
+  transition: transform 200ms ease;
+}
+.installer-tab-content[data-state="active"] {
+  animation: installer-content-enter 180ms ease-out;
+}
+@keyframes installer-content-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .installer-tab-indicator { transition: none; }
+  .installer-tab-content[data-state="active"] { animation: none; }
+}
+
+.admin-popover-content {
+  --popover-enter-x: 0px;
+  --popover-enter-y: 6px;
+  transform-origin: var(--radix-popover-content-transform-origin);
+}
+.admin-popover-content[data-side="bottom"] { --popover-enter-y: -6px; }
+.admin-popover-content[data-side="left"] { --popover-enter-x: 6px; --popover-enter-y: 0px; }
+.admin-popover-content[data-side="right"] { --popover-enter-x: -6px; --popover-enter-y: 0px; }
+.admin-popover-content[data-state="open"] { animation: admin-popover-enter var(--motion-normal) var(--ease-out) both; }
+.admin-popover-content[data-state="closed"] { animation: admin-popover-leave var(--motion-exit) ease-in both; pointer-events: none; }
+@keyframes admin-popover-enter {
+  from { opacity: 0; transform: translate(var(--popover-enter-x), var(--popover-enter-y)) scale(.97); }
+  to { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+@keyframes admin-popover-leave {
+  from { opacity: 1; transform: translate(0, 0) scale(1); }
+  to { opacity: 0; transform: translate(var(--popover-enter-x), var(--popover-enter-y)) scale(.97); }
+}
+.admin-version-details { animation: admin-fade-in var(--motion-normal) ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .admin-popover-content[data-state], .admin-version-details { animation: none; }
 }

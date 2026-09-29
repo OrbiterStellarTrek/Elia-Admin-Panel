@@ -6,11 +6,11 @@ import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { DependencyEditor, type DependencyData } from "@/components/dependency-editor"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EditableCombobox } from "@/components/ui/editable-combobox"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LoaderCircle, Upload, X } from "lucide-react"
 
 type Api = (url: string, init?: RequestInit) => Promise<any>
@@ -23,7 +23,7 @@ export function ProxyFields({ value, onChange }: { value: Proxy; onChange: (valu
 
 function ToolDialog({ open, onOpenChange, title, description, children }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode }) {
   const triggerRef = useRef<HTMLElement | null>(null)
-  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-neutral-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl"><div className="mb-4 flex justify-between gap-3"><div><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="admin-dialog-overlay fixed inset-0 z-[60] bg-neutral-950/40 backdrop-blur-sm" /><Dialog.Content onOpenAutoFocus={() => { triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }} onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus() } }} className="admin-dialog-content fixed left-1/2 top-1/2 z-[61] max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-x-hidden overflow-y-auto rounded-xl border bg-card p-5 shadow-2xl"><div className="mb-4 flex justify-between gap-3"><div className="min-w-0 break-words"><Dialog.Title className="font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1 text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" className="shrink-0" aria-label="关闭"><X /></Button></Dialog.Close></div>{children}</Dialog.Content></Dialog.Portal></Dialog.Root>
 }
 
 export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugin: any; api: Api; notify: Notify; confirm: (message: string) => Promise<boolean>; onUpdated: () => void | Promise<void> }) {
@@ -34,7 +34,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   const [ref, setRef] = useState("")
   const [prune, setPrune] = useState(false)
   const [proxy, setProxy] = useState<Proxy>({ proxyMode: "none", proxy: "" })
-  const [dependencies, setDependencies] = useState("")
+  const [dependencies, setDependencies] = useState<DependencyData>({})
   const [dependencyVersion, setDependencyVersion] = useState("")
   const [install, setInstall] = useState(false)
   async function load(tool: "git" | "dependencies") {
@@ -43,7 +43,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${tool === "git" ? "git" : "dependencies"}`)
       if (tool === "dependencies") setDependencyVersion(result.version)
       if (tool === "git") { setInfo(result); setRef(result.branch || result.head); setKind(result.branch ? "branch" : "commit"); setPrune(false) }
-      else { setDependencies(JSON.stringify(result.data, null, 2)); setInstall(false) }
+      else { setDependencies(result.data); setInstall(false) }
       setOpen(tool)
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
   }
@@ -57,7 +57,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
     if (open === "git" && !await confirm(`将 ${plugin.title} 更新到${kind === "branch" ? "分支" : "提交"} ${ref}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
     setBusy(true)
     try {
-      const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: JSON.parse(dependencies), install, version: dependencyVersion }
+      const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: dependencies, install, version: dependencyVersion }
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${open === "git" ? "git/update" : "dependencies"}`, { method: open === "git" ? "POST" : "PUT", body: JSON.stringify(body) })
       notify("success", result.message); setOpen(null); await onUpdated()
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
@@ -65,14 +65,14 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   return <>
     {plugin.hasPackage && <Button variant="outline" disabled={busy} onClick={() => load("dependencies")}>编辑依赖</Button>}
     {plugin.hasGit && <Button variant="outline" disabled={busy} onClick={() => load("git")}>手动更新</Button>}
-    <ToolDialog open={open !== null} onOpenChange={value => { if (!value && !busy) setOpen(null) }} title={open === "git" ? "手动更新插件" : "编辑插件依赖"} description={open === "git" ? "选择或输入分支、commit；存在本地修改时会停止更新。" : "编辑 package.json 中的依赖对象；保存前自动备份。"}>
+    <ToolDialog open={open !== null} onOpenChange={value => { if (!value && !busy) setOpen(null) }} title={open === "git" ? "手动更新插件" : "编辑插件依赖"} description={open === "git" ? "选择或输入分支、commit；存在本地修改时会停止更新。" : "按依赖类型编辑包与版本；从 registry.npmmirror.com 查询真实版本，保存前自动备份。"}>
       <form onSubmit={submit} className="space-y-4">{open === "git" ? <>
         <p className="break-all text-xs text-muted-foreground">当前：{info?.branch || "游离提交"} · {info?.head?.slice(0, 12)}</p>
         <div className="flex gap-2"><Button type="button" variant={kind === "branch" ? "secondary" : "outline"} onClick={() => { setKind("branch"); setRef(info?.branch || info?.branches?.[0] || "") }}>分支</Button><Button type="button" variant={kind === "commit" ? "secondary" : "outline"} onClick={() => { setKind("commit"); setRef(info?.head || "") }}>commit</Button></div>
         <Label htmlFor={`update-ref-${plugin.id}`}>目标{kind === "branch" ? "分支" : "commit"}</Label><EditableCombobox id={`update-ref-${plugin.id}`} label={kind === "branch" ? "目标分支" : "目标提交"} value={ref} onValueChange={setRef} placeholder={kind === "branch" ? "输入或选择分支" : "输入或选择提交哈希"} options={kind === "branch" ? (info?.branches || []).map((branch: string) => ({ value: branch, label: branch })) : (info?.commits || []).map((commit: any) => ({ value: commit.hash, label: `${commit.hash.slice(0, 12)} · ${commit.message}` }))} required />
         <ProxyFields value={proxy} onChange={setProxy} /><Button type="button" variant="outline" disabled={busy} onClick={fetchRefs}>获取远端分支与提交</Button>
         <div className="flex items-center justify-between gap-3"><Label htmlFor={`prune-${plugin.id}`}>裁剪 .git，仅保留最新一个提交</Label><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div>
-      </> : <><Textarea aria-label="依赖 JSON" className="min-h-72 font-mono text-xs" value={dependencies} onChange={event => setDependencies(event.target.value)} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
+      </> : <><DependencyEditor value={dependencies} onChange={setDependencies} disabled={busy} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
       <Button type="submit" disabled={busy}>{busy && <LoaderCircle className="animate-spin" />}{open === "git" ? "更新到所选版本" : "保存依赖"}</Button></form>
     </ToolDialog>
   </>
@@ -147,19 +147,19 @@ export function ScriptInstaller({ api, notify, onInstalled }: { api: Api; notify
     <Button variant="outline" onClick={() => { dragDepth.current = 0; setDragActive(false); setOpen(true) }}>安装单 JS 插件</Button>
     <ToolDialog open={open} onOpenChange={value => { if (!value && !busy) { dragDepth.current = 0; setDragActive(false); setOpen(false) } }} title="安装单 JS 插件" description="安装到 plugins/example；支持本地上传或 HTTPS 文件直链，不覆盖同名文件。重启后加载。">
       <form onSubmit={submit} className="space-y-4">
-        <Tabs value={mode} onValueChange={value => { dragDepth.current = 0; setDragActive(false); setMode(value) }}><TabsList aria-label="安装方式" className="grid w-full grid-cols-2"><TabsTrigger value="upload" disabled={busy}>上传 JS 文件</TabsTrigger><TabsTrigger value="url" disabled={busy}>HTTPS 文件直链</TabsTrigger></TabsList></Tabs>
-        {mode === "upload" ? <div className="space-y-2">
+        <Tabs value={mode} onValueChange={value => { dragDepth.current = 0; setDragActive(false); setMode(value) }} className="min-w-0"><TabsList aria-label="安装方式" className="relative grid w-full grid-cols-2"><span aria-hidden="true" className="installer-tab-indicator" style={{ transform: mode === "url" ? "translateX(100%)" : "translateX(0)" }} /><TabsTrigger className="relative z-10 min-w-0 px-1 text-xs sm:text-sm data-[state=active]:bg-transparent data-[state=active]:shadow-none" value="upload" disabled={busy}>上传 JS 文件</TabsTrigger><TabsTrigger className="relative z-10 min-w-0 px-1 text-xs sm:text-sm data-[state=active]:bg-transparent data-[state=active]:shadow-none" value="url" disabled={busy}>HTTPS 文件直链</TabsTrigger></TabsList>
+        <TabsContent value="upload" className="installer-tab-content mt-4 space-y-2">
           <Label htmlFor="install-script-file">本地 JS 文件</Label>
           <div className="flex min-w-0 items-center gap-3 rounded-xl border border-border bg-muted/70 p-3">
             <Button type="button" variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}><Upload />选择文件</Button>
             <span className={`min-w-0 flex-1 truncate text-sm ${file ? "text-foreground" : "text-muted-foreground"}`} title={file?.name || "尚未选择 JS 文件"}>{file?.name || "尚未选择 JS 文件"}</span>
             {file && <Button type="button" size="icon" variant="ghost" disabled={busy} aria-label="移除已选择文件" title="移除已选择文件" onClick={() => { setFile(null); setName(current => current === file.name ? "" : current); if (fileInput.current) fileInput.current.value = "" }}><X /></Button>}
           </div>
-          <Input ref={fileInput} id="install-script-file" className="sr-only" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
-        </div> : <div className="space-y-2">
+          <Input ref={fileInput} id="install-script-file" className="hidden" aria-label="选择 JS 文件" type="file" accept=".js" onChange={event => { selectUploadFile(event.currentTarget.files?.[0] || null); event.currentTarget.value = "" }} />
+        </TabsContent><TabsContent value="url" className="installer-tab-content mt-4 space-y-2">
           <Label htmlFor="install-script-url">HTTPS 文件直链</Label>
           <Input id="install-script-url" aria-label="JS 文件直链" type="url" placeholder="https://example.com/plugin.js" value={url} required onChange={event => { setUrl(event.target.value); if (!name) { try { const last = new URL(event.target.value).pathname.split("/").pop(); if (last?.endsWith(".js")) setName(last) } catch {} } }} />
-        </div>}
+        </TabsContent></Tabs>
         <div className="space-y-2">
           <Label htmlFor="install-script-name">安装文件名</Label>
           <Input id="install-script-name" aria-label="安装文件名" value={name} required pattern=".+\.js" placeholder="plugin.js" onChange={event => setName(event.target.value)} />
