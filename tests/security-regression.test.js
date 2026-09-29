@@ -12,6 +12,7 @@ import { PassThrough } from "node:stream"
 import { pathToFileURL, fileURLToPath } from "node:url"
 import WebSocket from "ws"
 import YAML from "yaml"
+import { getCapApiEndpoint, getCapSiteverifyEndpoint } from "../lib/cap-config.js"
 import * as network from "../src/network-policy.js"
 
 const panel = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -21,10 +22,14 @@ const timeout = promise => Promise.race([promise, delay(6000).then(() => { throw
 test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保存冲突", { timeout: 120_000 }, async t => {
   const previousCwd = process.cwd(), previousBot = global.Bot, previousLogger = global.logger
   const previousSecurityEntrance = process.env.SECURITY_ENTRANCE
+  const previousCapSecret = process.env.CAP_SECRET_KEY, previousFetch = globalThis.fetch
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), "elia-security-regression-"))
   const sockets = new Set(), logs = [], cloneWaiters = []
   const devMode = process.env.PANEL_SECURITY_DEV === "1"
-  let frontendCalls = 0, failFrontend = false
+  const capServerUrl = "https://cap-fixture.example.test"
+  let capApiEndpoint = getCapApiEndpoint({ capServerUrl, capSiteKey: "fixture-site-key" }, {})
+  let capSiteverifyEndpoint = getCapSiteverifyEndpoint(capApiEndpoint)
+  let frontendCalls = 0, failFrontend = false, capServiceOffline = false, lastCapSecret = ""
   const frontendUpdateOptions = []
   let module, tcpServer, devChild, pauseClones = false, failClone = false, localConnections = 0
   const mockSpawn = (command, args) => {
@@ -58,6 +63,20 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
   })
   try {
     delete process.env.SECURITY_ENTRANCE
+    process.env.CAP_SECRET_KEY = "sk-fixture-secret"
+    globalThis.fetch = async (input, options) => {
+      if (String(input) === capSiteverifyEndpoint) {
+        if (capServiceOffline) throw new Error("Cap fixture offline")
+        const verification = JSON.parse(options.body)
+        lastCapSecret = verification.secret
+        const token = verification.response
+        const result = token === "valid-cap-token"
+          ? { success: true }
+          : { success: false, error: token === "expired-cap-token" ? "token expired" : "invalid token" }
+        return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } })
+      }
+      return previousFetch(input, options)
+    }
     for (const folder of ["plugins/EliaAdminPanel", "plugins/example", "config/config", "config/default_config", "data/elia-admin-panel", "logs"]) await fs.mkdir(path.join(fixture, folder), { recursive: true })
     await fs.writeFile(path.join(fixture, "package.json"), '{"type":"module"}')
     await fs.writeFile(path.join(fixture, "config/config/other.yaml"), "# 保留注释\nmasterQQ: [10001]\n")
@@ -73,7 +92,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     const password = crypto.randomBytes(24).toString("hex"), salt = crypto.randomBytes(16)
     let currentPassword = password
     const configFile = path.join(fixture, "data/elia-admin-panel/config.yaml")
-    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], approvedProxyUrls: ["http://127.0.0.1:7890"], loginImageApi: "https://images.example.test/random", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
+    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], approvedProxyUrls: ["http://127.0.0.1:7890"], loginImageApi: "https://images.example.test/random", capServerUrl, capSiteKey: "fixture-site-key", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
     const cfg = { config: {}, bot: {}, getConfig() { return {} }, getGroup() { return {} } }
     global.Bot = { uin: [], fl: new Map(), gl: new Map() }
     global.logger = Object.fromEntries(["mark", "warn", "error", "info"].map(level => [level, message => logs.push(String(message))]))
@@ -111,16 +130,110 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     })
     await module.evaluate(); await module.namespace.startAdminPanel()
     const base = `http://127.0.0.1:${port}`, wsBase = base.replace("http:", "ws:")
-    const call = async (url, body, cookie = "", method = body === undefined ? "GET" : "POST", headers = {}, redirect = "follow") => {
-      const response = await fetch(base + url, { method, redirect, signal: AbortSignal.timeout(30_000), headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+    const call = async (url, body, cookie = "", method = body === undefined ? "GET" : "POST", headers = {}, redirect = "follow", withoutCap = false) => {
+      const protectedAuthRoute = /^\/api\/auth\/(?:login|code\/request|code\/check)\/?$/.test(url.split("?")[0])
+      const requestBody = !withoutCap && protectedAuthRoute && body && typeof body === "object" && !Object.hasOwn(body, "cap-token")
+        ? { ...body, "cap-token": "valid-cap-token" }
+        : body
+      const response = await fetch(base + url, { method, redirect, signal: AbortSignal.timeout(30_000), headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...headers }, ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }) })
       const data = await response.json().catch(() => ({}))
       return { status: response.status, data, cookie: response.headers.get("set-cookie") }
     }
-    const login = await call("/api/auth/login", { password }); assert.equal(login.status, 200)
+    const login = await call("/api/auth/login", { password, "cap-token": "valid-cap-token" }); assert.equal(login.status, 200)
     let cookie = login.cookie.split(";")[0]
     const loginStatus = await call("/api/auth/status")
     assert.equal(loginStatus.status, 200)
     assert.equal(loginStatus.data.loginImageApi, "https://images.example.test/random")
+    assert.equal(loginStatus.data.capApiEndpoint, capApiEndpoint)
+    await t.test("公开认证接口拒绝缺失、无效和过期 token，验签故障时 fail-closed", async () => {
+      for (const [endpoint, body] of [
+        ["/api/auth/login", { password }],
+        ["/api/auth/code/request", {}],
+        ["/api/auth/code/check", { code: "invalid" }],
+      ]) {
+        const missing = await call(endpoint, body, "", "POST", {}, "follow", true)
+        assert.equal(missing.status, 400, endpoint)
+        assert.match(missing.data.error, /验证/)
+      }
+      const invalid = await call("/api/auth/login", { password, "cap-token": "invalid-cap-token" })
+      assert.equal(invalid.status, 400)
+      const expired = await call("/api/auth/login", { password, "cap-token": "expired-cap-token" })
+      assert.equal(expired.status, 400)
+      assert.match(expired.data.error, /过期/)
+      capServiceOffline = true
+      try {
+        const unavailable = await call("/api/auth/login", { password, "cap-token": "valid-cap-token" })
+        assert.equal(unavailable.status, 503)
+      } finally {
+        capServiceOffline = false
+      }
+    })
+    await t.test("未配置 Cap 时登录、验证码申请和验证码登录不要求 token", async () => {
+      const configured = YAML.parse(await fs.readFile(configFile, "utf8"))
+      const previousCapServerUrl = process.env.CAP_SERVER_URL
+      const previousCapSiteKey = process.env.CAP_SITE_KEY
+      const unconfigured = { ...configured }
+      delete unconfigured.capServerUrl
+      delete unconfigured.capSiteKey
+      delete process.env.CAP_SERVER_URL
+      delete process.env.CAP_SITE_KEY
+      await fs.writeFile(configFile, YAML.stringify(unconfigured))
+      try {
+        assert.equal((await call("/api/auth/status")).data.capApiEndpoint, "")
+        const login = await call("/api/auth/login", { password }, "", "POST", {}, "follow", true)
+        assert.equal(login.status, 200)
+        await call("/api/auth/logout", {}, login.cookie.split(";")[0])
+
+        const request = await call("/api/auth/code/request", {}, "", "POST", {}, "follow", true)
+        assert.equal(request.status, 200)
+        const credential = await fs.readFile(path.join(fixture, "data/elia-admin-panel/credentials/login-code.txt"), "utf8")
+        const loginCode = credential.match(/验证码 ([A-Za-z0-9_-]+)/)?.[1]
+        assert.ok(loginCode)
+        const codeLogin = await call("/api/auth/code/check", { code: loginCode }, "", "POST", {}, "follow", true)
+        assert.equal(codeLogin.status, 200)
+        await call("/api/auth/logout", {}, codeLogin.cookie.split(";")[0])
+      } finally {
+        await fs.writeFile(configFile, YAML.stringify(configured))
+        if (previousCapServerUrl === undefined) delete process.env.CAP_SERVER_URL
+        else process.env.CAP_SERVER_URL = previousCapServerUrl
+        if (previousCapSiteKey === undefined) delete process.env.CAP_SITE_KEY
+        else process.env.CAP_SITE_KEY = previousCapSiteKey
+      }
+    })
+    await t.test("Cap 站点信息和私钥由插件配置保存，公开 endpoint 动态下发且私钥不回显", async () => {
+      const { supportPanel } = await import("../elia.support.js")
+      const support = supportPanel()
+      const data = await support.configInfo.getConfigData()
+      const nextServerUrl = "https://configured-cap.example.test"
+      const nextSiteKey = "configured-site-key"
+      const result = await support.configInfo.setConfigData({ ...data, capServerUrl: nextServerUrl, capSiteKey: nextSiteKey, capSecretKey: "cap-config-fixture-secret" }, {
+        Result: { ok: (_data, message) => ({ code: 0, message }), error: message => ({ code: -1, message }) },
+      })
+      assert.equal(result.code, 0)
+      const saved = await support.configInfo.getConfigData()
+      assert.equal(saved.capServerUrl, nextServerUrl)
+      assert.equal(saved.capSiteKey, nextSiteKey)
+      assert.equal(saved.capSecretKey, "")
+      assert.equal(support.configInfo.schemas.find(schema => schema.field === "capServerUrl").component, "Input")
+      assert.equal(support.configInfo.schemas.find(schema => schema.field === "capSiteKey").component, "Input")
+      assert.equal(support.configInfo.schemas.find(schema => schema.field === "capSecretKey").component, "Input")
+      assert.equal(support.configInfo.schemas.find(schema => schema.field === "capSecretKey").componentProps.type, "password")
+      capApiEndpoint = getCapApiEndpoint({ capServerUrl: saved.capServerUrl, capSiteKey: saved.capSiteKey }, {})
+      capSiteverifyEndpoint = getCapSiteverifyEndpoint(capApiEndpoint)
+      assert.equal((await call("/api/auth/status")).data.capApiEndpoint, capApiEndpoint)
+
+      const previous = process.env.CAP_SECRET_KEY
+      delete process.env.CAP_SECRET_KEY
+      try {
+        const login = await call("/api/auth/login", { password, "cap-token": "valid-cap-token" })
+        assert.equal(login.status, 200)
+        assert.equal(lastCapSecret, "cap-config-fixture-secret")
+        await call("/api/auth/logout", {}, login.cookie.split(";")[0])
+      } finally {
+        if (previous === undefined) delete process.env.CAP_SECRET_KEY
+        else process.env.CAP_SECRET_KEY = previous
+      }
+    })
     await t.test("全部业务路由与日志 WS 拒绝未登录，完整跨站来源被拒绝", async () => {
       let routes = 0
       for (const match of code.slice(code.indexOf('app.use("/api", requireAuth)')).matchAll(/app\.(get|post|put|patch)\(("[^"]+"|\[[^\]]+\])/g)) for (const route of match[2].matchAll(/"([^"]+)"/g)) {
@@ -134,12 +247,12 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     })
     await t.test("可信 HTTPS 转发带 Secure，不可信转发头不能伪造", async () => {
       assert.ok(!login.cookie.includes("; Secure"))
-      assert.ok((await call("/api/auth/login", { password }, "", "POST", { "x-forwarded-proto": "https" })).cookie.includes("; Secure"))
+      assert.ok((await call("/api/auth/login", { password, "cap-token": "valid-cap-token" }, "", "POST", { "x-forwarded-proto": "https" })).cookie.includes("; Secure"))
     })
     await t.test("24 次同源请求最多 10 次预占，拒绝超额请求且计数没有丢失", async () => {
       module.namespace.resetAttempts()
       try {
-        const responses = await Promise.all(Array.from({ length: 24 }, () => call("/api/auth/login", { password: "错误密码" })))
+        const responses = await Promise.all(Array.from({ length: 24 }, () => call("/api/auth/login", { password: "错误密码", "cap-token": "valid-cap-token" })))
         const unauthorized = responses.filter(value => value.status === 401)
         const limited = responses.filter(value => value.status === 429)
         assert.equal(responses.length, 24)
@@ -415,6 +528,9 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     process.chdir(previousCwd); global.Bot = previousBot; global.logger = previousLogger
     if (previousSecurityEntrance === undefined) delete process.env.SECURITY_ENTRANCE
     else process.env.SECURITY_ENTRANCE = previousSecurityEntrance
+    if (previousCapSecret === undefined) delete process.env.CAP_SECRET_KEY
+    else process.env.CAP_SECRET_KEY = previousCapSecret
+    globalThis.fetch = previousFetch
     assert.equal(path.dirname(fixture), path.resolve(os.tmpdir()))
     assert.ok(path.basename(fixture).startsWith("elia-security-regression-"))
     await fs.rm(fixture, { recursive: true, force: true })

@@ -1,7 +1,8 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { createElement, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { CapErrorEvent, CapSolveEvent, CapWidget as CapWidgetElement } from "cap-widget"
 import dynamic from "next/dynamic"
 import packageInfo from "@/package.json"
 import { Collapse, useExitPresence } from "@/components/ui/motion"
@@ -366,16 +367,56 @@ function SecurityEntranceWarningToast({ seconds, exiting, onDismiss, onExited }:
   </Toast>
 }
 
-function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string; securityEntranceWarning: SecurityEntranceWarning | null }) {
+function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityEntranceWarning }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string; capApiEndpoint: string; securityEntranceWarning: SecurityEntranceWarning | null }) {
+  const [captchaWidget, setCaptchaWidget] = useState<CapWidgetElement | null>(null)
+  const [captchaWidgetReady, setCaptchaWidgetReady] = useState(false)
   const [mode, setMode] = useState<"code" | "password">("code")
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
+  const [captchaToken, setCaptchaToken] = useState("")
   const [codeToast, setCodeToast] = useState("")
   const [codeToastExiting, setCodeToastExiting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(initialError)
   const [expiresAt, setExpiresAt] = useState(0)
   const [remaining, setRemaining] = useState(0)
+
+  useEffect(() => {
+    let active = true
+    if (!capApiEndpoint) {
+      setCaptchaWidgetReady(false)
+      return () => { active = false }
+    }
+    void import("cap-widget").then(() => {
+      if (active) setCaptchaWidgetReady(true)
+    }).catch(() => {
+      if (active) setError("人机验证组件加载失败，请刷新页面后重试")
+    })
+
+    return () => { active = false }
+  }, [capApiEndpoint])
+
+  useEffect(() => {
+    const widget = captchaWidget
+    if (!captchaWidgetReady || !widget) return
+    const handleSolve = (event: CapSolveEvent) => {
+      setCaptchaToken(event.detail.token)
+      setError("")
+    }
+    const handleReset = () => setCaptchaToken("")
+    const handleError = (event: CapErrorEvent) => {
+      setCaptchaToken("")
+      setError(event.detail.message || "人机验证失败，请重试")
+    }
+    widget.addEventListener("solve", handleSolve)
+    widget.addEventListener("reset", handleReset)
+    widget.addEventListener("error", handleError)
+    return () => {
+      widget.removeEventListener("solve", handleSolve)
+      widget.removeEventListener("reset", handleReset)
+      widget.removeEventListener("error", handleError)
+    }
+  }, [captchaWidget, captchaWidgetReady])
 
   useEffect(() => {
     if (!expiresAt) return
@@ -392,10 +433,14 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
   }, [codeToast])
 
   async function requestCode() {
+    if (capApiEndpoint && !captchaToken) {
+      setError("请先完成人机验证")
+      return
+    }
     setBusy(true)
     setError("")
     try {
-      const result = await request("/api/auth/code/request", { method: "POST", body: "{}" })
+      const result = await request("/api/auth/code/request", { method: "POST", body: JSON.stringify(capApiEndpoint ? { "cap-token": captchaToken } : {}) })
       setExpiresAt(Date.now() + result.expiresIn * 1000)
       setCodeToastExiting(false)
       setCodeToast(`${result.message || "验证码已写入本机凭据文件"}`)
@@ -403,62 +448,92 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
       setError((reason as Error).message)
     } finally {
       setBusy(false)
+      captchaWidget?.reset()
     }
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (capApiEndpoint && !captchaToken) {
+      setError("请先完成人机验证")
+      return
+    }
     setBusy(true)
     setError("")
     try {
       let session: any
+      const capToken = capApiEndpoint ? { "cap-token": captchaToken } : {}
       if (mode === "code") {
-        session = await request("/api/auth/code/check", { method: "POST", body: JSON.stringify({ code }) })
+        session = await request("/api/auth/code/check", { method: "POST", body: JSON.stringify({ code, ...capToken }) })
       } else {
-        session = await request("/api/auth/login", { method: "POST", body: JSON.stringify({ password }) })
+        session = await request("/api/auth/login", { method: "POST", body: JSON.stringify({ password, ...capToken }) })
       }
       onLogin(session.expiresAt)
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
       setBusy(false)
+      captchaWidget?.reset()
     }
   }
   return (
-    <main className="grid min-h-screen place-items-center bg-muted/40 px-5 py-10 lg:py-12">
+    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-muted/40 px-5 py-10 lg:py-12">
+      <div className="admin-login-bg" aria-hidden="true" />
       <ThemeSwitcher className="fixed right-4 top-4 z-20 w-36" />
       <div className="admin-login grid w-full min-w-0 grid-cols-1 max-w-[430px] items-stretch lg:max-w-[1100px] lg:grid-cols-[minmax(0,1fr)_430px]">
       <section aria-label="登录图片" className="relative aspect-video w-full min-w-0 overflow-hidden rounded-t-2xl rounded-b-none border border-border bg-muted shadow-sm lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
         <img src={imageApi} alt="登录页展示图片" className="absolute inset-0 size-full object-cover" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent" aria-hidden="true" />
+        <div className="absolute inset-x-0 bottom-0 p-6 text-white" aria-hidden="true">
+          <p className="text-lg font-semibold tracking-tight drop-shadow">Elia Admin Panel</p>
+          <p className="mt-1 text-xs text-white/85">面向 Yunzai 机器人的一站式管理控制台</p>
+        </div>
       </section>
-      <Card className="flex min-h-[430px] w-full min-w-0 max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-border shadow-sm sm:min-h-[560px] lg:rounded-l-none lg:rounded-tr-2xl">
+      <Card className="flex min-h-[430px] w-full min-w-0 max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-border/70 bg-card/95 shadow-xl backdrop-blur-sm sm:min-h-[560px] lg:rounded-l-none lg:rounded-tr-2xl">
         <CardHeader className="px-5 pt-7 sm:px-8 sm:pt-9">
           <div className="mb-4 flex items-center gap-4">
-            <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-2xl p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-            <CardTitle className="min-w-0 text-2xl">登录到 Elia Panel</CardTitle>
+            <div className="admin-login-logo grid size-12 shrink-0 place-items-center overflow-hidden rounded-2xl p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+            <div className="min-w-0">
+              <CardTitle className="min-w-0 text-2xl">登录到 Elia Panel</CardTitle>
+              <p className="mt-1 text-xs text-muted-foreground">验证身份以进入管理控制台</p>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex flex-1 flex-col px-5 pb-6 sm:px-8 sm:pb-8">
-          <Tabs value={mode} onValueChange={value => { setMode(value as "code" | "password"); setError("") }} className="mb-5"><TabsList aria-label="登录方式" className="grid w-full grid-cols-2"><TabsTrigger value="code">验证码登录</TabsTrigger><TabsTrigger value="password">面板密码</TabsTrigger></TabsList></Tabs>
-          <form key={mode} onSubmit={submit} className="admin-form-enter space-y-4">
+          <Tabs value={mode} onValueChange={value => { setMode(value as "code" | "password"); setError("") }} className="mb-5"><TabsList aria-label="登录方式" data-mode={mode} className="admin-login-tabs grid w-full grid-cols-2"><TabsTrigger value="code">验证码登录</TabsTrigger><TabsTrigger value="password">面板密码</TabsTrigger></TabsList></Tabs>
+          <form onSubmit={submit} className="admin-form-enter space-y-4">
             {mode === "code" ? <>
-              <div className="flex h-10 w-full items-center overflow-hidden rounded-md border border-input bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-ring">
+              <div className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
                 <Label htmlFor="panel-code" className="shrink-0 pl-4 text-sm font-medium">验证码</Label>
                 <Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
-                <Button type="button" variant="ghost" className="h-full shrink-0 rounded-none px-4 text-sm font-medium text-primary hover:bg-accent hover:text-accent-foreground" disabled={busy || remaining > 0} onClick={requestCode}>
+                <Button type="button" variant="ghost" className="h-full shrink-0 rounded-none px-4 text-sm font-medium text-primary hover:bg-accent hover:text-accent-foreground" disabled={busy || remaining > 0 || (Boolean(capApiEndpoint) && !captchaToken)} onClick={requestCode}>
                   {busy && <LoaderCircle className="animate-spin" />}
                   {remaining > 0 ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}` : "获取验证码"}
                 </Button>
               </div>
-            </> : <div className="flex h-10 w-full items-center overflow-hidden rounded-md border border-input bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-ring">
+            </> : <div className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
               <Label htmlFor="panel-password" className="shrink-0 pl-4 text-sm font-medium">面板密码</Label>
               <Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
             </div>}
+            {capApiEndpoint && <div className="flex min-h-[68px] justify-center" aria-label="人机验证">
+              {captchaWidgetReady ? createElement("cap-widget", {
+                ref: setCaptchaWidget,
+                "data-cap-api-endpoint": capApiEndpoint,
+                "data-cap-i18n-initial-state": "点击验证你是人类",
+                "data-cap-i18n-verifying-label": "正在验证...",
+                "data-cap-i18n-solved-label": "验证通过",
+                "data-cap-i18n-error-label": "验证失败",
+                "data-cap-i18n-verify-aria-label": "点击完成安全验证",
+                "data-cap-i18n-verifying-aria-label": "正在验证，请稍候",
+                "data-cap-i18n-verified-aria-label": "验证通过",
+                "data-cap-i18n-error-aria-label": "安全验证失败，请重试",
+              }) : <p className="self-center text-center text-xs text-muted-foreground">正在加载人机验证...</p>}
+            </div>}
             {error && <ErrorState message={error} />}
-            <Button className={mode === "code" ? "w-full rounded-lg" : "w-full"} disabled={busy || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : mode === "password" ? <KeyRound /> : null}{mode === "code" ? "立即登录" : "进入控制台"}</Button>
+            <Button className="admin-login-submit h-11 w-full rounded-xl font-semibold" disabled={busy || (Boolean(capApiEndpoint) && !captchaToken) || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : mode === "password" ? <KeyRound /> : null}{mode === "code" ? "立即登录" : "进入控制台"}</Button>
           </form>
-          <div className="mt-auto space-y-2 border-t pt-4 text-xs leading-5 text-muted-foreground">
-            <p>主人可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#面板登录</code> 获取快捷登录地址</p>
+          <div className="mt-auto space-y-2 border-t pt-4 text-center text-xs leading-5 text-muted-foreground">
+            <p>主人可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#elia登录</code> 获取快捷登录地址</p>
           </div>
         </CardContent>
       </Card>
@@ -475,6 +550,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const [authenticated, setAuthenticated] = useState<boolean | null>(null)
   const [sessionExpiresAt, setSessionExpiresAt] = useState<number | null>(null)
   const [loginImageApi, setLoginImageApi] = useState("https://t.alcy.cc/moez")
+  const [capApiEndpoint, setCapApiEndpoint] = useState("")
   const [loginError, setLoginError] = useState("")
   const [section, setSection] = useState<Section>(initialSection)
   const [fileManagerPath, setFileManagerPath] = useState(() => typeof window === "undefined" ? "." : routeQuery("path") || ".")
@@ -581,6 +657,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       .then(result => {
         if (active) {
           setLoginImageApi(result.loginImageApi || "https://t.alcy.cc/moez")
+          setCapApiEndpoint(result.capApiEndpoint || "")
           if (process.env.NODE_ENV !== "development" && result.securityEntranceConfigured === false) {
             setSecurityEntranceWarningDeadline(Date.now() + SECURITY_ENTRANCE_WARNING_MS)
             setSecurityEntranceWarningSeconds(30)
@@ -651,7 +728,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
     : { seconds: securityEntranceWarningSeconds, exiting: securityEntranceWarningExiting, onDismiss: dismissSecurityEntranceWarning, onExited: () => { setSecurityEntranceWarningDeadline(null); setSecurityEntranceWarningExiting(false) } }
 
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
-  if (!authenticated) return <Login imageApi={loginImageApi} initialError={loginError} securityEntranceWarning={securityEntranceWarning} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
+  if (!authenticated) return <Login imageApi={loginImageApi} capApiEndpoint={capApiEndpoint} initialError={loginError} securityEntranceWarning={securityEntranceWarning} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
 
   async function logout() {
     try { await api("/api/auth/logout", { method: "POST" }) } catch {}

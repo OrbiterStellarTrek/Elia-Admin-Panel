@@ -3,6 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { readConfig, writeConfig, withConfigLock } from "./src/panel-config.js"
 import { contentVersion, requireVersion, trustedProxy, withBudget } from "./src/security.js"
+import { getCapApiEndpoint } from "./lib/cap-config.js"
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const passwordIterations = 310_000
@@ -120,6 +121,27 @@ export function supportPanel() {
           component: "Input",
           componentProps: { type: "password", autocomplete: "new-password", placeholder: "留空表示保持不变" },
         },
+        {
+          field: "capServerUrl",
+          label: "Cap 服务器地址",
+          bottomHelpMessage: "填写 HTTPS 根地址，不要包含 Site Key 或路径；留空时读取 CAP_SERVER_URL 环境变量。",
+          component: "Input",
+          componentProps: { placeholder: "https://captcha.example.com", autocomplete: "url" },
+        },
+        {
+          field: "capSiteKey",
+          label: "Cap Site Key",
+          bottomHelpMessage: "公开站点密钥；留空时读取 CAP_SITE_KEY 环境变量。服务器地址和 Site Key 配置后立即生效。",
+          component: "Input",
+          componentProps: { placeholder: "Site Key", autocomplete: "off" },
+        },
+        {
+          field: "capSecretKey",
+          label: "Cap Secret Key",
+          bottomHelpMessage: "留空表示不修改；私钥以明文保存到 data/elia-admin-panel/config.yaml，读取时不会回显，保存后立即生效。",
+          component: "Input",
+          componentProps: { type: "password", autocomplete: "new-password", placeholder: "留空表示保持不变" },
+        },
         { field: "trustedProxies", label: "可信反向代理 IP/CIDR", component: "InputTextArea", bottomHelpMessage: "每行一个，仅这些来源可通过 X-Forwarded-Proto 声明 HTTPS。默认不信任任何代理。" },
         { field: "cookieSecure", label: "始终使用 HTTPS Cookie", component: "Switch", bottomHelpMessage: "公网部署建议启用；启用后 HTTP 无法保持登录。本机 HTTP 开发可关闭。" },
       ],
@@ -134,6 +156,9 @@ export function supportPanel() {
           securityEntrance: config.securityEntrance || process.env.SECURITY_ENTRANCE || "",
           password: "",
           secret: "",
+          capServerUrl: config.capServerUrl || process.env.CAP_SERVER_URL || "",
+          capSiteKey: config.capSiteKey || process.env.CAP_SITE_KEY || "",
+          capSecretKey: "",
           trustedProxies: (config.trustedProxies || []).join("\n"),
           cookieSecure: config.cookieSecure === true,
           _version: contentVersion(JSON.stringify(config)),
@@ -151,6 +176,9 @@ export function supportPanel() {
         const securityEntrance = String(data.securityEntrance ?? current.securityEntrance ?? process.env.SECURITY_ENTRANCE ?? "").trim()
         const password = String(data.password ?? "")
         const secret = String(data.secret ?? "")
+        const capServerUrl = String(data.capServerUrl ?? current.capServerUrl ?? process.env.CAP_SERVER_URL ?? "").trim()
+        const capSiteKey = String(data.capSiteKey ?? current.capSiteKey ?? process.env.CAP_SITE_KEY ?? "").trim()
+        const capSecretKey = String(data.capSecretKey ?? "").trim()
 
         if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return Result.error("监听地址或端口无效")
         if (publicUrl && !validatePublicUrls(publicUrl)) return Result.error("公网访问地址必须是 http(s) 站点根地址，不能包含子路径、查询参数或凭据")
@@ -159,6 +187,8 @@ export function supportPanel() {
         if (password && password.length < 12) return Result.error("面板密码至少需要 12 个字符")
         if (password.length > 1024) return Result.error("面板密码不能超过 1024 个字符")
         if (secret && Buffer.byteLength(secret, "utf8") < 32) return Result.error("浏览器会话 Secret 至少需要 32 个 UTF-8 字节")
+        if (capSecretKey.length > 4096) return Result.error("Cap Secret Key 不能超过 4096 个字符")
+        if ((capServerUrl || capSiteKey) && !getCapApiEndpoint({ capServerUrl, capSiteKey }, {})) return Result.error("Cap 需要有效的 HTTPS 根地址和仅含字母、数字、_ 或 - 的 Site Key")
         if (devMode && !["127.0.0.1", "::1", "localhost"].includes(host)) return Result.error("开发模式仅允许绑定回环地址")
         const trustedProxies = data.trustedProxies === undefined ? current.trustedProxies || [] : String(data.trustedProxies).split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean)
         if (trustedProxies.some(entry => !trustedProxy(entry.split("/")[0], [entry]))) return Result.error("可信代理必须填写有效 IP 或 CIDR")
@@ -167,6 +197,11 @@ export function supportPanel() {
         delete next.password
         if (password) Object.assign(next, await createPasswordCredential(password))
         if (secret) next.secret = secret
+        if (capServerUrl) next.capServerUrl = capServerUrl
+        else delete next.capServerUrl
+        if (capSiteKey) next.capSiteKey = capSiteKey
+        else delete next.capSiteKey
+        if (capSecretKey) next.capSecretKey = capSecretKey
         await writeConfig(next)
 
         const notes = []
@@ -177,6 +212,8 @@ export function supportPanel() {
         if (publicUrl !== String(current.publicUrl || "").trim()) notes.push("公网访问地址立即用于主人快捷登录链接")
         if (loginImageApi !== String(current.loginImageApi || defaultLoginImageApi).trim()) notes.push("登录随机图 API 立即生效")
         if (securityEntrance !== String(current.securityEntrance || "").trim()) notes.push("安全入口立即生效，旧入口令牌已撤销")
+        if (capServerUrl !== String(current.capServerUrl || process.env.CAP_SERVER_URL || "").trim() || capSiteKey !== String(current.capSiteKey || process.env.CAP_SITE_KEY || "").trim()) notes.push("Cap 站点配置已保存并立即生效")
+        if (capSecretKey) notes.push("Cap Secret Key 已保存并立即生效")
         return Result.ok({}, `配置已保存；${notes.join("；") || "没有需要立即生效的变更"}`)
         })
       },
