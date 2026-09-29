@@ -284,6 +284,11 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.equal(support.configInfo.schemas.find(schema => schema.field === "securityEntrance").component, "Input")
       assert.equal((await saveSupportConfig({ ...supportData, securityEntrance: "invalid/path" })).code, -1)
       assert.equal((await saveSupportConfig({ ...supportData, securityEntrance: entrance })).code, 0)
+      const robotsResponse = await fetch(`${base}/robots.txt`)
+      assert.equal(robotsResponse.status, 200)
+      assert.match(robotsResponse.headers.get("content-type"), /^text\/plain/)
+      assert.equal(await robotsResponse.text(), "User-agent: *\nDisallow: /\n")
+      assert.equal((await fetch(`${base}/robots.txt`, { method: "HEAD" })).status, 200)
 
       for (const [url, body, method] of [["/", undefined, "GET"], ["/login", undefined, "GET"], ["/admin", undefined, "GET"], ["/api/auth/login", { password }, "POST"], ["/api/auth/code/request", {}, "POST"], ["/api/auth/code/check", { code: "invalid" }, "POST"], ["/api/auth/quick", { code: "invalid" }, "POST"], ["/api/files/read?path=package.json", undefined, "GET"]]) {
         assert.equal((await call(url, body, "", method)).status, 404, url)

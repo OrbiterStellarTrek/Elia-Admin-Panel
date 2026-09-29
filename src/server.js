@@ -877,7 +877,7 @@ function isSecurityEntrancePublicAsset(req) {
   let pathname
   try { pathname = decodeURIComponent(req.path) } catch { return false }
   if (pathname.includes("\\") || pathname.includes("\0") || path.posix.normalize(pathname) !== pathname || /\.map(?:$|\/)/i.test(pathname)) return false
-  return /^\/_next\/static\//i.test(pathname) || /^\/(?:favicon\.ico|elia\.png)\/?$/i.test(pathname)
+  return /^\/_next\/static\//i.test(pathname) || /^\/(?:favicon\.ico|elia\.png|robots\.txt)\/?$/i.test(pathname)
 }
 
 function requireSecurityEntrance(req, res, next) {
@@ -1966,6 +1966,7 @@ export async function startAdminPanel() {
   })
   app.use(asyncRoute(async (req, res, next) => { await refreshSecurity(); next() }))
   app.use(securityEntranceGate)
+  app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /\n"))
   let activeUploads = 0
   app.use((req, res, next) => {
     if (!/^\/api\/(?:files\/upload|plugins\/install-script)\/?$/i.test(req.path)) return next()
