@@ -16,6 +16,7 @@ import { pickNumericGroup, ffmpegPath } from "./bot-capabilities.js"
 import { repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
 import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configEvents, configGeneration, deliverCredential } from "./panel-config.js"
 import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
+import { verifyCapToken } from "./captcha.js"
 import { approvedFrontendProxy, safeDownload, secureGitTransport } from "./network-policy.js"
 import { auditEvent } from "./audit.js"
 import { ensureFrontendBuild, frontendBuildInfo, updateFrontendBuild } from "./frontend-build.js"
@@ -1968,7 +1969,7 @@ export async function startAdminPanel() {
     res.setHeader("Referrer-Policy", "same-origin")
     res.setHeader("X-Frame-Options", "DENY")
     res.setHeader("Cache-Control", "no-store")
-    res.setHeader("Content-Security-Policy-Report-Only", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: wss:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+    res.setHeader("Content-Security-Policy-Report-Only", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: wss: https://captcha.07210700.xyz; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
     next()
   })
   app.use(asyncRoute(async (req, res, next) => { await refreshSecurity(); next() }))
@@ -1988,6 +1989,13 @@ export async function startAdminPanel() {
   })
   app.use("/api", express.json({ limit: "3mb" }))
 
+  const verifyCapRequest = async (req, res) => {
+    const result = await verifyCapToken(req.body?.["cap-token"], { secret: securityPolicy.capSecretKey || process.env.CAP_SECRET_KEY })
+    if (result.success) return true
+    res.status(result.status).json({ error: result.error })
+    return false
+  }
+
   app.get("/api/auth/status", (req, res) => {
     const token = parseCookies(req.headers.cookie).get("elia_panel_session")
     const session = token && verifySessionToken(token)
@@ -2000,6 +2008,7 @@ export async function startAdminPanel() {
   app.post("/api/auth/login", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (!allowAttempt(loginAttempts, ip, 10, 15 * 60 * 1000)) return res.status(429).json({ error: "登录尝试次数过多，请 15 分钟后重试" })
+    if (!(await verifyCapRequest(req, res))) return
     const attemptWindow = loginAttempts.get(ip).resetAt
     const submitted = String(req.body?.password || "")
     const version = await withBudget("password-kdf", 4, () => verifyPanelPassword(submitted))
@@ -2019,6 +2028,7 @@ export async function startAdminPanel() {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (loginCode?.expiresAt > Date.now()) return res.status(429).json({ error: "当前验证码仍有效，请查看本机凭据文件" })
     if (!allowAttempt(codeRequestAttempts, ip, 3, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码请求过于频繁，请 15 分钟后再试" })
+    if (!(await verifyCapRequest(req, res))) return
     const code = crypto.randomBytes(12).toString("base64url")
     loginCode = { value: code, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }
     await deliverCredential("login-code", `验证码 ${code}`)
@@ -2028,6 +2038,7 @@ export async function startAdminPanel() {
   app.post("/api/auth/code/check", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"
     if (!allowAttempt(codeCheckAttempts, ip, 12, 15 * 60 * 1000)) return res.status(429).json({ error: "验证码尝试次数过多，请稍后再试" })
+    if (!(await verifyCapRequest(req, res))) return
     const submitted = String(req.body?.code || "").trim()
     if (loginCode && loginCode.expiresAt > Date.now() && crypto.timingSafeEqual(hashSecret(submitted), hashSecret(loginCode.value))) {
       const version = activeCredentialVersion

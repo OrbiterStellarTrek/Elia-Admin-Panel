@@ -58,6 +58,8 @@ pnpm install --filter elia-admin-panel --ignore-scripts
 - **面板密码**：在 EliaAdminPanel 插件配置中设置新密码（至少 12 个字符）；密码框默认留空，读取配置时不会回显密码。保存后立即生效，并以独立随机盐和 PBKDF2 哈希写入配置。密码登录按来源 IP 限流，每 15 分钟最多 10 次，并限制密码派生计算的并发数。忘记密码时可先用验证码或主人快捷地址登录，再在插件配置中重设。
 - **浏览器会话**：使用 HttpOnly、SameSite=Strict Cookie，令牌有效 12 小时；未轮换凭据的有效会话可跨重启保留。退出登录立即撤销对应 HTTP/WS；通过 Elia 或 Guoba 修改密码/Secret，立即撤销全部 HTTP、日志 WS、HMR、快捷码和持久会话，阻断旧密码在途登录。首次升级到加固版会要求旧会话重新登录。
 
+密码登录、验证码申请和验证码校验均要求完成 Cap 人机验证，服务端会在执行操作前向 Cap 验证 token。可在“插件控制 → EliaAdminPanel → 登录安全”填写 Cap 后台对应站点的 Secret Key；私钥以明文保存在受保护的 `data/elia-admin-panel/config.yaml`，插件配置页不会回显，留空表示保持不变。也可用进程环境变量 `CAP_SECRET_KEY` 提供回退值；YAML 中已配置的值优先。未设置 Secret 或 Cap 服务不可用时，认证接口会拒绝请求并返回服务暂不可用，不能绕过验证继续登录。
+
 验证码和首次密码仅通过本机受保护文件交付，不通过网页响应、普通日志或 stdout 返回。Windows 的 Node 文件 mode 不能替代 ACL，请从 Yunzai 根目录运行 `plugins/EliaAdminPanel/scripts/secure-local-storage.ps1`，并确认实际 Bot 运行账号拥有权限。请勿转发主人快捷地址。
 
 ## 面板设置

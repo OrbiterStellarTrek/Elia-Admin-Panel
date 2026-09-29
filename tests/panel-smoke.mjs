@@ -12,14 +12,27 @@ import { promisify } from "node:util"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import puppeteer from "puppeteer"
 import YAML from "yaml"
+import { CAP_API_ENDPOINT, CAP_SITEVERIFY_ENDPOINT } from "../lib/cap-config.js"
 
 const panel = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const temp = await fs.mkdtemp(path.join(os.tmpdir(), "elia-panel-smoke-"))
 const originalCwd = process.cwd()
+const originalCapSecret = process.env.CAP_SECRET_KEY, originalFetch = globalThis.fetch
 let browser
 let module
 let failures = []
 try {
+  process.env.CAP_SECRET_KEY = "sk-smoke-test"
+  globalThis.fetch = async (input, options) => {
+    if (String(input) === CAP_SITEVERIFY_ENDPOINT) {
+      const token = JSON.parse(options.body).response
+      const result = token === "smoke-valid-token"
+        ? { success: true }
+        : { success: false, error: token === "smoke-expired-token" ? "token expired" : "invalid token" }
+      return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } })
+    }
+    return originalFetch(input, options)
+  }
   for (const folder of ["plugins/fixture-support", "plugins/fixture-config/config", "plugins/fixture-empty", "plugins/system", "plugins/other", "plugins/example", "config/config", "data/elia-admin-panel", "logs"] ) await fs.mkdir(path.join(temp, folder), { recursive: true })
   await fs.writeFile(path.join(temp, "package.json"), '{"type":"module"}')
   for (const folder of ["fixture-support", "fixture-config", "fixture-empty"]) await fs.writeFile(path.join(temp, "plugins", folder, "index.js"), "export default {}")
@@ -66,7 +79,7 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
   await module.evaluate()
   await module.namespace.startAdminPanel()
   const base = `http://127.0.0.1:${port}`
-  const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password }) })
+  const login = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password, "cap-token": "smoke-valid-token" }) })
   assert.equal(login.status, 200)
   const cookie = login.headers.get("set-cookie").split(";")[0]
   async function api(url, init = {}) {
@@ -104,6 +117,34 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
   console.log("接口验证通过：排序、官 Bot 静默、二进制上传、路径保护、JS 语法检查、依赖、禁用及启用")
 
   browser = await puppeteer.launch({ headless: true })
+  const captchaPage = await browser.newPage()
+  const captchaErrors = []
+  captchaPage.on("pageerror", error => captchaErrors.push(error.message))
+  await captchaPage.setViewport({ width: 1440, height: 1000 })
+  await captchaPage.goto(base)
+  await captchaPage.waitForSelector("cap-widget")
+  assert.equal(await captchaPage.$eval("cap-widget", widget => widget.getAttribute("data-cap-api-endpoint")), CAP_API_ENDPOINT)
+  await captchaPage.waitForSelector('[role="tab"]')
+  await captchaPage.click('[role="tab"]:nth-child(2)')
+  await captchaPage.waitForSelector("#panel-password")
+  await captchaPage.type("#panel-password", password)
+  const submitSelector = "form button:last-of-type"
+  assert.equal(await captchaPage.$eval(submitSelector, button => button.disabled), true)
+  async function solveForSmoke(token) {
+    await captchaPage.$eval("cap-widget", (widget, value) => widget.dispatchEvent("solve", { token: value }), token)
+    await captchaPage.waitForFunction(selector => !document.querySelector(selector)?.disabled, {}, submitSelector)
+    await captchaPage.click(submitSelector)
+  }
+  await solveForSmoke("smoke-invalid-token")
+  await captchaPage.waitForFunction(() => document.body.innerText.includes("安全验证未通过"))
+  assert.equal(await captchaPage.$eval(submitSelector, button => button.disabled), true)
+  await solveForSmoke("smoke-expired-token")
+  await captchaPage.waitForFunction(() => document.body.innerText.includes("安全验证已过期"))
+  await solveForSmoke("smoke-valid-token")
+  await captchaPage.waitForFunction(() => document.body.innerText.includes("运行概览"))
+  assert.deepEqual(captchaErrors, [])
+  await captchaPage.close()
+  console.log("Cap 浏览器登录验证通过：组件加载、缺失/无效/过期拒绝、有效 token 登录")
   const page = await browser.newPage()
   const errors = []
   page.on("pageerror", error => errors.push(error.message))
@@ -190,6 +231,9 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
   await browser?.close()
   await module?.namespace.stopFixture?.().catch(() => {})
   process.chdir(originalCwd)
+  if (originalCapSecret === undefined) delete process.env.CAP_SECRET_KEY
+  else process.env.CAP_SECRET_KEY = originalCapSecret
+  globalThis.fetch = originalFetch
   assert.equal(path.dirname(temp), path.resolve(os.tmpdir()))
   assert.ok(path.basename(temp).startsWith("elia-panel-smoke-"))
   await fs.rm(temp, { recursive: true, force: true })

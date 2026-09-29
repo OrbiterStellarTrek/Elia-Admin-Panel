@@ -184,7 +184,83 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 [data-motion-page="overview"] .admin-card:nth-child(4) { animation-delay: 105ms; }
 .admin-login { animation: admin-surface-in 460ms var(--ease-out); }
 .admin-form-enter { animation: admin-fade-in var(--motion-normal) ease-out; }
+.admin-login [aria-label="人机验证"] { min-height: 44px; }
+.admin-login cap-widget {
+  --cap-background: var(--card);
+  --cap-border-color: var(--border);
+  --cap-border-radius: calc(var(--radius) - 2px);
+  --cap-widget-height: 38px;
+  --cap-widget-width: 100%;
+  --cap-widget-padding: 8px 12px;
+  --cap-gap: 10px;
+  --cap-color: var(--card-foreground);
+  --cap-checkbox-size: 20px;
+  --cap-checkbox-border: 1px solid var(--input);
+  --cap-checkbox-border-radius: calc(var(--radius) - 3px);
+  --cap-checkbox-background: var(--card);
+  --cap-checkbox-margin: 0;
+  --cap-font: var(--font-sans);
+  --cap-spinner-color: var(--primary);
+  --cap-spinner-background-color: var(--muted);
+  --cap-spinner-thickness: 3px;
+  width: 100%;
+  max-width: 100%;
+}
 .admin-login-tabs { position: relative; isolation: isolate; }
+
+/* Login page decorations */
+.admin-login-bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.admin-login-bg::before,
+.admin-login-bg::after {
+  content: "";
+  position: absolute;
+  width: 44vmax;
+  height: 44vmax;
+  border-radius: 50%;
+  filter: blur(64px);
+}
+.admin-login-bg::before {
+  top: -18vmax;
+  right: -12vmax;
+  background: radial-gradient(closest-side, oklch(0.74 0.09 270 / .4), transparent 72%);
+  animation: admin-blob-drift 18s ease-in-out infinite alternate;
+}
+.admin-login-bg::after {
+  bottom: -20vmax;
+  left: -14vmax;
+  background: radial-gradient(closest-side, oklch(0.78 0.09 340 / .34), transparent 72%);
+  animation: admin-blob-drift 22s ease-in-out infinite alternate-reverse;
+}
+.dark .admin-login-bg::before { opacity: .35; }
+.dark .admin-login-bg::after { opacity: .28; }
+@keyframes admin-blob-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(4vmax, 3vmax, 0) scale(1.08); }
+}
+
+.admin-login-logo {
+  background: linear-gradient(150deg, color-mix(in oklch, var(--primary) 8%, var(--card)), var(--card));
+  box-shadow: inset 0 0 0 1px var(--border), 0 6px 14px -8px rgb(0 0 0 / .25);
+}
+
+.admin-login-submit {
+  background: linear-gradient(135deg, var(--primary), color-mix(in oklch, var(--primary) 76%, oklch(0.6 0.16 285)));
+  box-shadow: 0 8px 18px -8px oklch(0.45 0.12 285 / .5);
+  transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-normal), filter var(--motion-fast), opacity var(--motion-fast);
+}
+@media (hover: hover) and (pointer: fine) {
+  .admin-login-submit:not(:disabled):hover {
+    transform: translateY(-1px);
+    filter: brightness(1.04);
+    box-shadow: 0 12px 26px -10px oklch(0.45 0.12 285 / .55);
+  }
+}
+.admin-login-submit:not(:disabled):active { transform: translateY(0); }
+.admin-login-submit:disabled { box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .admin-login-bg::before,
+  .admin-login-bg::after { animation: none; }
+}
 .admin-login-tabs::before {
   content: "";
   position: absolute;
