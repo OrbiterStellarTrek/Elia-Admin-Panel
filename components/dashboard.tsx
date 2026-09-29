@@ -427,18 +427,18 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
   return (
     <main className="grid min-h-screen place-items-center bg-muted/40 px-5 py-10 lg:py-12">
       <ThemeSwitcher className="fixed right-4 top-4 z-20 w-36" />
-      <div className="admin-login grid w-full max-w-[430px] items-stretch lg:max-w-[1100px] lg:grid-cols-[minmax(0,1fr)_430px]">
-      <section aria-label="登录图片" className="relative aspect-video w-full overflow-hidden rounded-t-2xl rounded-b-none border border-border bg-muted shadow-sm lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
+      <div className="admin-login grid w-full min-w-0 grid-cols-1 max-w-[430px] items-stretch lg:max-w-[1100px] lg:grid-cols-[minmax(0,1fr)_430px]">
+      <section aria-label="登录图片" className="relative aspect-video w-full min-w-0 overflow-hidden rounded-t-2xl rounded-b-none border border-border bg-muted shadow-sm lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
         <img src={imageApi} alt="登录页展示图片" className="absolute inset-0 size-full object-cover" />
       </section>
-      <Card className="flex min-h-[430px] w-full max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-border shadow-sm sm:min-h-[560px] lg:rounded-l-none lg:rounded-tr-2xl">
-        <CardHeader className="px-8 pt-9">
+      <Card className="flex min-h-[430px] w-full min-w-0 max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-border shadow-sm sm:min-h-[560px] lg:rounded-l-none lg:rounded-tr-2xl">
+        <CardHeader className="px-5 pt-7 sm:px-8 sm:pt-9">
           <div className="mb-4 flex items-center gap-4">
             <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-2xl p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
             <CardTitle className="min-w-0 text-2xl">登录到 Elia Panel</CardTitle>
           </div>
         </CardHeader>
-        <CardContent className="flex flex-1 flex-col px-8 pb-8">
+        <CardContent className="flex flex-1 flex-col px-5 pb-6 sm:px-8 sm:pb-8">
           <Tabs value={mode} onValueChange={value => { setMode(value as "code" | "password"); setError("") }} className="mb-5"><TabsList aria-label="登录方式" className="grid w-full grid-cols-2"><TabsTrigger value="code">验证码登录</TabsTrigger><TabsTrigger value="password">面板密码</TabsTrigger></TabsList></Tabs>
           <form key={mode} onSubmit={submit} className="admin-form-enter space-y-4">
             {mode === "code" ? <>
@@ -903,7 +903,7 @@ function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = 
 }
 
 function Metric({ icon: Icon, label, value, detail }: { icon: typeof Cpu; label: string; value: string; detail: string }) {
-  return <Card><CardContent className="p-5"><div className="flex items-center justify-between gap-3"><div className="text-sm font-medium">{label}</div><Icon className="size-4 shrink-0 text-muted-foreground" /></div><div className="mt-3 text-2xl font-semibold tabular-nums tracking-tight">{value}</div><div className="mt-1.5 text-xs text-muted-foreground">{detail}</div></CardContent></Card>
+  return <Card><CardContent className="p-3 sm:p-5"><div className="flex items-center justify-between gap-3"><div className="text-xs font-medium sm:text-sm">{label}</div><Icon className="size-4 shrink-0 text-muted-foreground" /></div><div className="mt-2.5 text-xl font-semibold tabular-nums tracking-tight sm:mt-3 sm:text-2xl">{value}</div><div className="mt-1.5 text-[11px] text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
 }
 
 function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: (section: Section, accountId?: string) => void }) {
@@ -919,14 +919,14 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
     <PageIntro actions={[{ label: "刷新状态", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新状态" title="刷新状态" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新状态"}</Button> }]} />
     {error && <div className="mb-5"><ErrorState message={error} /></div>}
     <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">运行概览</h1><p className="mt-1 text-sm text-muted-foreground">查看 Bot 运行情况与消息统计。</p></header>
-    <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
       <Metric icon={Activity} label="运行状态" value={status ? "运行中" : "读取中"} detail={status ? `进程 PID ${status.pid}` : "正在连接 Bot"} />
       <Metric icon={Clock3} label="持续运行" value={status ? formatUptime(status.uptime) : "—"} detail={status?.startedAt ? `启动于 ${new Date(status.startedAt).toLocaleString("zh-CN")}` : "等待运行信息"} />
       <Metric icon={Cpu} label="内存占用" value={status ? formatBytes(status.memory.rss) : "—"} detail={status ? `堆内存 ${formatBytes(status.memory.heapUsed)} / ${formatBytes(status.memory.heapTotal)}` : "Node.js 进程 RSS"} />
       <Metric icon={Users} label="群组缓存" value={status ? String(status.groupCount) : "—"} detail={status ? `${status.accounts.length} 个机器人账号` : "当前 Bot 群组数量"} />
     </div>
     <div className="mb-3 mt-7 text-sm font-medium text-foreground">消息统计</div>
-    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
       <Metric icon={Send} label="今日发送" value={formatCount(status?.messages?.sentToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本周发送" value={formatCount(status?.messages?.sentThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本月发送" value={formatCount(status?.messages?.sentThisMonth)} detail={status?.messages?.redisAvailable ? "Redis 月度计数" : "Redis 未连接"} />
@@ -934,7 +934,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
       <Metric icon={MessageSquareText} label="运行期间接收" value={formatCount(status?.messages?.receivedSinceStart)} detail={status?.messages?.receivedSinceStart == null ? "适配器未提供接收计数" : "机器人账号运行时计数"} />
     </div>
     <div className="mb-3 mt-7 text-sm font-medium text-foreground">图片统计</div>
-    <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
       <Metric icon={ImageIcon} label="今日生成图片" value={formatCount(status?.messages?.screenshotsToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本周生成图片" value={formatCount(status?.messages?.screenshotsThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本月生成图片" value={formatCount(status?.messages?.screenshotsThisMonth)} detail={status?.messages?.redisAvailable ? "Redis 月度计数" : "Redis 未连接"} />
@@ -1431,7 +1431,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
       </div>
       </div>
       <Card className={`min-w-0 ${editorFullscreen ? "fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden rounded-none border-0" : rawMode ? "flex h-full min-h-0 flex-col overflow-hidden" : ""}`}>
-        <CardHeader className="shrink-0 flex-row items-center justify-between border-b border-border pb-4">
+        <CardHeader className="shrink-0 flex-col items-start gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
           <div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div>
           <div className="flex items-center gap-2">
             <Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={async () => {
@@ -2171,8 +2171,8 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
       { label: "重新扫描", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="重新扫描" title="重新扫描" onClick={refresh} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "重新扫描"}</Button> },
     ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <div className={`plugin-center-grid grid min-h-[640px] gap-5 xl:gap-0 xl:min-h-0 xl:items-start ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
-      <div className="relative h-[640px] min-h-[640px] min-w-0 xl:h-auto xl:min-h-0">
+    <div className={`plugin-center-grid grid min-h-0 gap-5 xl:gap-0 xl:items-start ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
+      <div className="relative h-[55dvh] min-h-[280px] max-h-[420px] min-w-0 xl:h-auto xl:min-h-0">
         <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
         <div className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-card p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -2181,7 +2181,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           </div>
           <div className="mt-2 flex shrink-0 justify-start border-t border-border px-1 pt-2"><Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight className="size-4" /></Button></div>
         </div>
-        <div className={`flex min-h-[640px] flex-1 flex-col transition-opacity duration-150 xl:min-h-0 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+        <div className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
           <Card className="flex max-h-[50%] min-h-0 flex-[0_1_auto] flex-col overflow-hidden rounded-tl-none rounded-tr-2xl rounded-br-none rounded-bl-none">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-muted text-foreground">{largePlugins.length}</Badge></span></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
@@ -2492,6 +2492,7 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
 }
 
 function MessageDebugger({ api }: { api: Api }) {
+  const [mobileView, setMobileView] = useState<"compose" | "history">("compose")
   const [messageType, setMessageType] = useState<"private" | "group">("private")
   const [userId, setUserId] = useState("55555")
   const [groupId, setGroupId] = useState("")
@@ -2575,8 +2576,14 @@ function MessageDebugger({ api }: { api: Api }) {
   }
 
   return <>
-    <div ref={splitGridRef} style={{ "--debug-left-track": `${splitPercent}fr`, "--debug-right-track": `${100 - splitPercent}fr` } as React.CSSProperties} className="debug-workbench-grid grid h-full min-h-0 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-rows-1">
-      <section className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-b border-border bg-card px-5 py-5 sm:px-7 xl:border-b-0 xl:border-r-0 xl:px-8 xl:py-7">
+    <div ref={splitGridRef} style={{ "--debug-left-track": `${splitPercent}fr`, "--debug-right-track": `${100 - splitPercent}fr` } as React.CSSProperties} className="debug-workbench-grid grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] xl:grid-rows-1">
+      <div className="px-3 pt-3 xl:hidden">
+        <ToggleGroup type="single" value={mobileView} onValueChange={value => { if (value) setMobileView(value as "compose" | "history") }} className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" aria-label="调试视图">
+          <ToggleGroupItem value="compose" className="rounded-lg px-3 py-2 text-xs font-medium transition">发送消息</ToggleGroupItem>
+          <ToggleGroupItem value="history" className="rounded-lg px-3 py-2 text-xs font-medium transition">调试记录</ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+      <section className={`${mobileView === "compose" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-y-auto border-b border-border bg-card px-4 py-4 sm:px-7 sm:py-5 xl:border-b-0 xl:border-r-0 xl:px-8 xl:py-7`}>
         <div className="mb-5 border-b border-border pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></div>
         <form className="space-y-4" onSubmit={sendMessage}>
           <ToggleGroup type="single" value={messageType} onValueChange={value => { if (value) setMessageType(value as "group" | "private") }} className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" aria-label="消息类型">
@@ -2586,7 +2593,7 @@ function MessageDebugger({ api }: { api: Api }) {
             <div className="space-y-2"><Label htmlFor="debug-user-id">发送方 ID</Label><Input id="debug-user-id" value={userId} maxLength={80} onChange={event => setUserId(event.target.value)} placeholder="例如：123456789" /></div>
             {messageType === "group" && <div className="space-y-2"><Label htmlFor="debug-group-id">群号</Label><Input id="debug-group-id" value={groupId} maxLength={80} onChange={event => setGroupId(event.target.value)} placeholder="例如：987654321" /></div>}
           </div>
-          <div className="space-y-2"><Label htmlFor="debug-message">消息内容</Label><Textarea id="debug-message" className="min-h-36 resize-y font-mono text-sm leading-6" value={message} maxLength={5000} onChange={event => setMessage(event.target.value)} placeholder="输入要交给插件处理的文本消息…" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="flex justify-between text-[10px] text-muted-foreground"><span>支持以 # 开头的命令与普通聊天文本</span><span>{message.length}/5000</span></div></div>
+          <div className="space-y-2"><Label htmlFor="debug-message">消息内容</Label><Textarea id="debug-message" className="min-h-24 resize-y font-mono text-sm leading-6 sm:min-h-36" value={message} maxLength={5000} onChange={event => setMessage(event.target.value)} placeholder="输入要交给插件处理的文本消息…" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="flex justify-between text-[10px] text-muted-foreground"><span>支持以 # 开头的命令与普通聊天文本</span><span>{message.length}/5000</span></div></div>
           {error && <ErrorState message={error} />}
           <Button className="w-full" disabled={busy || !message.trim() || !userId.trim() || (messageType === "group" && !groupId.trim())}>{busy ? <LoaderCircle className="animate-spin" /> : <Send />}送入插件处理链</Button>
         </form>
@@ -2624,7 +2631,7 @@ function MessageDebugger({ api }: { api: Api }) {
         <span className="pointer-events-none absolute inset-y-0 w-px bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
         <span className="pointer-events-none z-10 h-10 w-1 rounded-full bg-neutral-300 transition group-hover:h-14 group-hover:bg-primary group-focus-visible:bg-primary" />
       </div>
-      <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40">
+      <section className={`${mobileView === "history" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40`}>
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-5 py-3 sm:px-7 sm:py-4 xl:px-8 xl:py-4"><div><CardTitle className="text-base">调试记录</CardTitle><CardDescription className="mt-1">本次面板会话最近 20 条</CardDescription></div><Button variant="outline" size="sm" disabled={!history.length} onClick={() => setHistory([])}>清空</Button></div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-5 xl:p-6">{history.length ? <>{history.map(item => <article key={item.id} className="space-y-3">
           <div className="flex justify-end"><div className="max-w-[98%]">
