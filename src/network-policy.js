@@ -23,6 +23,17 @@ export function normalizeNetworkUrl(input, { proxy = false } = {}) {
   if (!proxy && (host.endsWith(".") || host === "localhost" || /\.(?:local|localhost|internal|home|lan)$/.test(host))) throw securityError("目标主机不属于公网")
   return url
 }
+export function approvedFrontendProxy(policy = {}) {
+  const configured = Array.isArray(policy?.approvedProxyUrls) ? policy.approvedProxyUrls : []
+  for (const value of configured) {
+    let proxy
+    try { proxy = normalizeNetworkUrl(value, { proxy: true }) } catch { continue }
+    const hostname = proxy.hostname.replace(/^\[|\]$/g, "")
+    if (!["http:", "https:"].includes(proxy.protocol) || !net.isIP(hostname) || proxy.pathname !== "/" || proxy.search) continue
+    return proxy.href
+  }
+  return null
+}
 export async function resolvePublicUrl(input, { lookup = dns.lookup } = {}) {
   const url = normalizeNetworkUrl(input)
   const hostname = url.hostname.replace(/^\[|\]$/g, "")

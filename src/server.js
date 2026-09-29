@@ -16,7 +16,7 @@ import { pickNumericGroup, ffmpegPath } from "./bot-capabilities.js"
 import { repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
 import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configEvents, configGeneration, deliverCredential } from "./panel-config.js"
 import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
-import { safeDownload, secureGitTransport } from "./network-policy.js"
+import { approvedFrontendProxy, safeDownload, secureGitTransport } from "./network-policy.js"
 import { auditEvent } from "./audit.js"
 import { ensureFrontendBuild, frontendBuildInfo, updateFrontendBuild } from "./frontend-build.js"
 import cfg from "../../../lib/config/config.js"
@@ -2672,12 +2672,15 @@ export async function startAdminPanel() {
     res.json({ files, selected, content: log.entries.map(entry => entry.text).join("\n"), entries: log.entries, cursor: log.cursor, identity: log.identity })
   }))
   app.get("/api/frontend/status", asyncRoute(async (req, res) => {
-    res.json({ mode: settings.devMode ? "development" : "release", installed: await frontendBuildInfo(PANEL_DIR) })
+    res.json({ mode: settings.devMode ? "development" : "release", installed: await frontendBuildInfo(PANEL_DIR), proxyAvailable: Boolean(approvedFrontendProxy(securityPolicy)) })
   }))
   app.post("/api/frontend/update", asyncRoute(async (req, res) => {
     if (settings.devMode) return res.status(409).json({ error: "当前正在使用开发源码，请关闭开发模式并重启 Bot 后更新发布版前端" })
+    if (req.body?.useProxy !== undefined && typeof req.body.useProxy !== "boolean") return res.status(400).json({ error: "代理开关参数无效" })
+    const proxy = req.body?.useProxy ? approvedFrontendProxy(securityPolicy) : null
+    if (req.body?.useProxy && !proxy) return res.status(409).json({ error: "未配置获批的 HTTP(S) 固定 IP 代理" })
     try {
-      const result = await updateFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR })
+      const result = await updateFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR, ...(proxy ? { proxy } : {}) })
       res.json({ ok: true, ...result, message: result.updated ? "前端已更新，刷新页面后使用新版本" : "前端已是最新版本，无需更新" })
     } catch (error) {
       if (error.status === 409) throw error

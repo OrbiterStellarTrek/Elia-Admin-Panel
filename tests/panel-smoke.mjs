@@ -49,7 +49,7 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
   const port = await new Promise(resolve => { const server = net.createServer().listen(0, "127.0.0.1", () => { const port = server.address().port; server.close(() => resolve(port)) }) })
   const password = crypto.randomBytes(20).toString("hex")
   const salt = crypto.randomBytes(16)
-  await fs.writeFile(path.join(temp, "data/elia-admin-panel/config.yaml"), YAML.stringify({ host: "127.0.0.1", port, passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 100_000, 32, "sha256").toString("hex"), passwordIterations: 100_000 }))
+  await fs.writeFile(path.join(temp, "data/elia-admin-panel/config.yaml"), YAML.stringify({ host: "127.0.0.1", port, approvedProxyUrls: ["http://127.0.0.1:7890"], passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 100_000, 32, "sha256").toString("hex"), passwordIterations: 100_000 }))
   let numericCalls = 0
   global.Bot = { uin: [1], 1: { adapter: { id: "QQBot" } }, pickGroup() { numericCalls++; throw new Error("官方 Bot 不支持数字群") }, gl: new Map(), fl: new Map([[20002, { nickname: "测试好友", user_id: 20002 }]]) }
   global.logger = Object.fromEntries(["mark", "warn", "error", "info", "debug"].map(level => [level, message => { if (level === "error") failures.push(message) }]))
@@ -73,6 +73,9 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
     const response = await fetch(base + url, { ...init, headers: { cookie, "content-type": "application/json", ...init.headers } })
     return { status: response.status, data: await response.json() }
   }
+  const frontendStatus = await api("/api/frontend/status")
+  assert.equal(frontendStatus.status, 200)
+  assert.equal(frontendStatus.data.proxyAvailable, true)
   const plugins = (await api("/api/plugins")).data.plugins
   assert.deepEqual(plugins.map(plugin => plugin.id), ["fixture-support", "fixture-config", "fixture-empty"])
   assert.equal((await api("/api/config/group-plugin-names/123")).status, 200)
@@ -89,7 +92,11 @@ export function supportPanel() { return { pluginInfo: { title: "设置测试插�
   assert.equal((await api("/api/plugins/install-script?name=valid.js", { method: "POST", headers: raw, body: "export default class Example {}" })).status, 200)
   assert.equal((await api("/api/plugins/install-script?name=invalid.js", { method: "POST", headers: raw, body: "export class {" })).status, 400)
   const dependency = { dependencies: { yaml: "^2.8.1" } }
-  assert.equal((await api("/api/plugins/fixture-support/dependencies", { method: "PUT", body: JSON.stringify({ data: dependency }) })).status, 200)
+  const missingDependencyVersion = await api("/api/plugins/fixture-support/dependencies", { method: "PUT", body: JSON.stringify({ data: dependency }) })
+  assert.equal(missingDependencyVersion.status, 428)
+  assert.equal(missingDependencyVersion.data.error, "请重新读取最新内容后保存")
+  const dependencyVersion = (await api("/api/plugins/fixture-support/dependencies")).data.version
+  assert.equal((await api("/api/plugins/fixture-support/dependencies", { method: "PUT", body: JSON.stringify({ data: dependency, version: dependencyVersion }) })).status, 200)
   assert.equal((await api("/api/plugins/fixture-support/dependencies")).data.data.dependencies.yaml, "^2.8.1")
   assert.equal((await api("/api/plugins/fixture-empty/disable", { method: "POST", body: "{}" })).status, 200)
   const disabled = (await api("/api/plugins/archives")).data.archives[0]

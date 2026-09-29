@@ -25,6 +25,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
   const sockets = new Set(), logs = [], cloneWaiters = []
   const devMode = process.env.PANEL_SECURITY_DEV === "1"
   let frontendCalls = 0, failFrontend = false
+  const frontendUpdateOptions = []
   let module, tcpServer, devChild, pauseClones = false, failClone = false, localConnections = 0
   const mockSpawn = (command, args) => {
     if (devMode && command === process.execPath && args.includes("dev")) {
@@ -72,7 +73,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     const password = crypto.randomBytes(24).toString("hex"), salt = crypto.randomBytes(16)
     let currentPassword = password
     const configFile = path.join(fixture, "data/elia-admin-panel/config.yaml")
-    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], loginImageApi: "https://images.example.test/random", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
+    await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], approvedProxyUrls: ["http://127.0.0.1:7890"], loginImageApi: "https://images.example.test/random", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
     const cfg = { config: {}, bot: {}, getConfig() { return {} }, getGroup() { return {} } }
     global.Bot = { uin: [], fl: new Map(), gl: new Map() }
     global.logger = Object.fromEntries(["mark", "warn", "error", "info"].map(level => [level, message => logs.push(String(message))]))
@@ -95,8 +96,9 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       else if (specifier === "./frontend-build.js") imported = {
         ensureFrontendBuild: async () => null,
         frontendBuildInfo: async () => ({ release: "sha-fixture", digest: "sha256:" + "a".repeat(64) }),
-        updateFrontendBuild: async () => {
+        updateFrontendBuild: async (_pluginDir, options) => {
           frontendCalls++
+          frontendUpdateOptions.push(options)
           if (failFrontend) throw new Error("SHA-256 校验失败")
           return { updated: frontendCalls === 1, release: "sha-fixture", digest: "sha256:" + "a".repeat(64) }
         },
@@ -171,13 +173,17 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       const status = await call("/api/frontend/status", undefined, cookie)
       assert.equal(status.status, 200)
       assert.equal(status.data.mode, devMode ? "development" : "release")
+      assert.equal(status.data.proxyAvailable, true)
       if (devMode) {
         assert.equal((await call("/api/frontend/update", {}, cookie)).status, 409)
         assert.equal(frontendCalls, 0)
       } else {
-        const first = await call("/api/frontend/update", {}, cookie)
+        assert.equal((await call("/api/frontend/update", { useProxy: "true" }, cookie)).status, 400)
+        assert.equal(frontendCalls, 0)
+        const first = await call("/api/frontend/update", { useProxy: true, proxy: "https://unapproved.example" }, cookie)
         assert.equal(first.status, 200)
         assert.equal(first.data.updated, true)
+        assert.equal(frontendUpdateOptions[0].proxy, "http://127.0.0.1:7890/")
         assert.equal((await call("/api/frontend/update", {}, cookie)).data.updated, false)
         failFrontend = true
         const failed = await call("/api/frontend/update", {}, cookie)

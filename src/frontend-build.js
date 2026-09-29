@@ -3,6 +3,7 @@ import { execFile as execFileCallback } from "node:child_process"
 import { promisify } from "node:util"
 import fs from "node:fs/promises"
 import path from "node:path"
+import { ProxyAgent } from "undici"
 import { withLock } from "./security.js"
 
 const execFile = promisify(execFileCallback)
@@ -161,8 +162,19 @@ export async function frontendBuildInfo(pluginDir) {
   } catch { return null }
 }
 
-async function installLatestFrontend(pluginDir, { fetchImpl = globalThis.fetch, execute = execFile, rename = fs.rename, backupDir = path.join(pluginDir, ".elia-admin-panel-previous-out") } = {}) {
+async function installLatestFrontend(pluginDir, options = {}) {
+  const { fetchImpl = globalThis.fetch, proxy, ...buildOptions } = options
   if (typeof fetchImpl !== "function") throw new Error("当前 Node.js 不支持下载前端构建")
+  const dispatcher = proxy ? new ProxyAgent(proxy) : null
+  const requestFetch = dispatcher ? (url, init) => fetchImpl(url, { ...init, dispatcher }) : fetchImpl
+  try {
+    return await installLatestFrontendWithFetch(pluginDir, { ...buildOptions, fetchImpl: requestFetch })
+  } finally {
+    await dispatcher?.close()
+  }
+}
+
+async function installLatestFrontendWithFetch(pluginDir, { fetchImpl, execute = execFile, rename = fs.rename, backupDir = path.join(pluginDir, ".elia-admin-panel-previous-out") } = {}) {
   const outputDir = path.join(pluginDir, "out")
   const { release, asset, assetUrl } = await getLatestAsset(fetchImpl)
   const version = release.tag_name || asset.name

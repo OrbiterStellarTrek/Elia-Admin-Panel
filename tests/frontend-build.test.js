@@ -4,6 +4,7 @@ import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { ProxyAgent } from "undici"
 import { ensureFrontendBuild, frontendBuildInfo, updateFrontendBuild } from "../src/frontend-build.js"
 
 const releaseApi = "https://api.github.com/repos/OrbiterStellarTrek/Elia-Admin-Panel/releases/latest"
@@ -114,8 +115,10 @@ test("拒绝校验通过但包含路径穿越的归档", async () => {
 
 function updateFixture({ content = "new frontend", bytes = archive, release = latestRelease(), types = "-rw-r--r-- 0 user group 12 Jan 1 00:00 index.html\n" } = {}) {
   const requests = []
-  const fetchImpl = async url => {
+  const requestOptions = []
+  const fetchImpl = async (url, options) => {
     requests.push(url)
+    requestOptions.push(options)
     return url === releaseApi ? response({ json: release }) : response({ body: bytes, url })
   }
   const execute = async (_command, args) => {
@@ -127,8 +130,20 @@ function updateFixture({ content = "new frontend", bytes = archive, release = la
     await fs.writeFile(path.join(destination, "_next/static/chunks/app.js"), content)
     return { stdout: "" }
   }
-  return { fetchImpl, execute, requests }
+  return { fetchImpl, execute, requests, requestOptions }
 }
+
+test("前端更新的 Release 查询和归档下载共用获批代理", async () => {
+  const pluginDir = await makePluginDir()
+  try {
+    const fixture = updateFixture()
+    await updateFrontendBuild(pluginDir, { ...fixture, proxy: "http://127.0.0.1:7890/" })
+    assert.deepEqual(fixture.requests, [releaseApi, assetUrl])
+    const dispatcher = fixture.requestOptions[0].dispatcher
+    assert.ok(dispatcher instanceof ProxyAgent)
+    assert.strictEqual(fixture.requestOptions[1].dispatcher, dispatcher)
+  } finally { await fs.rm(pluginDir, { recursive: true, force: true }) }
+})
 
 test("手动更新已有构建，摘要相同跳过下载，本地内容损坏时重新安装", async () => {
   const pluginDir = await makePluginDir()
