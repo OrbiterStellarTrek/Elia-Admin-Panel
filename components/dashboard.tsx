@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { Collapse, useExitPresence } from "@/components/ui/motion"
 import { Toast } from "@/components/ui/toast"
 import { FieldHelp } from "@/components/ui/field-help"
+import { ConfirmPopover } from "@/components/ui/confirm-popover"
 import { FrontendUpdater } from "@/components/frontend-updater"
 import * as Dialog from "@radix-ui/react-dialog"
 import Cropper, { type Area } from "react-easy-crop"
@@ -481,6 +482,10 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const sidebarPresent = useExitPresence(sidebarOpen)
   const [sidebarCollapsed, setSidebarCollapsed] = useBrowserBooleanPreference("mainSidebarCollapsed")
+  const [restartAvailable, setRestartAvailable] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [restartAnchor, setRestartAnchor] = useState<HTMLButtonElement | null>(null)
+  const closeRestartConfirmation = useCallback(() => setRestartAnchor(null), [])
   const api: Api = useCallback((url, init) => request(url, init), [])
   const confirm = useCallback<Confirm>((message: string) => new Promise<boolean>(resolve => {
     if (confirmationResolver.current) {
@@ -551,15 +556,31 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }, [])
 
   useEffect(() => {
+    if (!authenticated) return
+    let active = true
+    const refresh = () => api("/api/status")
+      .then(result => { if (active) setRestartAvailable(Boolean(result.restartAvailable)) })
+      .catch(() => { if (active) setRestartAvailable(false) })
+    refresh()
+    const timer = window.setInterval(refresh, 30000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [authenticated, api])
+
+  useEffect(() => { setRestartAnchor(null) }, [section, sidebarCollapsed, sidebarOpen, authenticated])
+
+  useEffect(() => {
     let active = true
     const quickCode = window.location.hash.match(/^#\/(?:ml|quick)\/([^/?#]+)/)?.[1]
     const statusRequest = request("/api/auth/status")
       .then(result => {
         if (active) {
           setLoginImageApi(result.loginImageApi || "https://t.alcy.cc/moez")
-          if (result.securityEntranceConfigured === false) {
+          if (process.env.NODE_ENV !== "development" && result.securityEntranceConfigured === false) {
             setSecurityEntranceWarningDeadline(Date.now() + SECURITY_ENTRANCE_WARNING_MS)
             setSecurityEntranceWarningSeconds(30)
+          } else {
+            setSecurityEntranceWarningDeadline(null)
+            setSecurityEntranceWarningExiting(false)
           }
         }
         return result
@@ -631,6 +652,15 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
     setAuthenticated(false)
   }
 
+  async function restart() {
+    setRestartAnchor(null)
+    if (restarting || !restartAvailable) return
+    setRestarting(true)
+    try { const result = await api("/api/runtime/restart", { method: "POST", body: "{}" }); notify("success", result.message || "重启请求已发送") }
+    catch (reason) { notify("error", (reason as Error).message) }
+    finally { setRestarting(false) }
+  }
+
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
       <aside data-open={sidebarOpen} data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.06] bg-[linear-gradient(180deg,#1f212b_0%,#16171f_100%)] text-slate-100 shadow-2xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
@@ -653,6 +683,10 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             })}
           </nav>
           <div className="mt-auto space-y-3 px-1 pb-3">
+            <div className="border-t border-white/10 pt-3">
+              <div className="mb-1 px-3 text-[10px] font-medium text-slate-500">进程操作</div>
+              <button type="button" aria-label="重启 Bot" title={restartAvailable ? "重启 Bot" : "未检测到 ksr 或 PM2 守护程序"} aria-haspopup="dialog" aria-expanded={restartAnchor !== null} disabled={!restartAvailable || restarting} onClick={event => { const anchor = event.currentTarget; setRestartAnchor(current => current === anchor ? null : anchor) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-40">{restarting ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <RefreshCw className="size-4 shrink-0" />}重启 Bot</button>
+            </div>
             <button aria-label="退出登录" onClick={logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4 shrink-0" />退出登录</button>
             <div className="px-3 text-[10px] text-slate-600">ELIAADMINPANEL <span className="float-right">0.1.0</span></div>
             <div className="-mx-1 hidden border-t border-white/10 pt-2 md:block"><button aria-label="收起侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(true)} className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-xs font-medium text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200"><ChevronLeft className="size-4" />收起</button></div>
@@ -668,6 +702,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             })}
           </nav>
           <div className="mt-auto w-full space-y-2 border-t border-white/10 pt-2">
+            <button type="button" title={restartAvailable ? "进程操作：重启 Bot" : "进程操作：未检测到 ksr 或 PM2 守护程序"} aria-label="重启 Bot" aria-haspopup="dialog" aria-expanded={restartAnchor !== null} disabled={!restartAvailable || restarting} onClick={event => { const anchor = event.currentTarget; setRestartAnchor(current => current === anchor ? null : anchor) }} className="grid h-10 w-full place-items-center rounded-lg text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200 disabled:cursor-not-allowed disabled:opacity-40">{restarting ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}</button>
             <button title="退出登录" aria-label="退出登录" onClick={logout} className="grid h-10 w-full place-items-center rounded-lg text-slate-400 transition hover:bg-white/5 hover:text-white"><LogOut className="size-4" /></button>
             <button title="展开侧边栏" aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(false)} className="grid h-10 w-full place-items-center rounded-lg text-indigo-300 transition hover:bg-white/5 hover:text-indigo-200"><ChevronRight className="size-4" /></button>
           </div>
@@ -678,7 +713,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
         <main key={section} data-motion-page={section} className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-0 pt-16 sm:px-6 md:pt-0 lg:px-9" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
-          {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
+          {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} confirm={confirm} />}
@@ -691,6 +726,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         {authenticated && securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
         {notice && <Toast exiting={notice.exiting} onExited={() => setNotice(current => current?.exiting ? null : current)} aria-live="polite" className={`flex items-start gap-2.5 rounded-lg border bg-white px-4 py-3 text-sm shadow-xl ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5 shrink-0">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span><span className="min-w-0 break-words [overflow-wrap:anywhere]">{notice.message}</span></Toast>}
       </div>}
+      {restartAnchor && <ConfirmPopover anchor={restartAnchor} title="重启 Bot？" message="当前运行任务可能会中断。确定要重启吗？" confirmLabel="确认重启" onCancel={closeRestartConfirmation} onConfirm={restart} />}
       <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open) resolveConfirmation(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -877,23 +913,15 @@ function Metric({ icon: Icon, label, value, detail, tone = "indigo" }: { icon: t
   return <Card><CardContent className="flex items-start justify-between p-5"><div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-2 text-[23px] font-semibold tracking-tight">{value}</div><div className="mt-1 text-[11px] text-muted-foreground">{detail}</div></div><div className={`grid size-10 place-items-center rounded-xl ${palette[tone]}`}><Icon className="size-[18px]" /></div></CardContent></Card>
 }
 
-function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; confirm: Confirm; navigate: (section: Section, accountId?: string) => void }) {
+function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: (section: Section, accountId?: string) => void }) {
   const [status, setStatus] = useState<any>(null)
   const [error, setError] = useState("")
   const [refreshing, setRefreshing] = useState(false)
-  const [restarting, setRestarting] = useState(false)
   const refresh = useCallback(async () => {
     setRefreshing(true)
     try { setStatus(await api("/api/status")); setError("") } catch (reason) { setError((reason as Error).message) } finally { setRefreshing(false) }
   }, [api])
   useEffect(() => { refresh(); const timer = window.setInterval(refresh, 15000); return () => window.clearInterval(timer) }, [refresh])
-  async function restart() {
-    if (!await confirm("确定要重启 Bot 吗？当前运行任务可能会中断。")) return
-    setRestarting(true)
-    try { const result = await api("/api/runtime/restart", { method: "POST", body: "{}" }); notify("success", result.message || "重启请求已发送") }
-    catch (reason) { notify("error", (reason as Error).message) }
-    finally { setRestarting(false) }
-  }
   return <>
     <PageIntro actions={[{ label: "刷新状态", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新状态" title="刷新状态" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新状态"}</Button> }]} />
     {error && <div className="mb-5"><ErrorState message={error} /></div>}
@@ -936,7 +964,6 @@ function Overview({ api, notify, confirm, navigate }: { api: Api; notify: any; c
           { icon: FileCode2, title: "浏览工作区文件", desc: "查看并编辑文本资源文件", section: "files" as Section },
           { icon: TerminalSquare, title: "查看运行日志", desc: "定位近期错误与命令记录", section: "logs" as Section },
         ].map(item => <button key={item.title} onClick={() => navigate(item.section)} className="group flex items-center gap-3 rounded-xl border border-border/80 p-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50/40"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-slate-50 text-indigo-600 group-hover:bg-white"><item.icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium">{item.title}</span><span className="mt-1 block text-[10px] text-muted-foreground">{item.desc}</span></span><ChevronRight className="size-4 text-slate-300 group-hover:text-indigo-500" /></button>)}</CardContent></Card>
-        <Card className="border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-white"><CardHeader><div className="flex items-center gap-2"><div className="grid size-8 place-items-center rounded-xl bg-indigo-100 text-indigo-600"><Sparkles className="size-4" /></div><CardTitle>进程操作</CardTitle></div><CardDescription>通过当前进程守护程序执行 Bot 重启</CardDescription></CardHeader><CardContent><Button variant="outline" className="w-full border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50" disabled={!status?.restartAvailable || restarting} onClick={restart}>{restarting ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}重启 Bot {status?.restartAvailable ? "" : "（未检测到守护程序）"}</Button>{!status?.restartAvailable && <p className="mt-2.5 text-[10px] leading-4 text-muted-foreground">仅在使用 ksr 或 PM2 托管时启用，避免意外结束未托管的进程。</p>}</CardContent></Card>
       </div>
     </div>
   </>
