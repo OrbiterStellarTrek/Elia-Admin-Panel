@@ -2494,6 +2494,8 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
 function MessageDebugger({ api }: { api: Api }) {
   const [mobileView, setMobileView] = useState<"compose" | "history">("compose")
   const [messageType, setMessageType] = useState<"private" | "group">("private")
+  const [isMaster, setIsMaster] = useState(true)
+  const [isGroupAdmin, setIsGroupAdmin] = useState(true)
   const [userId, setUserId] = useState("55555")
   const [groupId, setGroupId] = useState("")
   const [message, setMessage] = useState("")
@@ -2555,7 +2557,7 @@ function MessageDebugger({ api }: { api: Api }) {
     try {
       const result = await api("/api/debug/message", {
         method: "POST",
-        body: JSON.stringify({ message, userId, messageType, groupId }),
+        body: JSON.stringify({ message, userId, messageType, groupId, isMaster, isGroupAdmin }),
       })
       setHistory(old => [...old, {
         id: `${Date.now()}-${Math.random()}`,
@@ -2583,21 +2585,30 @@ function MessageDebugger({ api }: { api: Api }) {
           <ToggleGroupItem value="history" className="rounded-lg px-3 py-2 text-xs font-medium transition">调试记录</ToggleGroupItem>
         </ToggleGroup>
       </div>
-      <section className={`${mobileView === "compose" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-y-auto border-b border-border bg-card px-4 py-4 sm:px-7 sm:py-5 xl:border-b-0 xl:border-r-0 xl:px-8 xl:py-7`}>
+      <section className={`${mobileView === "compose" ? "flex" : "hidden xl:flex"} min-h-0 min-w-0 flex-col overflow-hidden border-b border-border bg-card px-4 py-4 sm:px-7 sm:py-5 xl:border-b-0 xl:border-r-0 xl:px-8 xl:py-7`}>
         <div className="mb-5 border-b border-border pb-4"><CardTitle className="text-base">发送调试消息</CardTitle><CardDescription>选择私聊或群聊，填写模拟发送方 ID 与消息内容。</CardDescription></div>
-        <form className="space-y-4" onSubmit={sendMessage}>
+        <form className="scrollbar-hidden mb-5 min-h-0 flex-1 space-y-4 overflow-y-auto" onSubmit={sendMessage}>
           <ToggleGroup type="single" value={messageType} onValueChange={value => { if (value) setMessageType(value as "group" | "private") }} className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" aria-label="消息类型">
             {([["private", "私聊"], ["group", "群聊"]] as const).map(([type, label]) => <ToggleGroupItem value={type} key={type} className={`rounded-lg px-3 py-2 text-xs font-medium transition ${messageType === type ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</ToggleGroupItem>)}
           </ToggleGroup>
-          <div className={`grid gap-3 ${messageType === "group" ? "sm:grid-cols-2" : ""}`}>
+          <div className={`grid grid-cols-1 gap-x-3 transition-[row-gap] duration-300 ease-out ${messageType === "group" ? "gap-y-3" : "gap-y-0"}`}>
             <div className="space-y-2"><Label htmlFor="debug-user-id">发送方 ID</Label><Input id="debug-user-id" value={userId} maxLength={80} onChange={event => setUserId(event.target.value)} placeholder="例如：123456789" /></div>
-            {messageType === "group" && <div className="space-y-2"><Label htmlFor="debug-group-id">群号</Label><Input id="debug-group-id" value={groupId} maxLength={80} onChange={event => setGroupId(event.target.value)} placeholder="例如：987654321" /></div>}
+            <div className="min-w-0"><Collapse open={messageType === "group"}><div className="space-y-2"><Label htmlFor="debug-group-id">群号</Label><Input id="debug-group-id" value={groupId} maxLength={80} onChange={event => setGroupId(event.target.value)} placeholder="例如：987654321" /></div></Collapse></div>
+          </div>
+          <div className="rounded-xl border border-border px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="space-y-0.5"><Label htmlFor="debug-is-master" className="text-xs">以主人权限运行</Label><p className="text-[10px] text-muted-foreground">模拟消息按主人身份处理</p></div>
+              <Switch id="debug-is-master" checked={isMaster} onCheckedChange={setIsMaster} />
+            </div>
+            <Collapse open={messageType === "group"}><div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+              <div className="space-y-0.5"><Label htmlFor="debug-is-group-admin" className="text-xs">以群主/管理员身份运行</Label><p className="text-[10px] text-muted-foreground">关闭后按普通群成员处理</p></div>
+              <Switch id="debug-is-group-admin" checked={isGroupAdmin} onCheckedChange={setIsGroupAdmin} />
+            </div></Collapse>
           </div>
           <div className="space-y-2"><Label htmlFor="debug-message">消息内容</Label><Textarea id="debug-message" className="min-h-24 resize-y font-mono text-sm leading-6 sm:min-h-36" value={message} maxLength={5000} onChange={event => setMessage(event.target.value)} placeholder="输入要交给插件处理的文本消息…" onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); event.currentTarget.form?.requestSubmit() } }} /><div className="flex justify-between text-[10px] text-muted-foreground"><span>支持以 # 开头的命令与普通聊天文本</span><span>{message.length}/5000</span></div></div>
           {error && <ErrorState message={error} />}
           <Button className="w-full" disabled={busy || !message.trim() || !userId.trim() || (messageType === "group" && !groupId.trim())}>{busy ? <LoaderCircle className="animate-spin" /> : <Send />}送入插件处理链</Button>
         </form>
-        <div className="mt-5 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/40 p-3 text-[10px] leading-5 text-amber-900 dark:text-amber-300"><div className="font-semibold">调试权限</div><p className="mt-1">模拟事件按标准输入方式以主人身份运行；群聊同时模拟群主/管理员。插件命令可能执行实际操作，请确认输入内容。</p><p className="mt-1">事件回复会在此捕获，不通过真实 QQ 会话发送；插件若自行调用真实 Bot 或外部服务，仍可能产生实际副作用。</p></div>
       </section>
       <div
         role="separator"

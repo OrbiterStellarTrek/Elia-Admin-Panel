@@ -337,6 +337,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 999px; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
+.scrollbar-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hidden::-webkit-scrollbar { display: none; }
 
 .file-manager-fullscreen {
   width: 100%;

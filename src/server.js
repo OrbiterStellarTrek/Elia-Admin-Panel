@@ -490,7 +490,7 @@ async function normalizeDebugNode(node, index, depth, audioBudget, forwardContex
   }
 }
 
-function createPanelDebugEvent({ message, userId, messageType, groupId, replies }) {
+function createPanelDebugEvent({ message, userId, messageType, groupId, isMaster, isGroupAdmin, replies }) {
   const bot = global.Bot
   if (!bot) throw Object.assign(new Error("Yunzai Bot 尚未初始化"), { status: 503 })
   let event
@@ -558,9 +558,9 @@ function createPanelDebugEvent({ message, userId, messageType, groupId, replies 
       user_id: userId,
       card: "面板调试",
       nickname: "面板调试",
-      role: messageType === "group" ? "owner" : "",
+      role: messageType === "group" ? isGroupAdmin ? "owner" : "member" : "",
     },
-    isMaster: true,
+    isMaster,
     toString: () => message,
     reply: sendDebugReply,
     recall: async () => ({ ok: true }),
@@ -574,8 +574,8 @@ function createPanelDebugEvent({ message, userId, messageType, groupId, replies 
       user_id: userId,
       nickname: info.nickname,
       card: info.card,
-      is_owner: true,
-      is_admin: true,
+      is_owner: isGroupAdmin,
+      is_admin: isGroupAdmin,
       getAvatarUrl: () => "",
     }
     event.group_id = groupId
@@ -585,7 +585,7 @@ function createPanelDebugEvent({ message, userId, messageType, groupId, replies 
       group_id: groupId,
       name: event.group_name,
       mute_left: 0,
-      is_owner: true,
+      is_owner: isGroupAdmin,
       pickMember: () => member,
       sendMsg: sendDebugReply,
       recallMsg: async () => ({ ok: true }),
@@ -2075,6 +2075,8 @@ export async function startAdminPanel() {
   app.post("/api/debug/message", asyncRoute(async (req, res) => {
     const message = typeof req.body?.message === "string" ? req.body.message : ""
     const messageType = req.body?.messageType === "group" ? "group" : "private"
+    const isMaster = req.body?.isMaster !== false
+    const isGroupAdmin = req.body?.isGroupAdmin !== false
     const userId = String(req.body?.userId || "").trim()
     const groupId = String(req.body?.groupId || "").trim()
     const validId = id => id.length > 0 && id.length <= 80 && !/[\s\x00-\x1f]/.test(id)
@@ -2083,7 +2085,7 @@ export async function startAdminPanel() {
     if (messageType === "group" && !validId(groupId)) return res.status(400).json({ error: "群聊调试需要填写有效的群号" })
 
     const replies = []
-    const event = createPanelDebugEvent({ message, userId, messageType, groupId, replies })
+    const event = createPanelDebugEvent({ message, userId, messageType, groupId, isMaster, isGroupAdmin, replies })
     safeLogger("mark", `[面板调试输入][${messageType === "group" ? `群聊 ${groupId}` : "私聊"}][${userId}] ${message.slice(0, 200)}`)
     await pluginsLoader.deal(event)
     res.json({ ok: true, replies, message: replies.length ? "消息处理完成，已捕获插件回复" : "消息发送了，但是没有插件处理" })
