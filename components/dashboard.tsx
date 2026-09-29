@@ -36,6 +36,7 @@ const MonacoCodeEditor = dynamic(
 
 type SecretInputProps = Omit<React.ComponentProps<typeof Input>, "type">
 const MAX_AVATAR_BYTES = 1_500_000
+const SECURITY_ENTRANCE_WARNING_MS = 30_000
 
 function SecretInput({ className, ...props }: SecretInputProps) {
   const [visible, setVisible] = useState(false)
@@ -328,7 +329,30 @@ function ErrorState({ message }: { message: string }) {
   return <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><CircleHelp className="mt-0.5 size-4 shrink-0" />{message}</div>
 }
 
-function Login({ onLogin, initialError = "", imageApi }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string }) {
+type SecurityEntranceWarning = { seconds: number; onDismiss: () => void }
+
+function SecurityEntranceWarningToast({ seconds, onDismiss }: SecurityEntranceWarning) {
+  return <div role="alert" aria-live="assertive" className="admin-toast flex w-full items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-xl">
+    <CircleHelp className="mt-0.5 size-4 shrink-0 text-amber-700" />
+    <div className="min-w-0 flex-1">
+      <p className="font-semibold">尚未配置安全入口</p>
+      <p className="mt-1 text-xs leading-5 text-amber-900">请前往“插件控制 → EliaAdminPanel → 登录安全”设置安全入口路径，避免登录页与登录接口直接暴露。</p>
+      <p className="mt-1 text-[11px] text-amber-800">{seconds > 0 ? `${seconds} 秒后可关闭` : "现在可以关闭此提醒"}</p>
+    </div>
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={seconds > 0 ? `${seconds} 秒后可关闭安全入口提醒` : "关闭安全入口提醒"}
+      title={seconds > 0 ? `${seconds} 秒后可关闭` : "关闭提醒"}
+      disabled={seconds > 0}
+      className="size-8 shrink-0 text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+      onClick={onDismiss}
+    ><X /></Button>
+  </div>
+}
+
+function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string; securityEntranceWarning: SecurityEntranceWarning | null }) {
   const [mode, setMode] = useState<"code" | "password">("code")
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
@@ -426,7 +450,10 @@ function Login({ onLogin, initialError = "", imageApi }: { onLogin: (expiresAt: 
         </CardContent>
       </Card>
       </div>
-      {codeToast && <div role="status" className="admin-toast fixed right-4 top-4 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-700 shadow-xl sm:right-6 sm:top-6"><Check className="mt-0.5 size-4 shrink-0" />{codeToast}</div>}
+      {(codeToast || securityEntranceWarning) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col gap-2 sm:right-6 sm:top-6">
+        {securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
+        {codeToast && <div role="status" className="admin-toast flex w-full items-start gap-2.5 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-700 shadow-xl"><Check className="mt-0.5 size-4 shrink-0" />{codeToast}</div>}
+      </div>}
     </main>
   )
 }
@@ -439,6 +466,8 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const [section, setSection] = useState<Section>(initialSection)
   const [fileManagerPath, setFileManagerPath] = useState(() => typeof window === "undefined" ? "." : routeQuery("path") || ".")
   const [notice, setNotice] = useState<Notice>(null)
+  const [securityEntranceWarningDeadline, setSecurityEntranceWarningDeadline] = useState<number | null>(null)
+  const [securityEntranceWarningSeconds, setSecurityEntranceWarningSeconds] = useState(30)
   const [confirmation, setConfirmation] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
   const noticeExitTimer = useRef<number | null>(null)
@@ -522,7 +551,13 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
     const quickCode = window.location.hash.match(/^#\/(?:ml|quick)\/([^/?#]+)/)?.[1]
     const statusRequest = request("/api/auth/status")
       .then(result => {
-        if (active) setLoginImageApi(result.loginImageApi || "https://t.alcy.cc/moez")
+        if (active) {
+          setLoginImageApi(result.loginImageApi || "https://t.alcy.cc/moez")
+          if (result.securityEntranceConfigured === false) {
+            setSecurityEntranceWarningDeadline(Date.now() + SECURITY_ENTRANCE_WARNING_MS)
+            setSecurityEntranceWarningSeconds(30)
+          }
+        }
         return result
       })
       .catch(() => null)
@@ -552,6 +587,14 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }, [notify])
 
   useEffect(() => {
+    if (securityEntranceWarningDeadline === null) return
+    const update = () => setSecurityEntranceWarningSeconds(Math.max(0, Math.ceil((securityEntranceWarningDeadline - Date.now()) / 1000)))
+    update()
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [securityEntranceWarningDeadline])
+
+  useEffect(() => {
     if (!authenticated || !sessionExpiresAt) return
     const remaining = sessionExpiresAt - Date.now()
     if (remaining <= 0) {
@@ -567,8 +610,17 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
     return () => window.clearTimeout(timer)
   }, [authenticated, sessionExpiresAt])
 
+  function dismissSecurityEntranceWarning() {
+    if (securityEntranceWarningDeadline === null || Date.now() < securityEntranceWarningDeadline) return
+    setSecurityEntranceWarningDeadline(null)
+  }
+
+  const securityEntranceWarning = securityEntranceWarningDeadline === null
+    ? null
+    : { seconds: securityEntranceWarningSeconds, onDismiss: dismissSecurityEntranceWarning }
+
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
-  if (!authenticated) return <Login imageApi={loginImageApi} initialError={loginError} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
+  if (!authenticated) return <Login imageApi={loginImageApi} initialError={loginError} securityEntranceWarning={securityEntranceWarning} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
 
   async function logout() {
     try { await api("/api/auth/logout", { method: "POST" }) } catch {}
@@ -631,7 +683,10 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
           {section === "debug" && <MessageDebugger api={api} />}
         </main>
       </div>
-      {notice && <div className={`admin-toast fixed right-4 top-4 z-50 flex max-w-[min(480px,calc(100vw-32px))] items-start gap-2.5 rounded-2xl border bg-white px-4 py-3 text-sm shadow-xl sm:right-6 sm:top-6 ${notice.exiting ? "admin-toast-out" : ""} ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
+      {(notice || (authenticated && securityEntranceWarningDeadline !== null)) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col gap-2 sm:right-6 sm:top-6">
+        {authenticated && securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
+        {notice && <div className={`admin-toast flex w-full items-start gap-2.5 rounded-lg border bg-white px-4 py-3 text-sm shadow-xl ${notice.exiting ? "admin-toast-out" : ""} ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
+      </div>}
       <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open) resolveConfirmation(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>

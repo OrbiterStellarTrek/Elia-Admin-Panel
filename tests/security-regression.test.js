@@ -20,6 +20,7 @@ const timeout = promise => Promise.race([promise, delay(6000).then(() => { throw
 
 test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保存冲突", { timeout: 120_000 }, async t => {
   const previousCwd = process.cwd(), previousBot = global.Bot, previousLogger = global.logger
+  const previousSecurityEntrance = process.env.SECURITY_ENTRANCE
   const fixture = await fs.mkdtemp(path.join(os.tmpdir(), "elia-security-regression-"))
   const sockets = new Set(), logs = [], cloneWaiters = []
   const devMode = process.env.PANEL_SECURITY_DEV === "1"
@@ -54,6 +55,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     ws.once("unexpected-response", (_req, response) => { response.resume(); finish(response.statusCode); ws.terminate() })
   })
   try {
+    delete process.env.SECURITY_ENTRANCE
     for (const folder of ["plugins/EliaAdminPanel", "plugins/example", "config/config", "config/default_config", "data/elia-admin-panel", "logs"]) await fs.mkdir(path.join(fixture, folder), { recursive: true })
     await fs.writeFile(path.join(fixture, "package.json"), '{"type":"module"}')
     await fs.writeFile(path.join(fixture, "config/config/other.yaml"), "# 保留注释\nmasterQQ: [10001]\n")
@@ -67,6 +69,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     }
     const port = await new Promise(resolve => { const server = net.createServer().listen(0, "127.0.0.1", () => { const port = server.address().port; server.close(() => resolve(port)) }) })
     const password = crypto.randomBytes(24).toString("hex"), salt = crypto.randomBytes(16)
+    let currentPassword = password
     const configFile = path.join(fixture, "data/elia-admin-panel/config.yaml")
     await fs.writeFile(configFile, YAML.stringify({ host: "127.0.0.1", port, devMode, trustedProxies: ["127.0.0.1/32"], loginImageApi: "https://images.example.test/random", passwordSalt: salt.toString("hex"), passwordHash: crypto.pbkdf2Sync(password, salt, 310_000, 32, "sha256").toString("hex"), passwordIterations: 310_000 }))
     const cfg = { config: {}, bot: {}, getConfig() { return {} }, getGroup() { return {} } }
@@ -77,9 +80,10 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     const extra = `
 export function resetAttempts() { loginAttempts.clear(); }
 export function attemptCounts() { return [...loginAttempts.values()].map(v => v.count); }
+export function expireSecurityEntranceTokens() { for (const state of securityEntranceTokens.values()) state.expiresAt = Date.now() - 1; }
 export function stopSessions() { sessions.clear(); }
 export async function reloadSessions() { sessions.clear(); await loadPersistedSessions(); }
-export { issueSession, verifyPanelPassword, sendLogPacket };
+export { issueSession, safeLogger, verifyPanelPassword, sendLogPacket };
 export async function stopFixture() { configEvents.removeListener("changed", applySecurityConfig); logDirectoryWatcher?.close(); for(const timer of logWatchTimers.values()) clearTimeout(timer); clearInterval(logHeartbeatTimer); for(const socket of logWebSocketServer?.clients || []) socket.terminate(); for(const socket of devConnections.keys()) socket.destroy(); logWebSocketServer?.close(); stopNextDevServer(); if(expressServer) await new Promise(resolve => expressServer.close(resolve)); }
 `
     module = new vm.SourceTextModule(code + extra, { identifier: pathToFileURL(serverFile).href, initializeImportMeta(meta) { meta.url = pathToFileURL(serverFile).href }, importModuleDynamically: specifier => import(specifier) })
@@ -95,8 +99,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     })
     await module.evaluate(); await module.namespace.startAdminPanel()
     const base = `http://127.0.0.1:${port}`, wsBase = base.replace("http:", "ws:")
-    const call = async (url, body, cookie = "", method = body === undefined ? "GET" : "POST", headers = {}) => {
-      const response = await fetch(base + url, { method, signal: AbortSignal.timeout(30_000), headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+    const call = async (url, body, cookie = "", method = body === undefined ? "GET" : "POST", headers = {}, redirect = "follow") => {
+      const response = await fetch(base + url, { method, redirect, signal: AbortSignal.timeout(30_000), headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
       const data = await response.json().catch(() => ({}))
       return { status: response.status, data, cookie: response.headers.get("set-cookie") }
     }
@@ -208,6 +212,7 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.equal(changed.code, 0)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie)).status, 401)
       const final = await call("/api/auth/login", { password: newPassword + "2" }); assert.equal(final.status, 200)
+      currentPassword = newPassword + "2"
       cookie = final.cookie.split(";")[0]
       const oldSecretSocket = await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie } })
       const secretClosed = new Promise(resolve => oldSecretSocket.ws.once("close", resolve))
@@ -267,6 +272,72 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.equal((await call("/api/auth/logout", {}, cookie)).status, 200)
       await timeout(close)
     })
+    await t.test("安全入口隐藏页面与全部 API，签发随机令牌并在过期或轮换后拒绝", async () => {
+      const entrance = "a8F3kLm92P_fixture"
+      const entranceCookie = (token) => `security_entrance=${token}`
+      process.env.SECURITY_ENTRANCE = entrance
+      const { supportPanel } = await import("../elia.support.js")
+      const support = supportPanel()
+      const saveSupportConfig = data => support.configInfo.setConfigData(data, { Result: { ok: (_data, message) => ({ code: 0, message }), error: message => ({ code: -1, message }) } })
+      let supportData = await support.configInfo.getConfigData()
+      assert.equal(supportData.securityEntrance, entrance)
+      assert.equal(support.configInfo.schemas.find(schema => schema.field === "securityEntrance").component, "Input")
+      assert.equal((await saveSupportConfig({ ...supportData, securityEntrance: "invalid/path" })).code, -1)
+      assert.equal((await saveSupportConfig({ ...supportData, securityEntrance: entrance })).code, 0)
+
+      for (const [url, body, method] of [["/", undefined, "GET"], ["/login", undefined, "GET"], ["/admin", undefined, "GET"], ["/api/auth/login", { password }, "POST"], ["/api/auth/code/request", {}, "POST"], ["/api/auth/code/check", { code: "invalid" }, "POST"], ["/api/auth/quick", { code: "invalid" }, "POST"], ["/api/files/read?path=package.json", undefined, "GET"]]) {
+        assert.equal((await call(url, body, "", method)).status, 404, url)
+      }
+      assert.equal((await call("/wrong-entrance")).status, 404)
+      assert.equal((await call("/", undefined, entranceCookie("A".repeat(43)))).status, 404)
+      assert.equal((await call(`/${entrance}/extra`)).status, 404)
+
+      const verified = await call(`/${entrance}`, undefined, "", "GET", { "x-forwarded-proto": "https" }, "manual")
+      assert.equal(verified.status, 303)
+      assert.match(verified.cookie, /^security_entrance=[A-Za-z0-9_-]{43};/)
+      assert.notEqual(verified.cookie.split(";")[0].slice("security_entrance=".length), entrance)
+      assert.notEqual(verified.cookie.split(";")[0].slice("security_entrance=".length), Buffer.from(entrance).toString("base64url"))
+      assert.match(verified.cookie, /; HttpOnly;/)
+      assert.match(verified.cookie, /; SameSite=Lax;/)
+      assert.match(verified.cookie, /; Path=\//)
+      assert.match(verified.cookie, /; Max-Age=1200/)
+      assert.match(verified.cookie, /; Secure(?:;|$)/)
+
+      const tokenCookie = verified.cookie.split(";")[0]
+      module.namespace.safeLogger("warn", `SECURITY_ENTRANCE=${entrance} security_entrance=${tokenCookie.slice("security_entrance=".length)}`)
+      assert.ok(logs.every(line => !line.includes(entrance) && !line.includes(tokenCookie.slice("security_entrance=".length))))
+      assert.notEqual((await call("/", undefined, tokenCookie)).status, 404)
+      assert.notEqual((await call("/login", undefined, tokenCookie)).status, 404)
+      const entranceLogin = await call("/api/auth/login", { password: currentPassword }, tokenCookie)
+      assert.equal(entranceLogin.status, 200)
+      const sessionCookie = entranceLogin.cookie.split(";")[0]
+      assert.equal((await wsConnect(wsBase + "/api/logs/ws")).status, 404)
+      assert.equal((await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie: tokenCookie } })).status, 401)
+      const authenticatedSocket = await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie: sessionCookie } })
+      assert.equal(authenticatedSocket.status, 101)
+      authenticatedSocket.ws.terminate()
+      if (devMode) {
+        assert.equal((await wsConnect(wsBase + "/_next/hmr", { headers: { origin: base } })).status, 404)
+        const entranceHmr = await wsConnect(wsBase + "/_next/hmr", { headers: { origin: base, cookie: tokenCookie } })
+        assert.equal(entranceHmr.status, 101)
+        entranceHmr.ws.terminate()
+      }
+
+      module.namespace.expireSecurityEntranceTokens()
+      assert.equal((await call("/", undefined, tokenCookie)).status, 404)
+      assert.notEqual((await call("/", undefined, sessionCookie)).status, 404)
+      assert.equal((await call("/api/auth/status", undefined, sessionCookie)).status, 200)
+
+      const rotatedEntrance = "new-secret-entry_fixture"
+      supportData = await support.configInfo.getConfigData()
+      assert.equal((await saveSupportConfig({ ...supportData, securityEntrance: rotatedEntrance })).code, 0)
+      assert.equal((await support.configInfo.getConfigData()).securityEntrance, rotatedEntrance)
+      assert.equal((await call("/", undefined, tokenCookie)).status, 404)
+      assert.notEqual((await call("/", undefined, sessionCookie)).status, 404)
+      assert.equal((await call(`/${entrance}`, undefined, "", "GET", {}, "manual")).status, 404)
+      assert.ok(logs.every(line => !line.includes(entrance) && !line.includes(rotatedEntrance) && !line.includes(tokenCookie)))
+      cookie = sessionCookie
+    })
   } finally {
     for (const socket of sockets) socket.terminate()
     await module?.namespace.stopFixture?.()
@@ -275,6 +346,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
     if (devChild?.exitCode === null) devChild.kill()
     await new Promise(resolve => tcpServer ? tcpServer.close(resolve) : resolve())
     process.chdir(previousCwd); global.Bot = previousBot; global.logger = previousLogger
+    if (previousSecurityEntrance === undefined) delete process.env.SECURITY_ENTRANCE
+    else process.env.SECURITY_ENTRANCE = previousSecurityEntrance
     assert.equal(path.dirname(fixture), path.resolve(os.tmpdir()))
     assert.ok(path.basename(fixture).startsWith("elia-security-regression-"))
     await fs.rm(fixture, { recursive: true, force: true })

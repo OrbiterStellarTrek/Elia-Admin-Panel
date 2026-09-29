@@ -48,6 +48,8 @@ const MAX_LOG_TAIL_BYTES = 512 * 1024
 const MAX_LOG_DELTA_BYTES = 2 * 1024 * 1024
 const LOG_FILE_PATTERN = /^(?:error|command)(?:\.\d{4}-\d{2}-\d{2})?\.log$/
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000
+const SECURITY_ENTRANCE_TTL_MS = 20 * 60 * 1000
+const SECURITY_ENTRANCE_MAX_TOKENS = 4096
 const PASSWORD_HASH_ITERATIONS = 310_000
 const DEFAULT_LOGIN_IMAGE_API = "https://t.alcy.cc/moe"
 const ALLOWED_TEXT_EXTENSIONS = new Set([
@@ -77,11 +79,13 @@ const PLUGIN_SCAN_IGNORED_ROOTS = new Set(["system", "other"])
 const BLOCKED_SEGMENTS = new Set([".git", "node_modules", ".next", "out"])
 
 const sessions = new Map()
+const securityEntranceTokens = new Map()
 const debugAudioCache = new Map()
 let debugAudioCacheBytes = 0
 const pluginRuleSnapshotCache = new WeakMap()
 let sessionSecret = ""
 let activeCredentialVersion = ""
+let activeSecurityEntrance = ""
 let securityPolicy = {}
 const devConnections = new Map()
 let sessionStoreWrite = Promise.resolve()
@@ -106,11 +110,14 @@ let warnedInvalidPublicUrl = false
 const logWatchTimers = new Map()
 
 const safeLogger = (level, message) => {
+  const entrances = [securityPolicy.securityEntrance, process.env.SECURITY_ENTRANCE].filter(value => typeof value === "string" && value)
+  const messageWithoutEntrance = entrances.reduce((text, entrance) => text.replaceAll(entrance, "[入口已隐藏]"), String(message))
+  const safeMessage = messageWithoutEntrance.replace(/(security_entrance\s*[:=]\s*)[^\s,;]+/gi, "$1[入口令牌已隐藏]")
   try {
-    if (global.logger?.[level]) global.logger[level](redact(message))
-    else console.log(redact(message))
+    if (global.logger?.[level]) global.logger[level](redact(safeMessage))
+    else console.log(redact(safeMessage))
   } catch {
-    console.log(redact(message))
+    console.log(redact(safeMessage))
   }
 }
 
@@ -804,6 +811,90 @@ function setSessionCookie(req, res, token) {
 function clearSessionCookie(req, res) {
   const secure = securityPolicy.cookieSecure === true || requestIsSecure(req, securityPolicy) ? "; Secure" : ""
   res.setHeader("Set-Cookie", `elia_panel_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure}`)
+}
+
+function timingSafeTextEqual(left, right) {
+  if (typeof left !== "string" || typeof right !== "string") return false
+  const leftHash = hashSecret(left)
+  const rightHash = hashSecret(right)
+  const matches = crypto.timingSafeEqual(leftHash, rightHash)
+  return Buffer.byteLength(left, "utf8") === Buffer.byteLength(right, "utf8") && matches
+}
+
+function configuredSecurityEntrance() {
+  const configured = securityPolicy.securityEntrance
+  if (configured !== undefined && configured !== "" && (typeof configured !== "string" || !/^[A-Za-z0-9_-]{1,256}$/.test(configured))) {
+    throw Object.assign(new Error("安全入口配置无效"), { status: 500 })
+  }
+  const entrance = configured || process.env.SECURITY_ENTRANCE || ""
+  if (typeof entrance !== "string" || (entrance && !/^[A-Za-z0-9_-]{1,256}$/.test(entrance))) throw Object.assign(new Error("安全入口配置无效"), { status: 500 })
+  if (!timingSafeTextEqual(entrance, activeSecurityEntrance)) {
+    securityEntranceTokens.clear()
+    activeSecurityEntrance = entrance
+  }
+  return entrance
+}
+
+function hasValidLoginSession(req) {
+  const token = parseCookies(req.headers.cookie).get("elia_panel_session")
+  return Boolean(token && verifySessionToken(token))
+}
+
+function hasValidEntranceSession(req, entrance = configuredSecurityEntrance()) {
+  if (!entrance) return false
+  const token = parseCookies(req.headers.cookie).get("security_entrance")
+  if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false
+  const tokenHash = hashSecret(token).toString("hex")
+  const state = securityEntranceTokens.get(tokenHash)
+  if (!state) return false
+  if (state.expiresAt <= Date.now()) {
+    securityEntranceTokens.delete(tokenHash)
+    return false
+  }
+  return true
+}
+
+function pruneSecurityEntranceTokens(now = Date.now()) {
+  for (const [tokenHash, state] of securityEntranceTokens) {
+    if (state.expiresAt <= now) securityEntranceTokens.delete(tokenHash)
+  }
+}
+
+function setSecurityEntranceCookie(req, res) {
+  const now = Date.now()
+  pruneSecurityEntranceTokens(now)
+  while (securityEntranceTokens.size >= SECURITY_ENTRANCE_MAX_TOKENS) {
+    securityEntranceTokens.delete(securityEntranceTokens.keys().next().value)
+  }
+  const token = crypto.randomBytes(32).toString("base64url")
+  securityEntranceTokens.set(hashSecret(token).toString("hex"), { expiresAt: now + SECURITY_ENTRANCE_TTL_MS })
+  const secure = securityPolicy.cookieSecure === true || requestIsSecure(req, securityPolicy) ? "; Secure" : ""
+  res.setHeader("Set-Cookie", `security_entrance=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SECURITY_ENTRANCE_TTL_MS / 1000}${secure}`)
+}
+
+function isSecurityEntrancePublicAsset(req) {
+  if (! ["GET", "HEAD"].includes(req.method)) return false
+  let pathname
+  try { pathname = decodeURIComponent(req.path) } catch { return false }
+  if (pathname.includes("\\") || pathname.includes("\0") || path.posix.normalize(pathname) !== pathname || /\.map(?:$|\/)/i.test(pathname)) return false
+  return /^\/_next\/static\//i.test(pathname) || /^\/(?:favicon\.ico|elia\.png)\/?$/i.test(pathname)
+}
+
+function requireSecurityEntrance(req, res, next) {
+  const entrance = configuredSecurityEntrance()
+  if (!entrance || hasValidLoginSession(req) || hasValidEntranceSession(req, entrance)) return next()
+  return res.status(404).end()
+}
+
+function securityEntranceGate(req, res, next) {
+  const entrance = configuredSecurityEntrance()
+  if (!entrance) return next()
+  if (req.method === "GET" && timingSafeTextEqual(req.path, `/${entrance}`)) {
+    setSecurityEntranceCookie(req, res)
+    return res.redirect(303, "/")
+  }
+  if (isSecurityEntrancePublicAsset(req)) return next()
+  return requireSecurityEntrance(req, res, next)
 }
 
 function checkOrigin(req, res, next) {
@@ -1627,7 +1718,8 @@ function attachLogWebSocket(server) {
     })
   })
   server.on("upgrade", async (request, socket, head) => {
-    try { await refreshSecurity() } catch { socket.destroy(); return }
+    let entrance
+    try { await refreshSecurity(); entrance = configuredSecurityEntrance() } catch { socket.destroy(); return }
     let pathname
     try { pathname = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname } catch {
       socket.destroy()
@@ -1642,6 +1734,9 @@ function attachLogWebSocket(server) {
       return
     }
     const sessionToken = token && verifySessionToken(token) ? token : null
+    if (entrance && !sessionToken && !hasValidEntranceSession(request, entrance)) {
+      return socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n")
+    }
     if (!sessionToken && !isDevHmr) {
       socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n")
       socket.destroy()
@@ -1870,6 +1965,7 @@ export async function startAdminPanel() {
     next()
   })
   app.use(asyncRoute(async (req, res, next) => { await refreshSecurity(); next() }))
+  app.use(securityEntranceGate)
   let activeUploads = 0
   app.use((req, res, next) => {
     if (!/^\/api\/(?:files\/upload|plugins\/install-script)\/?$/i.test(req.path)) return next()
@@ -1891,7 +1987,7 @@ export async function startAdminPanel() {
     if (!authenticated && token) {
       clearSessionCookie(req, res)
     }
-    res.json({ authenticated, expiresAt: authenticated ? session.expiresAt : null, loginImageApi: loginImageApi(securityPolicy.loginImageApi) })
+    res.json({ authenticated, expiresAt: authenticated ? session.expiresAt : null, loginImageApi: loginImageApi(securityPolicy.loginImageApi), securityEntranceConfigured: Boolean(configuredSecurityEntrance()) })
   })
   app.post("/api/auth/login", checkOrigin, asyncRoute(async (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || "unknown"

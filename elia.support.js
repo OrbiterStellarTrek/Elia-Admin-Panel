@@ -6,7 +6,7 @@ import { contentVersion, requireVersion, trustedProxy, withBudget } from "./src/
 
 const pluginDir = path.dirname(fileURLToPath(import.meta.url))
 const passwordIterations = 310_000
-const defaultLoginImageApi = "https://t.alcy.cc/moez"
+const defaultLoginImageApi = "https://t.alcy.cc/moe"
 
 function createPasswordCredential(password) {
   return withBudget("password-kdf", 4, () => createPasswordCredentialUnbounded(password))
@@ -53,7 +53,7 @@ export function supportPanel() {
       name: "EliaAdminPanel",
       title: "EliaAdminPanel Web 控制面板",
       description: "独立的 Yunzai Web 管理控制台",
-      author: "EliaAdminPanel",
+      author: "Pimeng & OrbiterStellarTrek",
       link: "",
       icon: "mdi:view-dashboard-outline",
       iconColor: "#6f78d8",
@@ -100,6 +100,13 @@ export function supportPanel() {
         },
         { label: "登录安全", component: "SOFT_GROUP_BEGIN" },
         {
+          field: "securityEntrance",
+          label: "安全入口路径",
+          bottomHelpMessage: "管理入口路径以普通文本显示。仅允许 1 至 256 个字母、数字、- 或 _。留空时回退到 SECURITY_ENTRANCE 环境变量；环境变量也未设置则关闭。修改后立即生效并撤销旧入口令牌。",
+          component: "Input",
+          componentProps: { placeholder: "留空表示关闭", autocomplete: "off" },
+        },
+        {
           field: "password",
           label: "面板密码",
           bottomHelpMessage: "当前密码不会回显。留空表示不修改；填写至少 12 个字符的新密码后保存，服务端会使用独立随机盐和 PBKDF2 哈希保存，不会写入明文。",
@@ -124,6 +131,7 @@ export function supportPanel() {
           devMode: config.devMode === true,
           publicUrl: config.publicUrl || "",
           loginImageApi: config.loginImageApi || defaultLoginImageApi,
+          securityEntrance: config.securityEntrance || process.env.SECURITY_ENTRANCE || "",
           password: "",
           secret: "",
           trustedProxies: (config.trustedProxies || []).join("\n"),
@@ -140,12 +148,14 @@ export function supportPanel() {
         const devMode = data.devMode === undefined ? current.devMode === true : data.devMode === true
         const publicUrl = String(data.publicUrl ?? current.publicUrl ?? "").trim()
         const loginImageApi = String(data.loginImageApi ?? current.loginImageApi ?? defaultLoginImageApi).trim() || defaultLoginImageApi
+        const securityEntrance = String(data.securityEntrance ?? current.securityEntrance ?? process.env.SECURITY_ENTRANCE ?? "").trim()
         const password = String(data.password ?? "")
         const secret = String(data.secret ?? "")
 
         if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return Result.error("监听地址或端口无效")
         if (publicUrl && !validatePublicUrls(publicUrl)) return Result.error("公网访问地址必须是 http(s) 站点根地址，不能包含子路径、查询参数或凭据")
         if (!validLoginImageApi(loginImageApi)) return Result.error("登录随机图 API 必须是有效的 HTTP(S) 地址，且不能包含凭据")
+        if (securityEntrance && !/^[A-Za-z0-9_-]{1,256}$/.test(securityEntrance)) return Result.error("安全入口路径仅允许 1 至 256 个字母、数字、- 或 _")
         if (password && password.length < 12) return Result.error("面板密码至少需要 12 个字符")
         if (password.length > 1024) return Result.error("面板密码不能超过 1024 个字符")
         if (secret && Buffer.byteLength(secret, "utf8") < 32) return Result.error("浏览器会话 Secret 至少需要 32 个 UTF-8 字节")
@@ -153,7 +163,7 @@ export function supportPanel() {
         const trustedProxies = data.trustedProxies === undefined ? current.trustedProxies || [] : String(data.trustedProxies).split(/[,\r\n]+/).map(value => value.trim()).filter(Boolean)
         if (trustedProxies.some(entry => !trustedProxy(entry.split("/")[0], [entry]))) return Result.error("可信代理必须填写有效 IP 或 CIDR")
 
-        const next = { ...current, host, port, devMode, publicUrl, loginImageApi, trustedProxies, cookieSecure: data.cookieSecure === undefined ? current.cookieSecure === true : data.cookieSecure === true }
+        const next = { ...current, host, port, devMode, publicUrl, loginImageApi, securityEntrance, trustedProxies, cookieSecure: data.cookieSecure === undefined ? current.cookieSecure === true : data.cookieSecure === true }
         delete next.password
         if (password) Object.assign(next, await createPasswordCredential(password))
         if (secret) next.secret = secret
@@ -166,6 +176,7 @@ export function supportPanel() {
         if (devMode !== (current.devMode === true)) notes.push("开发模式需重启 Bot 后生效")
         if (publicUrl !== String(current.publicUrl || "").trim()) notes.push("公网访问地址立即用于主人快捷登录链接")
         if (loginImageApi !== String(current.loginImageApi || defaultLoginImageApi).trim()) notes.push("登录随机图 API 立即生效")
+        if (securityEntrance !== String(current.securityEntrance || "").trim()) notes.push("安全入口立即生效，旧入口令牌已撤销")
         return Result.ok({}, `配置已保存；${notes.join("；") || "没有需要立即生效的变更"}`)
         })
       },

@@ -70,6 +70,8 @@ pnpm install --filter elia-admin-panel --ignore-scripts
 
 HTTPS 反向代理需要设置 `trustedProxies`（精确 IP/CIDR）和 `publicUrl`；代理应覆盖 `X-Forwarded-Proto`，而不是透传客户端值。公网部署建议同时启用 `cookieSecure: true`。来源检查采用完整 origin；不可信转发头不会改变 Cookie 的传输属性。本机 HTTP 开发可保持 `cookieSecure: false`。
 
+可在面板插件配置页设置并查看安全入口路径；也可通过进程环境变量 `SECURITY_ENTRANCE` 提供回退值。配置页中的非空值优先，路径长度为 1 至 256，且仅允许字母、数字、`-` 和 `_`；留空时使用环境变量，二者都为空时关闭。访问 `/{入口路径}` 后会签发有效期 20 分钟的 HttpOnly 入口 Cookie。入口校验由 Node.js 后端执行，反向代理无需配置对应路由。已登录 Session 不受入口 Cookie 过期影响。
+
 Git 常规代理仅允许使用运维在受保护 YAML 中批准的固定 IP 地址，例如 `approvedProxyUrls: ["http://127.0.0.1:7890"]`；不会继承进程环境的隐式代理。获批代理属于可信出站边界，运维应在代理侧限制目的地址、DNS 和重定向。HTTPS 前缀代理仍须满足公网 DNS 校验；直连和前缀 Git 禁止重定向并固定解析地址。Git 需支持 `http.curloptResolve`。
 
 配置、普通文件、插件 support 配置和依赖保存必须携带读取时的版本；旧版本返回 409，缺版本返回 428，前端已经同步适配。具体变更、回归入口及尚未完成的部署事项见 [加固记录](docs/SECURITY/2026-09-28/SECURITY_HARDENING.md)。
