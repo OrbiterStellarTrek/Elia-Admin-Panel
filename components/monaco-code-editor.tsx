@@ -8,6 +8,7 @@ import "monaco-editor/language/json/monaco.contribution.js"
 import "monaco-editor/language/typescript/monaco.contribution.js"
 
 export function editorLanguageForPath(path: string) {
+  if (path.toLowerCase().endsWith(".js.disable")) return "javascript"
   const extension = path.split(".").pop()?.toLowerCase()
   if (["yml", "yaml"].includes(extension || "")) return "yaml"
   if (extension === "json" || extension === "jsonc") return "json"

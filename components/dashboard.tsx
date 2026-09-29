@@ -2,6 +2,8 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
+import { Collapse, useExitPresence } from "@/components/ui/motion"
+import { Toast } from "@/components/ui/toast"
 import * as Dialog from "@radix-ui/react-dialog"
 import Cropper, { type Area } from "react-easy-crop"
 import {
@@ -329,10 +331,10 @@ function ErrorState({ message }: { message: string }) {
   return <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700"><CircleHelp className="mt-0.5 size-4 shrink-0" />{message}</div>
 }
 
-type SecurityEntranceWarning = { seconds: number; onDismiss: () => void }
+type SecurityEntranceWarning = { seconds: number; exiting: boolean; onDismiss: () => void; onExited: () => void }
 
-function SecurityEntranceWarningToast({ seconds, onDismiss }: SecurityEntranceWarning) {
-  return <div role="alert" aria-live="assertive" className="admin-toast flex w-full items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-xl">
+function SecurityEntranceWarningToast({ seconds, exiting, onDismiss, onExited }: SecurityEntranceWarning) {
+  return <Toast exiting={exiting} onExited={onExited} role="alert" aria-live="assertive" className="flex w-full items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-xl">
     <CircleHelp className="mt-0.5 size-4 shrink-0 text-amber-700" />
     <div className="min-w-0 flex-1">
       <p className="font-semibold">尚未配置安全入口</p>
@@ -345,11 +347,11 @@ function SecurityEntranceWarningToast({ seconds, onDismiss }: SecurityEntranceWa
       size="icon"
       aria-label={seconds > 0 ? `${seconds} 秒后可关闭安全入口提醒` : "关闭安全入口提醒"}
       title={seconds > 0 ? `${seconds} 秒后可关闭` : "关闭提醒"}
-      disabled={seconds > 0}
+      disabled={seconds > 0 || exiting}
       className="size-8 shrink-0 text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
       onClick={onDismiss}
     ><X /></Button>
-  </div>
+  </Toast>
 }
 
 function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }: { onLogin: (expiresAt: number) => void; initialError?: string; imageApi: string; securityEntranceWarning: SecurityEntranceWarning | null }) {
@@ -357,6 +359,7 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
   const [codeToast, setCodeToast] = useState("")
+  const [codeToastExiting, setCodeToastExiting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(initialError)
   const [expiresAt, setExpiresAt] = useState(0)
@@ -372,7 +375,7 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
 
   useEffect(() => {
     if (!codeToast) return
-    const timer = window.setTimeout(() => setCodeToast(""), 30_000)
+    const timer = window.setTimeout(() => setCodeToastExiting(true), 30_000)
     return () => window.clearTimeout(timer)
   }, [codeToast])
 
@@ -382,6 +385,7 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
     try {
       const result = await request("/api/auth/code/request", { method: "POST", body: "{}" })
       setExpiresAt(Date.now() + result.expiresIn * 1000)
+      setCodeToastExiting(false)
       setCodeToast(`${result.message || "验证码已写入本机凭据文件"}`)
     } catch (reason) {
       setError((reason as Error).message)
@@ -410,7 +414,7 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
   }
   return (
     <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e6e4fc_0,_transparent_46%),radial-gradient(ellipse_at_bottom_right,_#e2effb_0,_transparent_46%)] px-5 py-10 lg:py-12">
-      <div className="grid w-full max-w-[1260px] items-stretch lg:grid-cols-[minmax(0,1fr)_430px]">
+      <div className="admin-login grid w-full max-w-[1260px] items-stretch lg:grid-cols-[minmax(0,1fr)_430px]">
       <section aria-label="登录图片" className="relative aspect-video w-full overflow-hidden rounded-t-2xl rounded-b-none border border-white/70 bg-slate-200 shadow-[0_30px_100px_-42px_rgba(58,67,150,.35)] lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
         <img src={imageApi} alt="登录页展示图片" className="absolute inset-0 size-full object-cover" />
       </section>
@@ -423,11 +427,11 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
           </div>
         </CardHeader>
         <CardContent className="flex flex-1 flex-col px-8 pb-8">
-          <div role="tablist" aria-label="登录方式" className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+          <div role="tablist" aria-label="登录方式" className="admin-login-tabs mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1" data-mode={mode}>
             <button type="button" role="tab" aria-selected={mode === "code"} onClick={() => { setMode("code"); setError("") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "code" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>验证码登录</button>
             <button type="button" role="tab" aria-selected={mode === "password"} onClick={() => { setMode("password"); setError("") }} className={`rounded-lg px-3 py-2 text-sm font-medium transition ${mode === "password" ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>面板密码</button>
           </div>
-          <form onSubmit={submit} className="space-y-4">
+          <form key={mode} onSubmit={submit} className="admin-form-enter space-y-4">
             {mode === "code" ? <>
               <div className="flex h-10 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:ring-2 focus-within:ring-ring">
                 <Label htmlFor="panel-code" className="shrink-0 pl-4 text-sm font-medium">验证码</Label>
@@ -450,9 +454,9 @@ function Login({ onLogin, initialError = "", imageApi, securityEntranceWarning }
         </CardContent>
       </Card>
       </div>
-      {(codeToast || securityEntranceWarning) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col gap-2 sm:right-6 sm:top-6">
+      {(codeToast || securityEntranceWarning) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
         {securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
-        {codeToast && <div role="status" className="admin-toast flex w-full items-start gap-2.5 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-700 shadow-xl"><Check className="mt-0.5 size-4 shrink-0" />{codeToast}</div>}
+        {codeToast && <Toast exiting={codeToastExiting} onExited={() => { setCodeToast(""); setCodeToastExiting(false) }} className="flex items-start gap-2.5 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm text-emerald-700 shadow-xl"><Check className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 break-words [overflow-wrap:anywhere]">{codeToast}</span></Toast>}
       </div>}
     </main>
   )
@@ -468,11 +472,12 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const [notice, setNotice] = useState<Notice>(null)
   const [securityEntranceWarningDeadline, setSecurityEntranceWarningDeadline] = useState<number | null>(null)
   const [securityEntranceWarningSeconds, setSecurityEntranceWarningSeconds] = useState(30)
+  const [securityEntranceWarningExiting, setSecurityEntranceWarningExiting] = useState(false)
   const [confirmation, setConfirmation] = useState<string | null>(null)
   const noticeTimer = useRef<number | null>(null)
-  const noticeExitTimer = useRef<number | null>(null)
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const sidebarPresent = useExitPresence(sidebarOpen)
   const [sidebarCollapsed, setSidebarCollapsed] = useBrowserBooleanPreference("mainSidebarCollapsed")
   const api: Api = useCallback((url, init) => request(url, init), [])
   const confirm = useCallback<Confirm>((message: string) => new Promise<boolean>(resolve => {
@@ -491,11 +496,9 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }, [])
   const notify = useCallback((kind: "success" | "error" | "info", message: string) => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
-    if (noticeExitTimer.current !== null) window.clearTimeout(noticeExitTimer.current)
     setNotice({ kind, message, exiting: false })
     noticeTimer.current = window.setTimeout(() => {
       setNotice(current => current ? { ...current, exiting: true } : null)
-      noticeExitTimer.current = window.setTimeout(() => setNotice(null), 500)
     }, 4200)
   }, [])
   const navigateTo = useCallback((nextSection: Section, accountId?: string) => {
@@ -519,7 +522,6 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
   useEffect(() => () => {
     if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current)
-    if (noticeExitTimer.current !== null) window.clearTimeout(noticeExitTimer.current)
     confirmationResolver.current?.(false)
     confirmationResolver.current = null
   }, [])
@@ -612,12 +614,12 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
   function dismissSecurityEntranceWarning() {
     if (securityEntranceWarningDeadline === null || Date.now() < securityEntranceWarningDeadline) return
-    setSecurityEntranceWarningDeadline(null)
+    setSecurityEntranceWarningExiting(true)
   }
 
   const securityEntranceWarning = securityEntranceWarningDeadline === null
     ? null
-    : { seconds: securityEntranceWarningSeconds, onDismiss: dismissSecurityEntranceWarning }
+    : { seconds: securityEntranceWarningSeconds, exiting: securityEntranceWarningExiting, onDismiss: dismissSecurityEntranceWarning, onExited: () => { setSecurityEntranceWarningDeadline(null); setSecurityEntranceWarningExiting(false) } }
 
   if (authenticated === null) return <main className="grid min-h-screen place-items-center text-muted-foreground"><LoaderCircle className="size-7 animate-spin" /></main>
   if (!authenticated) return <Login imageApi={loginImageApi} initialError={loginError} securityEntranceWarning={securityEntranceWarning} onLogin={expiresAt => { setLoginError(""); setSessionExpiresAt(expiresAt); notify("success", "登录成功！欢迎回来，主人~"); setAuthenticated(true) }} />
@@ -629,7 +631,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
-      <aside data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.06] bg-[linear-gradient(180deg,#1f212b_0%,#16171f_100%)] text-slate-100 shadow-2xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside data-open={sidebarOpen} data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-white/[0.06] bg-[linear-gradient(180deg,#1f212b_0%,#16171f_100%)] text-slate-100 shadow-2xl md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="admin-sidebar-expanded absolute inset-y-0 left-0 flex flex-col px-3 pb-0 md:top-8">
           <div className="flex items-center gap-3 px-2 pb-7">
             <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 shadow-md shadow-indigo-950/40 ring-1 ring-white/15"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
@@ -637,11 +639,11 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
             <button className="ml-auto text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></button>
           </div>
           <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[.16em] text-slate-500">控制台</div>
-          <nav className="space-y-1">
+          <nav className="admin-nav space-y-1" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
             {navigation.map(item => {
               const Icon = item.icon
               const selected = section === item.id
-              return <button key={item.id} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"}`}>
+              return <button key={item.id} aria-current={selected ? "page" : undefined} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${selected ? "bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]" : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"}`}>
                 {selected && <span aria-hidden="true" className="absolute left-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-300 to-violet-400" />}
                 <Icon className={`size-[18px] shrink-0 ${selected ? "text-indigo-300" : "text-slate-500 group-hover:text-slate-300"}`} />
                 <span className="min-w-0 flex-1 text-[13px] font-medium">{item.label}</span>
@@ -656,11 +658,11 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         </div>
         <div className="admin-sidebar-compact absolute inset-y-0 left-0 flex flex-col items-center px-1.5 pb-3 md:top-8">
           <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-[14px] bg-white/10 p-1 ring-1 ring-white/15"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-          <nav className="w-full space-y-1" aria-label="主导航">
+          <nav className="admin-nav w-full space-y-1" aria-label="主导航" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
             {navigation.map(item => {
               const Icon = item.icon
               const selected = section === item.id
-              return <button key={item.id} title={item.label} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative grid h-10 w-full place-items-center rounded-lg transition ${selected ? "bg-white/[0.08] text-indigo-300" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-200"}`}>{selected && <span aria-hidden="true" className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-300 to-violet-400" />}<Icon className="size-[18px]" /></button>
+              return <button key={item.id} aria-current={selected ? "page" : undefined} title={item.label} aria-label={item.label} onClick={() => navigateTo(item.id)} className={`group relative grid h-10 w-full place-items-center rounded-lg transition ${selected ? "bg-white/[0.08] text-indigo-300" : "text-slate-500 hover:bg-white/[0.05] hover:text-slate-200"}`}>{selected && <span aria-hidden="true" className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-gradient-to-b from-indigo-300 to-violet-400" />}<Icon className="size-[18px]" /></button>
             })}
           </nav>
           <div className="mt-auto w-full space-y-2 border-t border-white/10 pt-2">
@@ -670,10 +672,10 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         </div>
       </aside>
 
-      {sidebarOpen && <button className="fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
+      {sidebarPresent && <button data-state={sidebarOpen ? "open" : "closed"} inert={!sidebarOpen} className="admin-mobile-overlay fixed inset-0 z-30 bg-slate-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-white/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-0 pt-16 sm:px-6 md:pt-0 lg:px-9" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
+        <main key={section} data-motion-page={section} className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "mx-auto max-w-[1600px] px-4 pb-0 pt-16 sm:px-6 md:pt-0 lg:px-9" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} confirm={confirm} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
@@ -683,9 +685,9 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
           {section === "debug" && <MessageDebugger api={api} />}
         </main>
       </div>
-      {(notice || (authenticated && securityEntranceWarningDeadline !== null)) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col gap-2 sm:right-6 sm:top-6">
+      {(notice || (authenticated && securityEntranceWarningDeadline !== null)) && <div className="fixed right-4 top-4 z-50 flex w-[min(480px,calc(100vw-32px))] flex-col items-end gap-2 pointer-events-none sm:right-6 sm:top-6">
         {authenticated && securityEntranceWarning && <SecurityEntranceWarningToast {...securityEntranceWarning} />}
-        {notice && <div className={`admin-toast flex w-full items-start gap-2.5 rounded-lg border bg-white px-4 py-3 text-sm shadow-xl ${notice.exiting ? "admin-toast-out" : ""} ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span>{notice.message}</div>}
+        {notice && <Toast exiting={notice.exiting} onExited={() => setNotice(current => current?.exiting ? null : current)} aria-live="polite" className={`flex items-start gap-2.5 rounded-lg border bg-white px-4 py-3 text-sm shadow-xl ${notice.kind === "error" ? "border-rose-200 text-rose-700" : notice.kind === "success" ? "border-emerald-200 text-emerald-700" : "border-indigo-200 text-indigo-700"}`}><span className="mt-0.5 shrink-0">{notice.kind === "error" ? <CircleHelp className="size-4" /> : <Check className="size-4" />}</span><span className="min-w-0 break-words [overflow-wrap:anywhere]">{notice.message}</span></Toast>}
       </div>}
       <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open) resolveConfirmation(false) }}>
         <AlertDialogContent>
@@ -709,6 +711,7 @@ type PageAction = { label: string; render: (iconOnly: boolean) => React.ReactNod
 function PageIntro({ actions }: { actions: PageAction[] }) {
   const hasMenu = actions.length > 4
   const [open, setOpen] = useState(false)
+  const present = useExitPresence(open)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -733,7 +736,7 @@ function PageIntro({ actions }: { actions: PageAction[] }) {
     {actions.map(action => <Fragment key={action.label}>{action.render(true)}</Fragment>)}
   </div>
   return <div ref={containerRef} className="fixed bottom-4 right-4 z-30 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6">
-    {open && <div id="page-actions-menu" role="group" aria-label="页面操作" className="admin-action-popover min-w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-border/80 bg-white/95 p-2 shadow-xl backdrop-blur" onClick={() => setOpen(false)}>
+    {present && <div data-state={open ? "open" : "closed"} inert={!open} aria-hidden={!open} id="page-actions-menu" role="group" aria-label="页面操作" className="admin-action-popover min-w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-border/80 bg-white/95 p-2 shadow-xl backdrop-blur" onClick={() => setOpen(false)}>
       <div className="flex flex-col gap-2 [&_button]:w-full [&_button]:justify-start">{actions.map(action => <Fragment key={action.label}>{action.render(false)}</Fragment>)}</div>
     </div>}
     <Button ref={triggerRef} type="button" variant="outline" size="icon" className="size-12 rounded-full border-border/80 bg-white shadow-lg" aria-label={open ? "关闭页面操作" : "打开页面操作"} aria-haspopup="true" aria-expanded={open} aria-controls="page-actions-menu" title={open ? "关闭页面操作" : "打开页面操作"} onClick={() => setOpen(value => !value)}>{open ? <X /> : <Ellipsis />}</Button>
@@ -1123,7 +1126,7 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
           <aside className="min-w-0">
             <h2 className="mb-3 text-sm font-semibold">机器人账号</h2>
             <div className="space-y-1">
-              {accounts.map(account => <button key={account.id} type="button" disabled={saving || refreshing} onClick={async () => { if (selectedId === account.id || saving || refreshing) return; if (pendingUpdates.length && !await confirm("切 换账号会丢弃尚未保存的修改，继续吗？")) return; setDraftAccountId(""); setSelectedId(account.id) }} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${selectedId === account.id ? "border-sky-300 bg-sky-50/70" : "border-transparent hover:border-border hover:bg-white"}`}>
+              {accounts.map(account => <button key={account.id} type="button" disabled={saving || refreshing} onClick={async () => { if (selectedId === account.id || saving || refreshing) return; if (pendingUpdates.length && !await confirm("切换账号会丢弃尚未保存的修改，继续吗？")) return; setDraftAccountId(""); setSelectedId(account.id) }} className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${selectedId === account.id ? "border-sky-300 bg-sky-50/70" : "border-transparent hover:border-border hover:bg-white"}`}>
                 <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-full bg-slate-100 text-slate-500"><Bot className="size-5" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span>
                 <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-xs text-muted-foreground">QQ {account.id}</span></span>
                 <span aria-label={account.status} title={account.status} className={`size-2 shrink-0 rounded-full ${account.online ? "bg-emerald-500" : "bg-slate-300"}`} />
@@ -1451,14 +1454,14 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         {error && <div className="mb-4"><ErrorState message={error} /></div>}
         {loading && <div className="grid min-h-64 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div>}
         {!loading && rawMode && <MonacoCodeEditor key={selected} path={selected || "config.yaml"} value={raw} className="min-h-0 flex-1 overflow-hidden border-t border-border" onChange={value => { setRaw(value); setDirty(true) }} />}
-        {!loading && !rawMode && groupSectionKeys.length > 0 && activeGroupSection && isObject(activeGroupSettings) && <div className="space-y-5">{Object.entries(activeGroupSettings).map(([key, value]) => {
+        {!loading && !rawMode && groupSectionKeys.length > 0 && activeGroupSection && isObject(activeGroupSettings) && <div key={activeGroupSection} className="admin-fields-enter space-y-5">{Object.entries(activeGroupSettings).map(([key, value]) => {
           const listDoesNotInherit = activeGroupSection !== "default" && (key === "enable" || key === "disable") && activeGroupSettings.isInheritDefault !== 1 && !Object.prototype.hasOwnProperty.call(groupOverrides, key)
           const defaultValue = activeGroupSection === "default" ? defaults?.default?.[key] : listDoesNotInherit ? undefined : data.default?.[key] ?? defaults?.default?.[key]
           const mutuallyExclusiveName = key === "enable" ? "disable" : key === "disable" ? "enable" : ""
           const mutuallyExclusiveValues = mutuallyExclusiveName && Array.isArray(activeGroupSettings[mutuallyExclusiveName]) ? activeGroupSettings[mutuallyExclusiveName] : undefined
           return <ConfigField key={key} name={key} value={value} defaultValue={defaultValue} path={[activeGroupSection, key]} onChange={update} depth={1} pluginNames={key === "enable" || key === "disable" ? pluginNameOptions : undefined} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveName ? configFieldLabel(mutuallyExclusiveName) : undefined} />
         })}</div>}
-        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="space-y-5">{Object.entries(data).map(([key, value]) => <Fragment key={key}><ConfigField name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} />{key === "disableAdopt" && <PluginMatchHelper api={api} notify={notify} confirm={confirm} selectedPatterns={Array.isArray(value) ? value : []} onSelect={pattern => update([key], [...new Set([...(Array.isArray(value) ? value : []), pattern])])} />}</Fragment>)}</div>}
+        {!loading && !rawMode && data && groupSectionKeys.length === 0 && <div className="admin-fields-enter space-y-5">{Object.entries(data).map(([key, value]) => <Fragment key={key}><ConfigField name={key} value={value} defaultValue={defaults?.[key]} path={[key]} onChange={update} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} />{key === "disableAdopt" && <PluginMatchHelper api={api} notify={notify} confirm={confirm} selectedPatterns={Array.isArray(value) ? value : []} onSelect={pattern => update([key], [...new Set([...(Array.isArray(value) ? value : []), pattern])])} />}</Fragment>)}</div>}
         {!loading && !data && !error && <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">选择左侧配置文件开始编辑</div>}
         </CardContent>
       </Card>
@@ -2152,7 +2155,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
         <div className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-white p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-            <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}{hasUnconfiguredLargePlugins && <Button size="icon" variant="ghost" aria-label={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} title={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} onClick={() => setShowUnconfigured(value => !value)}><ChevronDown className={showUnconfigured ? "rotate-180" : ""} /></Button>}</div>
+            <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}{hasUnconfiguredLargePlugins && <Button size="icon" variant="ghost" aria-label={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} title={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} onClick={() => setShowUnconfigured(value => !value)}><ChevronDown className={`transition-transform duration-200 ${showUnconfigured ? "rotate-180" : ""}`} /></Button>}</div>
             <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border/70 pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
           <div className="mt-2 flex shrink-0 justify-start border-t border-border/70 px-1 pt-2"><Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight className="size-4" /></Button></div>
@@ -2162,7 +2165,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-slate-100 text-slate-600">{largePlugins.length}</Badge></span></div>
             <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-slate-400" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-              {shownLarge.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length).map(renderPlugin)}{shownLarge.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length) && <div><Button type="button" size="sm" variant="ghost" className="w-full justify-between" onClick={() => setShowUnconfigured(value => !value)}>无配置插件（{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).length}）<ChevronDown className={showUnconfigured ? "rotate-180" : ""} /></Button>{(showUnconfigured || largeSearch.trim()) && shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).map(renderPlugin)}</div>}
+              {shownLarge.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length).map(renderPlugin)}{shownLarge.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length) && <div><Button type="button" size="sm" variant="ghost" className="w-full justify-between" onClick={() => setShowUnconfigured(value => !value)}>无配置插件（{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).length}）<ChevronDown className={`transition-transform duration-200 ${showUnconfigured ? "rotate-180" : ""}`} /></Button><Collapse open={showUnconfigured || Boolean(largeSearch.trim())}>{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).map(renderPlugin)}</Collapse></div>}
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
           </Card>
@@ -2199,7 +2202,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-5" : "p-5"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className={`flex min-h-0 flex-1 flex-col overflow-hidden ${sourceFullscreen ? "" : "rounded-xl border border-border"}`}><div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-slate-50/80 px-4 py-2.5"><span className="flex min-w-0 items-center gap-2 text-xs font-medium"><FileCode2 className="size-4 shrink-0 text-indigo-500" /><span className="truncate">{selected.sourcePath}</span>{sourceDirty && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</span><div className="flex shrink-0 items-center gap-2"><span className="hidden text-[10px] text-muted-foreground sm:block">Ctrl+S 保存 · 重启后加载</span><Button type="button" size="icon" variant="ghost" className="size-8" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{detailLoading ? <div className="grid min-h-[545px] flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="min-h-[545px] flex-1" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
-          : selected.hasConfig ? <div className="space-y-3.5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => {
+          : selected.hasConfig ? <div key={`${selected.id}-${activeSchemaGroup}`} className="admin-fields-enter space-y-3.5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-indigo-500" /></div> : schemaLayout.map(item => {
             if (item.kind === "panel") {
               const multi = item.items.length > 1
               return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border/70 bg-border/60 shadow-[0_1px_2px_rgba(28,29,58,0.04)] ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }) => <div key={schema.field} className="min-w-0 bg-card px-4 py-3 transition-colors hover:bg-indigo-50/25">{renderSchemaField(schema, index, true)}</div>)}</div>
@@ -2303,11 +2306,11 @@ function CronExpressionField({ value, onChange, validate }: { value: string; onC
     <div className="flex gap-2"><Input aria-label="Cron 表达式" className="font-mono text-sm" value={value} placeholder="分 时 日 月 星期（或在前面增加秒字段）" onChange={event => onChange(event.target.value)} /><Button type="button" variant="outline" className="shrink-0" aria-expanded={quickEdit} onClick={() => setQuickEdit(open => !open)}>{quickEdit ? "收起快速编辑" : "快速编辑"}<ChevronDown className={`transition-transform ${quickEdit ? "rotate-180" : ""}`} /></Button></div>
     <p className="text-[10px] leading-4 text-muted-foreground">支持 Node 定时器常见的 5 段格式与含秒的 6 段格式；保存前会使用当前 Yunzai 的 cron-parser 实际校验。</p>
     <p aria-live="polite" aria-atomic="true" className={`min-h-[15px] text-[10px] leading-[15px] ${validation ? validation.valid ? "text-emerald-700" : "text-rose-600" : ""}`}>{validation ? <>{validation.message}{validation.valid && validation.nextRun ? ` · 下次执行：${new Date(validation.nextRun).toLocaleString("zh-CN")}` : ""}</> : ""}</p>
-    {quickEdit && <div className="space-y-3 rounded-xl border border-border bg-slate-50/70 p-3">
+    <Collapse open={quickEdit}><div className="space-y-3 rounded-xl border border-border bg-slate-50/70 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><div className="flex gap-1.5">{([[5, "5 段"], [6, "6 段（含秒）"]] as const).map(([fieldCount, title]) => <Button key={fieldCount} type="button" size="sm" variant={mode === fieldCount ? "default" : "outline"} className="h-7 px-2.5 text-[10px]" onClick={() => changeMode(fieldCount)}>{title}</Button>)}</div><div className="flex flex-wrap gap-1.5">{[["每天 1:20", "daily"], ["工作日 1:20", "weekdays"], ["每小时", "hourly"], ["每分钟", "minute"]].map(([title, preset]) => <Button key={preset} type="button" size="sm" variant="outline" className="h-7 px-2 text-[10px]" onClick={() => applyPreset(preset as "daily" | "weekdays" | "hourly" | "minute")}>{title}</Button>)}</div></div>
       {hasSupportedShape ? <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${mode === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}>{fieldNames.map((name, index) => { const segmentIndex = mode === 6 ? index : index + 1; return <label key={name} className="space-y-1 text-[10px] text-muted-foreground">{name}<Input aria-label={`Cron ${name}`} className="h-9 bg-white font-mono text-xs" value={segments[segmentIndex]} placeholder={name === "星期" ? "* / 1-5 / ?" : "* / 数字 / 范围"} onChange={event => changeSegment(segmentIndex, event.target.value)} /></label> })}</div> : <p className="text-[10px] text-amber-700">原表达式字段数异常。选择上方快捷模板可生成标准格式，或手动修正表达式。</p>}
       <p className="text-[10px] leading-4 text-muted-foreground">字段顺序：{mode === 6 ? "秒 分 时 日 月 星期" : "分 时 日 月 星期"}。支持 `*`、`?`、范围（`1-5`）、步长（`*/5`）与列表（`1,3,5`）；最终格式以此 Yunzai 实际安装版本校验为准。</p>
-    </div>}
+    </div></Collapse>
   </div>
 }
 

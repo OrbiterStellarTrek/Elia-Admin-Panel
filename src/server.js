@@ -52,6 +52,12 @@ const SECURITY_ENTRANCE_TTL_MS = 20 * 60 * 1000
 const SECURITY_ENTRANCE_MAX_TOKENS = 4096
 const PASSWORD_HASH_ITERATIONS = 310_000
 const DEFAULT_LOGIN_IMAGE_API = "https://t.alcy.cc/moe"
+// Disabled JavaScript plugins retain their JavaScript file type for editing.
+function workspaceFileExtension(filePath) {
+  const name = path.basename(filePath).toLowerCase()
+  return name.endsWith(".js.disable") ? ".js" : path.extname(name) || name
+}
+
 const ALLOWED_TEXT_EXTENSIONS = new Set([
   ".yaml", ".yml", ".json", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
   ".css", ".scss", ".md", ".txt", ".html", ".xml", ".conf", ".ini", ".toml",
@@ -2532,7 +2538,7 @@ export async function startAdminPanel() {
       if (entry.isDirectory()) {
         files.push({ name: entry.name, path: path.relative(ROOT, childPath).split(path.sep).join("/"), type: "directory" })
       } else if (entry.isFile()) {
-        const extension = path.extname(entry.name).toLowerCase() || (entry.name.startsWith(".") ? entry.name.toLowerCase() : "")
+        const extension = workspaceFileExtension(entry.name)
         const childStat = await fs.stat(childPath)
         const relativePath = path.relative(ROOT, childPath).split(path.sep).join("/")
         if (childStat.size <= MAX_TEXT_BYTES && ALLOWED_TEXT_EXTENSIONS.has(extension)) {
@@ -2553,7 +2559,7 @@ export async function startAdminPanel() {
     await rejectSymlinkPath(absolute)
     const stat = await fs.stat(absolute)
     if (!stat.isFile()) return res.status(400).json({ error: "文件不存在" })
-    const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    const extension = workspaceFileExtension(absolute)
     const imageMime = IMAGE_MIME_TYPES.get(extension)
     if (imageMime) {
       if (stat.size > MAX_PREVIEW_IMAGE_BYTES) return res.status(413).json({ error: "图片超过 20 MB 预览上限" })
@@ -2629,7 +2635,7 @@ export async function startAdminPanel() {
     if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) return res.status(400).json({ error: "文件内容无效或超过 1.5 MB" })
     const absolute = resolveWorkspacePath(relative)
     await rejectSymlinkPath(absolute)
-    const extension = path.extname(absolute).toLowerCase() || path.basename(absolute).toLowerCase()
+    const extension = workspaceFileExtension(absolute)
     if (!ALLOWED_TEXT_EXTENSIONS.has(extension)) return res.status(415).json({ error: "该文件类型不能在面板中编辑" })
     const version = await writeBackupAndFile(absolute, content, req.body?.version)
     res.json({ ok: true, version, message: "文件已保存；自动备份保存在 data/elia-admin-panel/backups" })

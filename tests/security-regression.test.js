@@ -170,6 +170,26 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       assert.equal((await call("/api/files/write", fileBody, cookie, "PUT")).status, 409)
       assert.equal((await call("/api/files/write", { path: "package.json", content: "{}" }, cookie, "PUT")).status, 428)
     })
+    await t.test("禁用 JS 文件可列出、读取和保存，其他 disable 后缀仍拒绝编辑", async () => {
+      for (const name of ["disabled.js.disable", "UPPER.JS.DISABLE", "blocked.exe.disable"]) {
+        await fs.writeFile(path.join(fixture, "plugins/example", name), "export const enabled = false\n")
+      }
+      const listing = await call("/api/files?path=plugins/example", undefined, cookie)
+      assert.equal(listing.status, 200)
+      for (const name of ["disabled.js.disable", "UPPER.JS.DISABLE"]) {
+        assert.equal(listing.data.entries.find(entry => entry.name === name)?.type, "file")
+        const relative = `plugins/example/${name}`
+        const file = await call(`/api/files/read?path=${encodeURIComponent(relative)}`, undefined, cookie)
+        assert.equal(file.status, 200)
+        const content = "export const updated = true\n"
+        assert.equal((await call("/api/files/write", { path: relative, content, version: file.data.version }, cookie, "PUT")).status, 200)
+        assert.equal(await fs.readFile(path.join(fixture, relative), "utf8"), content)
+        assert.equal((await call("/api/files/write", { path: relative, content, version: file.data.version }, cookie, "PUT")).status, 409)
+      }
+      assert.equal(listing.data.entries.find(entry => entry.name === "blocked.exe.disable")?.type, "binary")
+      assert.equal((await call("/api/files/read?path=plugins/example/blocked.exe.disable", undefined, cookie)).status, 415)
+      assert.equal((await call("/api/files/write", { path: "plugins/example/blocked.exe.disable", content: "text" }, cookie, "PUT")).status, 415)
+    })
     await t.test("配置符号链接、硬链接及 support 父链 junction 被拒绝", async () => {
       await fs.link(path.join(fixture, "config/config/other.yaml"), path.join(fixture, "config/config/hard.yaml"))
       assert.equal((await call("/api/config/hard.yaml", undefined, cookie)).status, 403)

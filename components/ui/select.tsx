@@ -15,7 +15,7 @@ const SelectTrigger = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
-    className={cn("flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:shadow-none disabled:opacity-100", className)}
+    className={cn("admin-select-trigger flex h-10 w-full items-center justify-between gap-2 rounded-xl border border-input bg-background px-3 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:shadow-none disabled:opacity-100", className)}
     {...props}
   >
     {children}
@@ -54,7 +54,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       position={position}
-      className={cn("relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-border bg-white text-foreground shadow-lg", className)}
+      className={cn("admin-select-content relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-xl border border-border bg-white text-foreground shadow-lg", className)}
       {...props}
     >
       <SelectScrollUpButton />
