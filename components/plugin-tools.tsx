@@ -42,10 +42,24 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
   const [fetchError, setFetchError] = useState("")
   const [activity, setActivity] = useState<"fetch" | "update" | null>(null)
+  const dialogSession = useRef(0)
+  const pendingCheck = useRef<{ key: string; promise: Promise<any> } | null>(null)
+  const checking = activity === "fetch"
+  useEffect(() => {
+    setOpen(null); setBusy(false); setActivity(null)
+    return () => { dialogSession.current += 1 }
+  }, [plugin.id])
+  function closeTool() {
+    if (busy) return
+    dialogSession.current += 1
+    setOpen(null); setActivity(null)
+  }
   async function load(tool: "git" | "dependencies") {
+    const session = ++dialogSession.current
     setBusy(true)
     try {
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${tool === "git" ? "git" : "dependencies"}`)
+      if (session !== dialogSession.current) return
       if (tool === "dependencies") setDependencyVersion(result.version)
       if (tool === "git") {
         const defaultBranch = result.branch || ["main", "master"].find(branch => result.branches?.includes(branch)) || result.branches?.[0]
@@ -53,17 +67,32 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
       }
       else { setDependencies(result.data); setInstall(false) }
       setOpen(tool)
-      if (tool === "git") await fetchRefs()
-    } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false) }
+      if (tool === "git") { setBusy(false); await fetchRefs() }
+    } catch (error) { if (session === dialogSession.current) notify("error", (error as Error).message) }
+    finally { if (session === dialogSession.current) setBusy(false) }
   }
   async function fetchRefs() {
-    setBusy(true); setActivity("fetch"); setFetchError(""); setCheckedAt(null)
-    try { setInfo(await api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify(proxy) })); setCheckedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); notify("success", "已刷新远端版本，请确认目标版本后更新") }
-    catch (error) { setFetchError((error as Error).message); notify("error", (error as Error).message) } finally { setBusy(false); setActivity(null) }
+    const session = dialogSession.current
+    const key = JSON.stringify([plugin.id, proxy])
+    setActivity("fetch"); setFetchError(""); setCheckedAt(null)
+    // Reopening the dialog can reuse the same check while Git is still fetching.
+    const check = pendingCheck.current?.key === key ? pendingCheck.current : { key, promise: api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify(proxy) }) }
+    pendingCheck.current = check
+    try {
+      const result = await check.promise
+      if (session !== dialogSession.current) return
+      setInfo(result); setCheckedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })); notify("success", "已刷新远端版本，请确认目标版本后更新")
+    } catch (error) {
+      if (session !== dialogSession.current) return
+      setFetchError((error as Error).message); notify("error", (error as Error).message)
+    } finally {
+      if (pendingCheck.current === check) pendingCheck.current = null
+      if (session === dialogSession.current) setActivity(null)
+    }
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (open === "git" && (busy || info?.dirty || !ref.trim())) return
+    if (open === "git" && (busy || checking || info?.dirty || !ref.trim())) return
     if (open === "git" && !await confirm(`将 ${plugin.title} 从 ${info?.head?.slice(0, 12)} 更新到${kind === "branch" ? "分支最新版" : "指定提交"} ${ref.trim()}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
     setBusy(true); setActivity("update")
     try {
@@ -78,7 +107,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   return <>
     {plugin.hasPackage && <Button variant="outline" disabled={busy} onClick={() => load("dependencies")}>编辑依赖</Button>}
     {plugin.hasGit && <Button variant="outline" disabled={busy} onClick={() => load("git")}>手动更新</Button>}
-    <ToolDialog open={open !== null} onOpenChange={value => { if (!value && !busy) setOpen(null) }} wide={open === "git" && kind === "commit"} title={open === "git" ? "更新插件" : "编辑插件依赖"} description={open === "git" ? `为 ${plugin.title} 选择更新版本，重启 Bot 后生效。` : "按依赖类型编辑包与版本；从 registry.npmmirror.com 查询真实版本，保存前自动备份。"}>
+    <ToolDialog open={open !== null} onOpenChange={value => { if (!value) closeTool() }} wide={open === "git" && kind === "commit"} title={open === "git" ? "更新插件" : "编辑插件依赖"} description={open === "git" ? `为 ${plugin.title} 选择更新版本，重启 Bot 后生效。` : "按依赖类型编辑包与版本；从 registry.npmmirror.com 查询真实版本，保存前自动备份。"}>
       <form onSubmit={submit} className="space-y-4">{open === "git" ? <div className="admin-plugin-update-layout min-w-0" data-history-open={kind === "commit"}>
         <div className="min-w-0 space-y-4" aria-label="更新设置">
         <div className="rounded-xl border bg-muted/40 p-3">
@@ -86,7 +115,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
           <div className="mt-2 flex items-center gap-2"><GitCommitHorizontal className="size-4 text-muted-foreground" /><code className="text-sm font-medium">{info?.head?.slice(0, 12)}</code></div>
           {info?.commits?.find((commit: any) => commit.hash === info.head)?.message && <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{info.commits.find((commit: any) => commit.hash === info.head).message}</p>}
         </div>
-        <fieldset disabled={busy} className="min-w-0 space-y-3">
+        <fieldset disabled={busy || checking} className="min-w-0 space-y-3">
           <legend className="mb-2 text-sm font-medium">更新方式</legend>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {[{ value: "branch", title: "分支最新版", hint: "获取分支最新代码", icon: GitBranch }, { value: "commit", title: "指定历史版本", hint: "从历史记录中选择", icon: GitCommitHorizontal }].map(option => <label key={option.value} className={`flex min-w-0 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors focus-within:ring-2 focus-within:ring-ring ${kind === option.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}>
@@ -115,7 +144,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
           <div className="max-h-80 min-h-0 flex-1 overflow-y-auto md:max-h-none">
             {(info?.commits || []).map((commit: any) => {
               const selected = target?.hash === commit.hash
-              return <button type="button" key={commit.hash} disabled={busy} aria-pressed={selected} onClick={() => { setKind("commit"); setRef(commit.hash) }} className={`flex w-full items-start gap-3 border-b p-4 text-left text-xs transition-colors last:border-0 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50 ${selected ? "bg-primary/5" : ""}`}>
+              return <button type="button" key={commit.hash} disabled={busy || checking} aria-pressed={selected} onClick={() => { setKind("commit"); setRef(commit.hash) }} className={`flex w-full items-start gap-3 border-b p-4 text-left text-xs transition-colors last:border-0 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50 ${selected ? "bg-primary/5" : ""}`}>
                 <GitCommitHorizontal className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1"><span className="block break-words text-sm leading-6">{commit.message}</span><span className="mt-1 flex flex-wrap items-center gap-2"><code className="text-muted-foreground">{commit.hash.slice(0, 12)}</code>{commit.hash === info?.head && <span className="rounded border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">当前版本</span>}{selected && <span className="text-[10px] font-medium">已选择</span>}</span></span>
                 {selected && <Check className="mt-1 size-4 shrink-0" />}
@@ -127,7 +156,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
         </div>
         </div>
       </div> : <><DependencyEditor value={dependencies} onChange={setDependencies} disabled={busy} /><div className="flex items-center justify-between"><Label>保存后安装依赖（不执行生命周期脚本）</Label><Switch checked={install} onCheckedChange={setInstall} /></div></>}
-      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t bg-card px-5 pb-5 pt-4"><Button type="button" variant="outline" disabled={busy} onClick={() => setOpen(null)}>取消</Button><Button type="submit" disabled={busy || open === "git" && (!ref.trim() || info?.dirty)}>{activity === "update" && <LoaderCircle className="animate-spin" />}{open === "git" ? activity === "update" ? "正在更新…" : kind === "branch" ? "更新到分支最新版" : "更新到此版本" : "保存依赖"}</Button></div></form>
+      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex justify-end gap-2 border-t bg-card px-5 pb-5 pt-4"><Button type="button" variant="outline" disabled={busy} onClick={closeTool}>取消</Button><Button type="submit" disabled={busy || checking || open === "git" && (!ref.trim() || info?.dirty)}>{activity === "update" && <LoaderCircle className="animate-spin" />}{open === "git" ? activity === "update" ? "正在更新…" : kind === "branch" ? "更新到分支最新版" : "更新到此版本" : "保存依赖"}</Button></div></form>
     </ToolDialog>
   </>
 }
