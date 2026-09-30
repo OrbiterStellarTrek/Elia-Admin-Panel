@@ -32,6 +32,8 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 ## 前端版本更新
 
+GitHub Actions 在前端 GitHub Release 发布成功后，会将相同标签、标题、说明及 `frontend-<SHA>.tar.gz` 构建附件同步到 [GitCode 镜像仓库](https://gitcode.com/Mirror-Yunzai/Elia-Admin-Panel)。使用仓库 Secret `GITCODE_RELEASE_TOKEN`，令牌需有目标仓库的 Release 写入权限。镜像须已包含对应提交，创建标签时使用相同 SHA。GitCode 同步为非阻塞步骤，失败只产生 Actions 警告，不影响 GitHub Release 发布成功；重跑 workflow 时会更新已有 GitCode Release 并替换同名附件。
+
 在“运行概览 → 面板前端”点击“检查并更新前端”。面板读取本仓库 GitHub 最新正式 Release，比较已安装发布包的 SHA-256 摘要和本地文件指纹。相同且完整时不下载；发现不同或本地文件被修改时，下载并校验包大小、SHA-256 和归档路径，再安装到 `out/`。本地构建没有发布标记时会下载一次进行比较，内容相同则仅记录发布信息。
 
 更新期间保留原前端，替换失败会恢复；成功后在 `data/elia-admin-panel/frontend-previous-out/` 保留上一个版本及其静态资源，供尚未刷新的页面继续加载。点击“刷新使用新版本”即可使用更新结果，无需重启 Bot。网络或校验失败不会替换当前前端；并发更新会被拒绝。此功能仅更新发布版静态前端，不更新插件后端。开发模式使用源码热更新，需关闭开发模式并重启 Bot 后使用发布版更新。

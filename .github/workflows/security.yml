@@ -68,3 +68,14 @@ jobs:
               --title "Frontend build ${GITHUB_SHA:0:12}" \
               --notes "Automated frontend build for commit ${GITHUB_SHA}."
           fi
+      - name: Sync frontend release to GitCode
+        id: gitcode_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITCODE_RELEASE_TOKEN: ${{ secrets.GITCODE_RELEASE_TOKEN }}
+          GITCODE_RELEASE_REPOSITORY: Mirror-Yunzai/Elia-Admin-Panel
+        run: node scripts/sync-gitcode-release.mjs
+      - name: Report GitCode sync failure
+        if: steps.gitcode_release.outcome == 'failure'
+        run: echo "::warning::GitCode 前端 Release 同步失败，GitHub Release 已正常发布。请检查同步步骤日志后重跑。"

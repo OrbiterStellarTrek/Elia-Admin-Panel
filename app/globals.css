@@ -49,57 +49,61 @@
 
 :root {
   color-scheme: light;
-  --radius: 0.5rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --radius: 0.625rem;
+  --background: oklch(0.98 0.004 265);
+  --foreground: oklch(0.25 0.025 265);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.51 0.18 275);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.95 0.01 265);
+  --secondary-foreground: oklch(0.35 0.03 265);
+  --muted: oklch(0.955 0.006 265);
+  --muted-foreground: oklch(0.50 0.025 265);
+  --accent: oklch(0.945 0.022 275);
+  --accent-foreground: oklch(0.43 0.15 275);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-accent: oklch(0.94 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --border: oklch(0.91 0.009 265);
+  --input: oklch(0.87 0.013 265);
+  --ring: oklch(0.57 0.17 275);
+  --sidebar: oklch(0.99 0.003 265);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: oklch(0.94 0.028 275);
+  --sidebar-accent-foreground: oklch(0.43 0.15 275);
+  --sidebar-border: var(--border);
+  --shadow-surface: 0 2px 5px -3px oklch(0.25 0.03 265 / .12), 0 8px 24px -20px oklch(0.25 0.03 265 / .16);
+  --shadow-floating: 0 4px 12px -5px oklch(0.25 0.03 265 / .14), 0 16px 40px -16px oklch(0.25 0.03 265 / .2);
 }
 
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.185 0.012 265);
+  --foreground: oklch(0.94 0.008 265);
+  --card: oklch(0.225 0.015 265);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.25 0.017 265);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.73 0.135 275);
+  --primary-foreground: oklch(0.19 0.035 275);
+  --secondary: oklch(0.28 0.019 265);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.27 0.016 265);
+  --muted-foreground: oklch(0.72 0.025 265);
+  --accent: oklch(0.30 0.045 275);
+  --accent-foreground: oklch(0.83 0.10 275);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --border: oklch(0.65 0.025 265 / 20%);
+  --input: oklch(0.65 0.025 265 / 35%);
+  --ring: var(--primary);
+  --sidebar: oklch(0.21 0.015 265);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --shadow-surface: 0 2px 8px -4px rgb(0 0 0 / .3);
+  --shadow-floating: 0 6px 18px -6px rgb(0 0 0 / .3), 0 20px 40px -16px rgb(0 0 0 / .4);
 }
 .dark ::selection { background: oklch(1 0 0 / .2); }
 .dark .scrollbar-thin { scrollbar-color: #525252 transparent; }
@@ -184,32 +188,70 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 [data-motion-page="overview"] .admin-card:nth-child(4) { animation-delay: 105ms; }
 .admin-login { animation: admin-surface-in 460ms var(--ease-out); }
 .admin-form-enter { animation: admin-fade-in var(--motion-normal) ease-out; }
-.admin-login [aria-label="人机验证"] { min-height: 44px; }
+.admin-cap-wrapper { display: grid; width: 100%; min-height: 52px; }
+.admin-cap-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 52px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
 .admin-login cap-widget {
   --cap-background: var(--card);
-  --cap-border-color: var(--border);
-  --cap-border-radius: calc(var(--radius) - 2px);
-  --cap-widget-height: 38px;
+  --cap-border-color: var(--input);
+  --cap-border-radius: var(--radius-xl);
+  --cap-widget-height: 52px;
   --cap-widget-width: 100%;
-  --cap-widget-padding: 8px 12px;
-  --cap-gap: 10px;
+  /* Reserve the right edge for Cap's credit link, including narrow screens. */
+  --cap-widget-padding: 12px 48px 12px 14px;
+  --cap-gap: 12px;
   --cap-color: var(--card-foreground);
   --cap-checkbox-size: 20px;
   --cap-checkbox-border: 1px solid var(--input);
-  --cap-checkbox-border-radius: calc(var(--radius) - 3px);
-  --cap-checkbox-background: var(--card);
+  --cap-checkbox-border-radius: var(--radius-sm);
+  --cap-checkbox-background: transparent;
   --cap-checkbox-margin: 0;
   --cap-font: var(--font-sans);
+  --cap-focus-ring: var(--ring);
   --cap-spinner-color: var(--primary);
   --cap-spinner-background-color: var(--muted);
-  --cap-spinner-thickness: 3px;
+  /* This variable is an SVG stroke-width in the installed Cap widget. */
+  --cap-spinner-thickness: 3;
+  --cap-invalid-border-color: var(--destructive);
+  --cap-invalid-ring-color: color-mix(in oklch, var(--destructive) 20%, transparent);
+  --cap-troubleshoot-color: var(--primary);
+  /* A grid avoids the inline widget's baseline gap and matches the loading height. */
+  display: grid;
   width: 100%;
   max-width: 100%;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05);
+  transition: box-shadow var(--motion-normal), background-color var(--motion-fast);
+}
+.admin-login cap-widget::part(label) { font-size: 13px; font-weight: 500; line-height: 1.5; }
+.admin-login cap-widget::part(trigger) {
+  transition: background-color var(--motion-fast), inset var(--motion-normal);
+}
+.admin-login cap-widget:focus-within {
+  --cap-border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 20%, transparent);
+}
+@media (hover: hover) and (pointer: fine) {
+  .admin-login cap-widget:hover { --cap-border-color: color-mix(in oklch, var(--primary) 40%, var(--input)); }
+  .admin-login cap-widget::part(trigger):hover { background-color: color-mix(in oklch, var(--primary) 3%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-login cap-widget::part(trigger) { transition: none; }
 }
 .admin-login-tabs { position: relative; isolation: isolate; }
 
 /* Login page decorations */
-.admin-login-bg { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+.admin-login-bg { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
 .admin-login-bg::before,
 .admin-login-bg::after {
   content: "";
@@ -298,7 +340,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 
 .admin-button {
   transition: background-color var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast),
-    box-shadow var(--motion-normal), opacity var(--motion-fast);
+    box-shadow var(--motion-normal), opacity var(--motion-fast), translate var(--motion-fast) var(--ease-out);
 }
 
 .admin-select-trigger, input:not([type="range"]), textarea, select {
@@ -504,6 +546,54 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   .admin-panel-sidebar[data-open="true"] { visibility: visible; transition-delay: 0s; }
 }
 
+/* Shared surface and interaction details. Keep page ancestors untransformed:
+   editors, secondary sidebars and action docks use viewport-fixed positioning. */
+.admin-panel-shell { background: var(--background); }
+.admin-panel-sidebar { box-shadow: 4px 0 20px -16px rgb(0 0 0 / .15); }
+.admin-sidebar-actions { margin-top: auto; padding-top: 24px; }
+.admin-nav::before {
+  border: 1px solid color-mix(in oklch, var(--primary) 12%, transparent);
+  box-shadow: 0 2px 6px -4px color-mix(in oklch, var(--primary) 25%, transparent);
+}
+.admin-nav > button[aria-current="page"],
+.admin-nav > button[aria-current="page"] > svg { color: var(--sidebar-accent-foreground); }
+.admin-nav > button:not([aria-current="page"]):hover { background: color-mix(in oklch, var(--sidebar-accent) 55%, transparent); }
+.admin-button[data-variant="default"]:not(:disabled):active,
+.admin-button[data-variant="outline"]:not(:disabled):active,
+.admin-button[data-variant="destructive"]:not(:disabled):active { translate: 0 1px; }
+.admin-button[data-size="icon"] { border-radius: var(--radius); }
+.admin-button:disabled { box-shadow: none; }
+.admin-page-actions { box-shadow: var(--shadow-floating); }
+.admin-page-actions > button[data-variant="outline"],
+.admin-page-actions > button[data-variant="ghost"] { border-color: transparent; background: transparent; box-shadow: none; }
+.admin-page-actions > button[data-variant="outline"]:hover,
+.admin-page-actions > button[data-variant="ghost"]:hover { background: var(--accent); color: var(--accent-foreground); }
+.admin-metric { transition: border-color var(--motion-normal), box-shadow var(--motion-normal); }
+.admin-metric-icon { color: var(--primary); background: color-mix(in oklch, var(--primary) 8%, var(--card)); }
+.admin-section-heading::after { content: ""; height: 1px; flex: 1; margin-left: 6px; background: var(--border); }
+.admin-quick-entry > span:first-child { transition: background-color var(--motion-fast), color var(--motion-fast); }
+.admin-quick-entry > svg:last-child { transition: translate var(--motion-normal) var(--ease-out), color var(--motion-fast); }
+@media (hover: hover) and (pointer: fine) {
+  .admin-button:not(:disabled) { cursor: pointer; }
+  .admin-metric:hover { border-color: color-mix(in oklch, var(--primary) 24%, var(--border)); box-shadow: var(--shadow-surface), 0 6px 20px -16px color-mix(in oklch, var(--primary) 30%, transparent); }
+  .admin-quick-entry:hover > span:first-child { background: var(--accent); color: var(--accent-foreground); }
+  .admin-quick-entry:hover > svg:last-child { translate: 2px 0; color: var(--primary); }
+}
+.admin-login { box-shadow: var(--shadow-floating), 0 32px 80px -40px rgb(0 0 0 / .2); }
+.admin-login-shell { background: radial-gradient(ellipse at 50% 45%, var(--card), var(--background)); }
+.admin-login-art { background: linear-gradient(145deg, oklch(0.42 0.10 275), oklch(0.30 0.07 290)); }
+.admin-login-art > img { opacity: 0; transition: opacity 600ms ease-out; }
+.admin-login-art > img[data-loaded="true"] { opacity: 1; }
+.admin-login-tabs::before { background: var(--card); border: 1px solid var(--border); }
+.admin-login-tabs [role="tab"][data-state="active"] { color: var(--primary); }
+.admin-login-submit { position: relative; justify-content: center; }
+.admin-login-submit > .admin-login-arrow { position: absolute; right: 16px; }
+.admin-login form { padding-bottom: 24px; }
+.admin-toast { box-shadow: var(--shadow-floating); }
+.admin-dialog-overlay, .admin-mobile-overlay { backdrop-filter: blur(3px); }
+.admin-dialog-content, .admin-popover-content, .admin-select-content { box-shadow: var(--shadow-floating); }
+.admin-field-tooltip { box-shadow: var(--shadow-floating); }
+
 /* Cover utility animations and every nested/portal control as well as custom motion. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -516,6 +606,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   }
   .admin-button:hover:not(:disabled), .admin-button:active:not(:disabled),
   .admin-nav > button > svg, [data-slot="slider"] [role="slider"]:active { scale: 1; translate: none; }
+  .admin-quick-entry:hover > svg:last-child { translate: none; }
+  .admin-login-submit:not(:disabled):hover { transform: none; }
 }
 
 .installer-tab-indicator {

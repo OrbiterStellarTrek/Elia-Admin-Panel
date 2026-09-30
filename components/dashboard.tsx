@@ -18,7 +18,7 @@ import {
   ChevronRight, CircleHelp, Clock3, Command, Cpu, Database, FileCode2, FileCog,
   Ellipsis, Eye, EyeOff, FileText, Folder, Gauge, Github, HardDrive, Image as ImageIcon, KeyRound, LayoutDashboard, LoaderCircle,
   LogOut, Maximize2, Menu, MessageSquareText, Minimize2, Monitor, Pencil, Plug, Plus, RefreshCw, Search, Send,
-  Server, Settings2, ShieldCheck, Sparkles, TerminalSquare, Upload, UserRound, Users, X,
+  Server, Settings2, Sparkles, TerminalSquare, Upload, UserRound, Users, X,
   WrapText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -372,6 +372,9 @@ function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityE
   const [captchaWidgetReady, setCaptchaWidgetReady] = useState(false)
   const [mode, setMode] = useState<"code" | "password">("code")
   const [password, setPassword] = useState("")
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [imageLoaded, setImageLoaded] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
   const [code, setCode] = useState("")
   const [captchaToken, setCaptchaToken] = useState("")
   const [codeToast, setCodeToast] = useState("")
@@ -380,6 +383,8 @@ function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityE
   const [error, setError] = useState(initialError)
   const [expiresAt, setExpiresAt] = useState(0)
   const [remaining, setRemaining] = useState(0)
+
+  useEffect(() => { setImageLoaded(false); setImageFailed(false) }, [imageApi])
 
   useEffect(() => {
     let active = true
@@ -477,19 +482,20 @@ function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityE
     }
   }
   return (
-    <main className="relative grid min-h-screen place-items-center overflow-hidden bg-muted/40 px-5 py-10 lg:py-12">
+    <main className="admin-login-shell relative isolate grid min-h-dvh place-items-center overflow-hidden px-5 py-20 lg:py-12">
       <div className="admin-login-bg" aria-hidden="true" />
       <ThemeSwitcher className="fixed right-4 top-4 z-20 w-36" />
-      <div className="admin-login grid w-full min-w-0 grid-cols-1 max-w-[430px] items-stretch lg:max-w-[1100px] lg:grid-cols-[minmax(0,1fr)_430px]">
-      <section aria-label="登录图片" className="relative aspect-video w-full min-w-0 overflow-hidden rounded-t-2xl rounded-b-none border border-border bg-muted shadow-sm lg:aspect-auto lg:rounded-l-2xl lg:rounded-tr-none lg:border-r-0">
-        <img src={imageApi} alt="登录页展示图片" className="absolute inset-0 size-full object-cover" />
+      <div className="admin-login grid w-full min-w-0 grid-cols-1 max-w-[430px] items-stretch overflow-hidden rounded-2xl border border-border/70 lg:max-w-[1080px] lg:grid-cols-[minmax(0,1fr)_430px]">
+      <section aria-label="登录图片" className="admin-login-art relative aspect-video w-full min-w-0 overflow-hidden bg-muted lg:aspect-auto">
+        {!imageFailed && <img src={imageApi} alt="登录页展示图片" data-loaded={imageLoaded} onLoad={() => setImageLoaded(true)} onError={() => setImageFailed(true)} className="absolute inset-0 size-full object-cover" />}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-transparent" aria-hidden="true" />
         <div className="absolute inset-x-0 bottom-0 p-6 text-white" aria-hidden="true">
-          <p className="text-lg font-semibold tracking-tight drop-shadow">Elia Admin Panel</p>
+          <p className="mb-2 text-[10px] font-medium tracking-[0.22em] text-white/70">ELIA / 控制台</p>
+          <p className="text-xl font-semibold tracking-tight drop-shadow">让管理更轻松</p>
           <p className="mt-1 text-xs text-white/85">面向 Yunzai 机器人的一站式管理控制台</p>
         </div>
       </section>
-      <Card className="flex min-h-[430px] w-full min-w-0 max-w-[430px] flex-col rounded-t-none rounded-b-2xl border-border/70 bg-card/95 shadow-xl backdrop-blur-sm sm:min-h-[560px] lg:rounded-l-none lg:rounded-tr-2xl">
+      <Card className="flex min-h-[430px] w-full min-w-0 max-w-[430px] flex-col rounded-none border-0 bg-card/95 shadow-none backdrop-blur-sm sm:min-h-[520px]">
         <CardHeader className="px-5 pt-7 sm:px-8 sm:pt-9">
           <div className="mb-4 flex items-center gap-4">
             <div className="admin-login-logo grid size-12 shrink-0 place-items-center overflow-hidden rounded-2xl p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
@@ -500,25 +506,25 @@ function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityE
           </div>
         </CardHeader>
         <CardContent className="flex flex-1 flex-col px-5 pb-6 sm:px-8 sm:pb-8">
-          <Tabs value={mode} onValueChange={value => { setMode(value as "code" | "password"); setError("") }} className="mb-5"><TabsList aria-label="登录方式" data-mode={mode} className="admin-login-tabs grid w-full grid-cols-2"><TabsTrigger value="code">验证码登录</TabsTrigger><TabsTrigger value="password">面板密码</TabsTrigger></TabsList></Tabs>
+          <Tabs value={mode} onValueChange={value => { setMode(value as "code" | "password"); setPasswordVisible(false); setError("") }} className="mb-5"><TabsList aria-label="登录方式" data-mode={mode} className="admin-login-tabs grid h-10 w-full grid-cols-2"><TabsTrigger value="code">验证码登录</TabsTrigger><TabsTrigger value="password">面板密码</TabsTrigger></TabsList></Tabs>
           <form onSubmit={submit} className="admin-form-enter space-y-4">
             {mode === "code" ? <>
-              <div className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
-                <Label htmlFor="panel-code" className="shrink-0 pl-4 text-sm font-medium">验证码</Label>
-                <Input autoFocus id="panel-code" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
+              <div key="code" className="admin-form-enter flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-card shadow-xs transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+                <Input autoFocus id="panel-code" aria-label="验证码" type="text" autoComplete="one-time-code" value={code} onChange={event => setCode(event.target.value.trim())} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-4 shadow-none focus-visible:ring-0" />
                 <Button type="button" variant="ghost" className="h-full shrink-0 rounded-none px-4 text-sm font-medium text-primary hover:bg-accent hover:text-accent-foreground" disabled={busy || remaining > 0 || (Boolean(capApiEndpoint) && !captchaToken)} onClick={requestCode}>
                   {busy && <LoaderCircle className="animate-spin" />}
                   {remaining > 0 ? `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}` : "获取验证码"}
                 </Button>
               </div>
-            </> : <div className="flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-background shadow-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/40">
-              <Label htmlFor="panel-password" className="shrink-0 pl-4 text-sm font-medium">面板密码</Label>
-              <Input autoFocus id="panel-password" type="password" autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-3 shadow-none focus-visible:ring-0" />
+            </> : <div key="password" className="admin-form-enter flex h-11 w-full items-center overflow-hidden rounded-xl border border-input bg-card shadow-xs transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+              <Input autoFocus id="panel-password" aria-label="面板密码" type={passwordVisible ? "text" : "password"} autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} className="h-full w-auto min-w-0 flex-1 rounded-none border-0 bg-transparent px-4 shadow-none focus-visible:ring-0" />
+              <Button type="button" variant="ghost" size="icon" className="mr-1 size-9 shrink-0 text-muted-foreground" aria-label={passwordVisible ? "隐藏密码" : "显示密码"} aria-controls="panel-password" aria-pressed={passwordVisible} onClick={() => setPasswordVisible(current => !current)}>{passwordVisible ? <EyeOff /> : <Eye />}</Button>
             </div>}
-            {capApiEndpoint && <div className="flex min-h-[68px] justify-center" aria-label="人机验证">
+            {capApiEndpoint && <div className="admin-cap-wrapper" aria-label="人机验证">
               {captchaWidgetReady ? createElement("cap-widget", {
                 ref: setCaptchaWidget,
                 "data-cap-api-endpoint": capApiEndpoint,
+                "data-cap-i18n-group-aria-label": "人机验证",
                 "data-cap-i18n-initial-state": "点击验证你是人类",
                 "data-cap-i18n-verifying-label": "正在验证...",
                 "data-cap-i18n-solved-label": "验证通过",
@@ -527,10 +533,10 @@ function Login({ onLogin, initialError = "", imageApi, capApiEndpoint, securityE
                 "data-cap-i18n-verifying-aria-label": "正在验证，请稍候",
                 "data-cap-i18n-verified-aria-label": "验证通过",
                 "data-cap-i18n-error-aria-label": "安全验证失败，请重试",
-              }) : <p className="self-center text-center text-xs text-muted-foreground">正在加载人机验证...</p>}
+              }) : <div className="admin-cap-loading" role="status"><LoaderCircle className="size-4 animate-spin" />正在加载人机验证…</div>}
             </div>}
             {error && <ErrorState message={error} />}
-            <Button className="admin-login-submit h-11 w-full rounded-xl font-semibold" disabled={busy || (Boolean(capApiEndpoint) && !captchaToken) || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : mode === "password" ? <KeyRound /> : null}{mode === "code" ? "立即登录" : "进入控制台"}</Button>
+            <Button className="admin-login-submit h-11 w-full rounded-xl px-12 font-semibold" disabled={busy || (Boolean(capApiEndpoint) && !captchaToken) || (mode === "code" ? !code : !password)}>{busy ? <LoaderCircle className="animate-spin" /> : mode === "password" ? <KeyRound /> : null}{busy ? "正在验证身份…" : mode === "code" ? "立即登录" : "进入控制台"}{!busy && <ArrowRight className="admin-login-arrow" />}</Button>
           </form>
           <div className="mt-auto space-y-2 border-t pt-4 text-center text-xs leading-5 text-muted-foreground">
             <p>主人可私聊 Bot 发送 <code className="rounded bg-muted px-1.5 py-0.5">#elia登录</code> 获取快捷登录地址</p>
@@ -750,11 +756,11 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         <div className="admin-sidebar-expanded scrollbar-thin absolute inset-y-0 left-0 flex flex-col overflow-y-auto px-3 pt-5 pb-0">
           <div className="flex items-center gap-3 px-2 pb-7">
             <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-sidebar-border bg-background p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
-            <div className="min-w-0 truncate font-semibold tracking-tight">EliaAdminPanel</div>
+            <div className="min-w-0"><div className="truncate text-sm font-semibold tracking-tight">Elia Panel</div><div className="mt-0.5 truncate text-[10px] text-muted-foreground">机器人管理控制台</div></div>
             <Button type="button" variant="ghost" className={cn("h-auto justify-start whitespace-normal p-0", "ml-auto text-muted-foreground md:hidden")} onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></Button>
           </div>
           <div className="px-2 pb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">控制台</div>
-          <nav className="admin-nav shrink-0 space-y-1" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
+          <nav aria-label="主导航" className="admin-nav shrink-0 space-y-1" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
             {navigation.map(item => {
               const Icon = item.icon
               const selected = section === item.id
@@ -829,9 +835,9 @@ type PageAction = { label: string; render: (iconOnly: boolean) => React.ReactNod
 
 function PageIntro({ actions }: { actions: PageAction[] }) {
   const [open, setOpen] = useState(false)
-  if (actions.length <= 4) return <div className="fixed bottom-4 right-4 z-30 flex flex-col gap-2 sm:bottom-6 sm:right-6">
-    {actions.map(action => <Fragment key={action.label}>{action.render(true)}</Fragment>)}
-  </div>
+  if (actions.length <= 4) return <TooltipProvider delayDuration={300}><div aria-label="页面操作" className="admin-page-actions fixed bottom-4 right-4 z-30 flex flex-col gap-1.5 rounded-xl border border-border/80 bg-card/90 p-1.5 backdrop-blur-md sm:bottom-6 sm:right-6">
+    {actions.map(action => <Tooltip key={action.label}><TooltipTrigger asChild>{action.render(true)}</TooltipTrigger><TooltipContent side="left" sideOffset={10}>{action.label}</TooltipContent></Tooltip>)}
+  </div></TooltipProvider>
   return <div className="fixed bottom-4 right-4 z-30 sm:bottom-6 sm:right-6">
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild><Button type="button" variant="outline" size="icon" className="size-11 bg-background shadow-sm" aria-label={open ? "关闭页面操作" : "打开页面操作"} title="页面操作">{open ? <X /> : <Ellipsis />}</Button></PopoverTrigger>
@@ -980,7 +986,7 @@ function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = 
 }
 
 function Metric({ icon: Icon, label, value, detail }: { icon: typeof Cpu; label: string; value: string; detail: string }) {
-  return <Card><CardContent className="p-3 sm:p-5"><div className="flex items-center justify-between gap-3"><div className="text-xs font-medium sm:text-sm">{label}</div><Icon className="size-4 shrink-0 text-muted-foreground" /></div><div className="mt-2.5 text-xl font-semibold tabular-nums tracking-tight sm:mt-3 sm:text-2xl">{value}</div><div className="mt-1.5 text-[11px] text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
+  return <Card className="admin-metric"><CardContent className="p-3 sm:p-5"><div className="flex items-center justify-between gap-3"><div className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</div><span className="admin-metric-icon grid size-7 shrink-0 place-items-center rounded-lg"><Icon className="size-3.5" /></span></div><div className="mt-2 text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">{value}</div><div className="mt-2 text-[11px] leading-relaxed text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
 }
 
 function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: (section: Section, accountId?: string) => void }) {
@@ -995,14 +1001,14 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
   return <>
     <PageIntro actions={[{ label: "刷新状态", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新状态" title="刷新状态" onClick={refresh} disabled={refreshing}>{refreshing ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新状态"}</Button> }]} />
     {error && <div className="mb-5"><ErrorState message={error} /></div>}
-    <header className="mb-6"><h1 className="text-2xl font-semibold tracking-tight">运行概览</h1><p className="mt-1 text-sm text-muted-foreground">查看 Bot 运行情况与消息统计。</p></header>
+    <header className="mb-6 flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">运行概览</h1><p className="mt-1.5 text-sm text-muted-foreground">查看 Bot 运行情况与消息统计。</p></div><div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] text-muted-foreground"><span className={`size-1.5 rounded-full ${error ? "bg-amber-500" : status ? "bg-emerald-500" : "bg-muted-foreground"}`} />{error ? "状态更新失败" : !status ? "正在读取状态" : "每 15 秒自动更新"}</div></header>
     <div className="mb-6 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-      <Metric icon={Activity} label="运行状态" value={status ? "运行中" : "读取中"} detail={status ? `进程 PID ${status.pid}` : "正在连接 Bot"} />
+      <Metric icon={Activity} label="运行状态" value={status ? "运行中" : error ? "连接失败" : "读取中"} detail={status ? `进程 PID ${status.pid}` : "正在连接 Bot"} />
       <Metric icon={Clock3} label="持续运行" value={status ? formatUptime(status.uptime) : "—"} detail={status?.startedAt ? `启动于 ${new Date(status.startedAt).toLocaleString("zh-CN")}` : "等待运行信息"} />
       <Metric icon={Cpu} label="内存占用" value={status ? formatBytes(status.memory.rss) : "—"} detail={status ? `堆内存 ${formatBytes(status.memory.heapUsed)} / ${formatBytes(status.memory.heapTotal)}` : "Node.js 进程 RSS"} />
       <Metric icon={Users} label="群组缓存" value={status ? String(status.groupCount) : "—"} detail={status ? `${status.accounts.length} 个机器人账号` : "当前 Bot 群组数量"} />
     </div>
-    <div className="mb-3 mt-7 text-sm font-medium text-foreground">消息统计</div>
+    <h2 className="admin-section-heading mb-3 mt-7 flex items-center gap-2 text-sm font-semibold"><MessageSquareText className="size-4 text-primary" />消息统计</h2>
     <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-5">
       <Metric icon={Send} label="今日发送" value={formatCount(status?.messages?.sentToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本周发送" value={formatCount(status?.messages?.sentThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} />
@@ -1010,7 +1016,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
       <Metric icon={Send} label="累计发送" value={formatCount(status?.messages?.sentTotal)} detail={status?.messages?.redisAvailable ? "Redis 累计计数" : "Redis 未连接"} />
       <Metric icon={MessageSquareText} label="运行期间接收" value={formatCount(status?.messages?.receivedSinceStart)} detail={status?.messages?.receivedSinceStart == null ? "适配器未提供接收计数" : "机器人账号运行时计数"} />
     </div>
-    <div className="mb-3 mt-7 text-sm font-medium text-foreground">图片统计</div>
+    <h2 className="admin-section-heading mb-3 mt-7 flex items-center gap-2 text-sm font-semibold"><ImageIcon className="size-4 text-primary" />图片统计</h2>
     <div className="mb-5 grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
       <Metric icon={ImageIcon} label="今日生成图片" value={formatCount(status?.messages?.screenshotsToday)} detail={status?.messages?.redisAvailable ? "Redis 当日计数" : "Redis 未连接"} />
       <Metric icon={Clock3} label="本周生成图片" value={formatCount(status?.messages?.screenshotsThisWeek)} detail={status?.messages?.redisAvailable ? "Redis 本周累计" : "Redis 未连接"} />
@@ -1034,7 +1040,7 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
           { icon: Plug, title: "管理插件设置", desc: "加载插件提供的兼容配置项", section: "plugins" as Section },
           { icon: FileCode2, title: "浏览工作区文件", desc: "查看并编辑文本资源文件", section: "files" as Section },
           { icon: TerminalSquare, title: "查看运行日志", desc: "定位近期错误与命令记录", section: "logs" as Section },
-        ].map(item => <Button type="button" variant="ghost" key={item.title} onClick={() => navigate(item.section)} className={cn("h-auto justify-start whitespace-normal p-0", "group flex items-center gap-3 rounded-xl border border-border p-3 text-left transition hover:border-border hover:bg-accent/40")}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-foreground group-hover:bg-card"><item.icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium">{item.title}</span><span className="mt-1 block text-[10px] text-muted-foreground">{item.desc}</span></span><ChevronRight className="size-4 text-neutral-300 group-hover:text-muted-foreground" /></Button>)}</CardContent></Card>
+        ].map(item => <Button type="button" variant="ghost" key={item.title} onClick={() => navigate(item.section)} className={cn("h-auto justify-start whitespace-normal p-0", "admin-quick-entry group flex items-center gap-3 rounded-xl border border-border p-3 text-left transition hover:border-border hover:bg-accent/40")}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-foreground group-hover:bg-card"><item.icon className="size-4" /></span><span className="min-w-0 flex-1"><span className="block text-xs font-medium">{item.title}</span><span className="mt-1 block text-[10px] text-muted-foreground">{item.desc}</span></span><ChevronRight className="size-4 text-neutral-300 group-hover:text-muted-foreground" /></Button>)}</CardContent></Card>
       </div>
     </div>
   </>
