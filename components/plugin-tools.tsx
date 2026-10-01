@@ -15,11 +15,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowRight, Check, ChevronDown, GitBranch, GitCommitHorizontal, LoaderCircle, RefreshCw, Upload, X } from "lucide-react"
 
 type Api = (url: string, init?: RequestInit) => Promise<any>
-type Proxy = { proxyMode: string; proxy: string }
 type Notify = (kind: "success" | "error", message: string) => void
 
-export function ProxyFields({ value, onChange }: { value: Proxy; onChange: (value: Proxy) => void }) {
-  return <div className="space-y-2"><Label>下载代理</Label><Select value={value.proxyMode} onValueChange={proxyMode => onChange({ ...value, proxyMode })}><SelectTrigger aria-label="代理类型"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">不使用代理</SelectItem><SelectItem value="standard">常规 HTTP / SOCKS 代理</SelectItem><SelectItem value="prefix">链接前缀代理</SelectItem></SelectContent></Select>{value.proxyMode !== "none" && <Input aria-label="代理地址" value={value.proxy} onChange={event => onChange({ ...value, proxy: event.target.value })} placeholder={value.proxyMode === "prefix" ? "https://gh-proxy.com" : "http://127.0.0.1:7890"} required />}</div>
+export function DownloadProxyHint() {
+  return <p className="text-xs leading-5 text-muted-foreground">下载代理统一使用已保存的<a href="/settings/" className="ml-1 underline underline-offset-4">面板设置</a>。</p>
 }
 
 function ToolDialog({ open, onOpenChange, title, description, children, wide = false }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: string; children: React.ReactNode; wide?: boolean }) {
@@ -35,7 +34,6 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   const [ref, setRef] = useState("")
   const [prune, setPrune] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [proxy, setProxy] = useState<Proxy>({ proxyMode: "none", proxy: "" })
   const [dependencies, setDependencies] = useState<DependencyData>({})
   const [dependencyVersion, setDependencyVersion] = useState("")
   const [install, setInstall] = useState(false)
@@ -73,10 +71,10 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
   }
   async function fetchRefs() {
     const session = dialogSession.current
-    const key = JSON.stringify([plugin.id, proxy])
+    const key = String(plugin.id)
     setActivity("fetch"); setFetchError(""); setCheckedAt(null)
     // Reopening the dialog can reuse the same check while Git is still fetching.
-    const check = pendingCheck.current?.key === key ? pendingCheck.current : { key, promise: api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify(proxy) }) }
+    const check = pendingCheck.current?.key === key ? pendingCheck.current : { key, promise: api(`/api/plugins/${encodeURIComponent(plugin.id)}/git/fetch`, { method: "POST", body: JSON.stringify({}) }) }
     pendingCheck.current = check
     try {
       const result = await check.promise
@@ -96,7 +94,7 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
     if (open === "git" && !await confirm(`将 ${plugin.title} 从 ${info?.head?.slice(0, 12)} 更新到${kind === "branch" ? "分支最新版" : "指定提交"} ${ref.trim()}？${prune ? "\n.git 将裁剪为一个提交，原历史会保留备份。" : ""}\n重启 Bot 后生效。`)) return
     setBusy(true); setActivity("update")
     try {
-      const body = open === "git" ? { ...proxy, kind, ref, pruneHistory: prune } : { data: dependencies, install, version: dependencyVersion }
+      const body = open === "git" ? { kind, ref, pruneHistory: prune } : { data: dependencies, install, version: dependencyVersion }
       const result = await api(`/api/plugins/${encodeURIComponent(plugin.id)}/${open === "git" ? "git/update" : "dependencies"}`, { method: open === "git" ? "POST" : "PUT", body: JSON.stringify(body) })
       notify("success", result.message); setOpen(null); await onUpdated()
     } catch (error) { notify("error", (error as Error).message) } finally { setBusy(false); setActivity(null) }
@@ -125,11 +123,12 @@ export function PluginTools({ plugin, api, notify, confirm, onUpdated }: { plugi
           </div>
           <div className="space-y-2"><Label htmlFor={`update-ref-${plugin.id}`}>{kind === "branch" ? "更新分支" : "提交哈希"}</Label><EditableCombobox id={`update-ref-${plugin.id}`} label={kind === "branch" ? "目标分支" : "目标提交"} value={ref} onValueChange={setRef} placeholder={kind === "branch" ? "输入或选择分支" : "输入 7 至 40 位提交哈希"} options={kind === "branch" ? (info?.branches || []).map((branch: string) => ({ value: branch, label: `${branch}${branch === info?.branch ? "（当前分支）" : ""}` })) : (info?.commits || []).map((commit: any) => ({ value: commit.hash, label: `${commit.hash.slice(0, 12)} · ${commit.message}` }))} required /></div>
           <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs leading-5 text-muted-foreground" role="status">{activity === "fetch" ? "正在获取远端版本…" : checkedAt ? `远端版本已刷新 · ${checkedAt}` : "尚未检查远端，记录来自本地缓存"}</p><Button type="button" size="sm" variant="outline" onClick={fetchRefs}>{activity === "fetch" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}检查更新</Button></div>
-          {fetchError && <p role="alert" className="break-words text-xs leading-5 text-destructive">检查失败：{fetchError}。可在高级选项中设置下载代理后重试。</p>}
+          <DownloadProxyHint />
+          {fetchError && <p role="alert" className="break-words text-xs leading-5 text-destructive">检查失败：{fetchError}。可检查面板设置中的下载代理后重试。</p>}
           <div className="rounded-xl border bg-muted/30 p-3" aria-live="polite"><div className="flex items-center gap-2 text-sm font-medium"><ArrowRight className="size-4" />{kind === "branch" ? `更新到 ${ref.trim() || "所选分支"} 最新版` : "切换到所选历史版本"}</div><p className="mt-2 break-words text-xs leading-5 text-muted-foreground">{target ? target.message : kind === "branch" ? "执行更新时会获取该分支的最新代码。" : "可从提交历史选择版本，或填写已知的提交哈希。"}</p>{(target?.hash || kind === "commit" && ref.trim()) && <code className="mt-2 block break-all text-xs">{info?.head?.slice(0, 12)} → {(target?.hash || ref.trim()).slice(0, 12)}</code>}{sameVersion && <p className="mt-2 text-xs text-muted-foreground">{kind === "commit" ? "所选提交就是当前安装版本。" : checkedAt ? "与本次检查记录中的当前版本一致。" : "与本地缓存中的当前版本一致，请先检查更新。"}</p>}</div>
           <div className="overflow-hidden rounded-xl border">
-            <button type="button" aria-expanded={advancedOpen} aria-controls={`update-advanced-${plugin.id}`} onClick={() => setAdvancedOpen(value => !value)} className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">高级选项<span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">{prune ? "裁剪历史已开启" : "代理与历史"}<ChevronDown className={`size-4 transition-transform duration-300 motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} /></span></button>
-            <div id={`update-advanced-${plugin.id}`}><Collapse open={advancedOpen}><fieldset disabled={!advancedOpen || busy} className="min-w-0 space-y-4 border-t p-3"><ProxyFields value={proxy} onChange={value => { setProxy(value); setCheckedAt(null) }} /><div className="flex items-start justify-between gap-4"><div className="space-y-1"><Label htmlFor={`prune-${plugin.id}`}>仅保留一个提交</Label><p className="text-xs leading-5 text-muted-foreground">减少 .git 占用；原提交历史会备份，默认保留完整历史。</p></div><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div></fieldset></Collapse></div>
+            <button type="button" aria-expanded={advancedOpen} aria-controls={`update-advanced-${plugin.id}`} onClick={() => setAdvancedOpen(value => !value)} className="flex w-full items-center justify-between gap-2 p-3 text-left text-sm font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">高级选项<span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">{prune ? "裁剪历史已开启" : "提交历史"}<ChevronDown className={`size-4 transition-transform duration-300 motion-reduce:transition-none ${advancedOpen ? "rotate-180" : ""}`} /></span></button>
+            <div id={`update-advanced-${plugin.id}`}><Collapse open={advancedOpen}><fieldset disabled={!advancedOpen || busy} className="min-w-0 space-y-4 border-t p-3"><div className="flex items-start justify-between gap-4"><div className="space-y-1"><Label htmlFor={`prune-${plugin.id}`}>仅保留一个提交</Label><p className="text-xs leading-5 text-muted-foreground">减少 .git 占用；原提交历史会备份，默认保留完整历史。</p></div><Switch id={`prune-${plugin.id}`} checked={prune} onCheckedChange={setPrune} /></div></fieldset></Collapse></div>
           </div>
         </fieldset>
         <p className={`text-xs leading-5 ${info?.dirty ? "text-destructive" : "text-muted-foreground"}`} role={info?.dirty ? "alert" : undefined}>{info?.dirty ? "检测到本地修改或未跟踪文件，请先处理后再更新。" : "存在本地修改时会停止更新；更新完成后需重启 Bot。"}</p>

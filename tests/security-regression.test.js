@@ -30,9 +30,10 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
   let capApiEndpoint = getCapApiEndpoint({ capServerUrl, capSiteKey: "fixture-site-key" }, {})
   let capSiteverifyEndpoint = getCapSiteverifyEndpoint(capApiEndpoint)
   let frontendCalls = 0, failFrontend = false, capServiceOffline = false, lastCapSecret = ""
-  const frontendUpdateOptions = []
+  const frontendUpdateOptions = [], gitInvocations = []
   let module, tcpServer, devChild, pauseClones = false, failClone = false, localConnections = 0
   const mockSpawn = (command, args) => {
+    if (command === "git") gitInvocations.push(args)
     if (devMode && command === process.execPath && args.includes("dev")) {
       devChild = realSpawn(command, args, { cwd: path.join(fixture, "frontend"), windowsHide: true, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" } })
       return devChild
@@ -81,7 +82,7 @@ test("隔离真实 HTTP/WS 回归：鉴权、轮换、SSRF、并发安装和保�
     await fs.writeFile(path.join(fixture, "package.json"), '{"type":"module"}')
     await fs.writeFile(path.join(fixture, "config/config/other.yaml"), "# 保留注释\nmasterQQ: [10001]\n")
     await fs.writeFile(path.join(fixture, "logs/command.log"), "隔离日志\n")
-    await fs.writeFile(path.join(fixture, "plugins/EliaAdminPanel/elia.support.js"), `export { supportPanel } from ${JSON.stringify(pathToFileURL(path.join(panel, "elia.support.js")).href)}\n`)
+    await fs.writeFile(path.join(fixture, "plugins/EliaAdminPanel/index.js"), "export default {}\n")
     if (devMode) {
       await fs.mkdir(path.join(fixture, "frontend/pages"), { recursive: true })
       await fs.writeFile(path.join(fixture, "frontend/package.json"), '{"name":"isolated-next-security","private":true}')
@@ -201,8 +202,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       }
     })
     await t.test("Cap 站点信息和私钥由插件配置保存，公开 endpoint 动态下发且私钥不回显", async () => {
-      const { supportPanel } = await import("../elia.support.js")
-      const support = supportPanel()
+      const { getPanelSettings } = await import("../src/panel-settings.js")
+      const support = ({ configInfo: getPanelSettings() })
       const data = await support.configInfo.getConfigData()
       const nextServerUrl = "https://configured-cap.example.test"
       const nextSiteKey = "configured-site-key"
@@ -234,13 +235,38 @@ export async function stopFixture() { configEvents.removeListener("changed", app
         else process.env.CAP_SECRET_KEY = previous
       }
     })
+    await t.test("面板设置独立读写、拒绝过期版本，其他插件的原生配置仍留在插件页", async () => {
+      const own = (await call("/api/plugins", undefined, cookie)).data.plugins.find(plugin => plugin.id === "EliaAdminPanel")
+      assert.equal(own.panelSettings, true)
+      assert.equal(own.hasConfig, false)
+      assert.deepEqual(own.schemas, [])
+      assert.equal((await call("/api/plugins/EliaAdminPanel/config", undefined, cookie)).status, 404)
+      const settings = await call("/api/panel/settings", undefined, cookie)
+      assert.equal(settings.status, 200)
+      assert.equal(settings.data.data.password, "")
+      assert.equal(settings.data.data.secret, "")
+      assert.equal(settings.data.data.capSecretKey, "")
+      assert.equal((await call("/api/panel/settings", { port: 50883 }, cookie, "PUT")).status, 428)
+      assert.equal((await call("/api/panel/settings", { ...settings.data.data, downloadProxyMode: "standard", downloadProxyUrl: "http://proxy.example:7890" }, cookie, "PUT")).data.code, -1)
+      const change = { ...settings.data.data, loginImageApi: "https://images.example.test/changed" }
+      assert.equal((await call("/api/panel/settings", change, cookie, "PUT")).data.code, 0)
+      assert.equal((await call("/api/panel/settings", change, cookie, "PUT")).status, 409)
+      const directory = path.join(fixture, "plugins/fixture-settings")
+      await fs.mkdir(directory)
+      await fs.writeFile(path.join(directory, "elia.support.js"), 'let data = { enabled: true }; export function supportPanel() { return { configInfo: { schemas: [{ field: "enabled", component: "Switch" }], getConfigData: () => data, setConfigData: value => { data = value; return { code: 0 } } } } }')
+      const plugin = (await call("/api/plugins", undefined, cookie)).data.plugins.find(plugin => plugin.id === "fixture-settings")
+      assert.equal(plugin.hasConfig, true)
+      const thirdParty = await call("/api/plugins/fixture-settings/config", undefined, cookie)
+      assert.equal((await call("/api/plugins/fixture-settings/config", { enabled: false, _panelVersion: thirdParty.data.version }, cookie, "PUT")).data.code, 0)
+      assert.equal((await call("/api/plugins/fixture-settings/config", undefined, cookie)).data.data.enabled, false)
+    })
     await t.test("全部业务路由与日志 WS 拒绝未登录，完整跨站来源被拒绝", async () => {
       let routes = 0
       for (const match of code.slice(code.indexOf('app.use("/api", requireAuth)')).matchAll(/app\.(get|post|put|patch)\(("[^"]+"|\[[^\]]+\])/g)) for (const route of match[2].matchAll(/"([^"]+)"/g)) {
         const method = match[1].toUpperCase(), endpoint = route[1].replace(/:[A-Za-z]+/g, "fixture")
         assert.equal((await call(endpoint, method === "GET" ? undefined : {}, "", method)).status, 401, endpoint); routes++
       }
-      assert.equal(routes, 38)
+      assert.equal(routes, 40)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie, "GET", { origin: "https://attacker.invalid" })).status, 403)
       assert.equal((await wsConnect(wsBase + "/api/logs/ws")).status, 401)
       assert.equal((await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie, origin: "https://attacker.invalid" } })).status, 403)
@@ -286,13 +312,13 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       const status = await call("/api/frontend/status", undefined, cookie)
       assert.equal(status.status, 200)
       assert.equal(status.data.mode, devMode ? "development" : "release")
-      assert.equal(status.data.proxyAvailable, true)
+      assert.equal(status.data.proxyAvailable, undefined)
       if (devMode) {
         assert.equal((await call("/api/frontend/update", {}, cookie)).status, 409)
         assert.equal(frontendCalls, 0)
       } else {
-        assert.equal((await call("/api/frontend/update", { useProxy: "true" }, cookie)).status, 400)
-        assert.equal(frontendCalls, 0)
+        const proxySettings = await call("/api/panel/settings", undefined, cookie)
+        assert.equal((await call("/api/panel/settings", { ...proxySettings.data.data, downloadProxyMode: "standard", downloadProxyUrl: "http://127.0.0.1:7890" }, cookie, "PUT")).data.code, 0)
         const first = await call("/api/frontend/update", { useProxy: true, proxy: "https://unapproved.example" }, cookie)
         assert.equal(first.status, 200)
         assert.equal(first.data.updated, true)
@@ -310,6 +336,24 @@ export async function stopFixture() { configEvents.removeListener("changed", app
         assert.equal(oldAsset.status, 200)
         assert.equal(await oldAsset.text(), "old chunk")
         assert.equal((await fetch(base + "/_next/static/chunks/fixture-nonexistent.js")).status, 404)
+      }
+    })
+    await t.test("插件安装和前端更新统一读取保存的代理，请求中的覆盖参数无效", async () => {
+      if (devMode) {
+        const settings = await call("/api/panel/settings", undefined, cookie)
+        assert.equal((await call("/api/panel/settings", { ...settings.data.data, downloadProxyMode: "standard", downloadProxyUrl: "http://127.0.0.1:7890" }, cookie, "PUT")).data.code, 0)
+      }
+      assert.equal((await call("/api/plugins/install", { url: "https://example.com/unified-proxy.git", proxyMode: "prefix", proxy: "https://unapproved.example" }, cookie)).status, 200)
+      assert.ok(gitInvocations.find(args => args.includes("clone") && args.includes("http.proxy=http://127.0.0.1:7890/")))
+      const settings = await call("/api/panel/settings", undefined, cookie)
+      assert.equal((await call("/api/panel/settings", { ...settings.data.data, downloadProxyMode: "none" }, cookie, "PUT")).data.code, 0)
+      gitInvocations.length = 0
+      assert.equal((await call("/api/plugins/install", { url: "https://example.com/unified-direct.git", proxyMode: "standard", proxy: "http://127.0.0.1:9999" }, cookie)).status, 200)
+      assert.ok(gitInvocations.find(args => args.includes("clone") && args.includes("http.proxy=")))
+      if (!devMode) {
+        assert.equal((await call("/api/frontend/update", { useProxy: true, proxy: "http://127.0.0.1:9999" }, cookie)).status, 200)
+        assert.equal(frontendUpdateOptions.at(-1).proxyMode, "none")
+        assert.equal(frontendUpdateOptions.at(-1).proxy, "")
       }
     })
     await t.test("配置和文件版本冲突返回 409，缺版本返回 428，注释被保留", async () => {
@@ -370,9 +414,9 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       const connected = await wsConnect(wsBase + "/api/logs/ws", { headers: { cookie } }); assert.equal(connected.status, 101)
       const closed = new Promise(resolve => connected.ws.once("close", resolve))
       const oldVersion = await module.namespace.verifyPanelPassword(password)
-      const settings = await call("/api/plugins/EliaAdminPanel/config", undefined, cookie)
+      const settings = await call("/api/panel/settings", undefined, cookie)
       const newPassword = crypto.randomBytes(24).toString("hex")
-      const result = await call("/api/plugins/EliaAdminPanel/config", { password: newPassword, _version: settings.data.data._version, _panelVersion: settings.data.version }, cookie, "PUT")
+      const result = await call("/api/panel/settings", { password: newPassword, _version: settings.data.data._version }, cookie, "PUT")
       assert.equal(result.status, 200); assert.equal(result.data.code, 0)
       assert.equal(await timeout(closed), 4401)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie)).status, 401)
@@ -381,8 +425,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       await assert.rejects(module.namespace.issueSession({ socket: {}, headers: {} }, { setHeader() {} }, oldVersion), { status: 401 })
       const next = await call("/api/auth/login", { password: newPassword }); assert.equal(next.status, 200)
       cookie = next.cookie.split(";")[0]
-      const { supportPanel } = await import("../elia.support.js")
-      const support = supportPanel(), data = await support.configInfo.getConfigData()
+      const { getPanelSettings } = await import("../src/panel-settings.js")
+      const support = ({ configInfo: getPanelSettings() }), data = await support.configInfo.getConfigData()
       const changed = await support.configInfo.setConfigData({ ...data, password: newPassword + "2" }, { Result: { ok: (_data, message) => ({ code: 0, message }), error: message => ({ code: -1, message }) } })
       assert.equal(changed.code, 0)
       assert.equal((await call("/api/files/read?path=package.json", undefined, cookie)).status, 401)
@@ -451,8 +495,8 @@ export async function stopFixture() { configEvents.removeListener("changed", app
       const entrance = "a8F3kLm92P_fixture"
       const entranceCookie = (token) => `security_entrance=${token}`
       process.env.SECURITY_ENTRANCE = entrance
-      const { supportPanel } = await import("../elia.support.js")
-      const support = supportPanel()
+      const { getPanelSettings } = await import("../src/panel-settings.js")
+      const support = ({ configInfo: getPanelSettings() })
       const saveSupportConfig = data => support.configInfo.setConfigData(data, { Result: { ok: (_data, message) => ({ code: 0, message }), error: message => ({ code: -1, message }) } })
       let supportData = await support.configInfo.getConfigData()
       assert.equal(supportData.securityEntrance, entrance)

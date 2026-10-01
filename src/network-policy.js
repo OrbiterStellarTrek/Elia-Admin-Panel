@@ -21,18 +21,8 @@ export function normalizeNetworkUrl(input, { proxy = false } = {}) {
     || url.username || url.password || url.hash || (!proxy && url.port && url.port !== "443")) throw securityError("只接受无凭据、标准端口的 HTTPS 地址")
   const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase()
   if (!proxy && (host.endsWith(".") || host === "localhost" || /\.(?:local|localhost|internal|home|lan)$/.test(host))) throw securityError("目标主机不属于公网")
+  if (proxy && !url.pathname) url.pathname = "/"
   return url
-}
-export function approvedFrontendProxy(policy = {}) {
-  const configured = Array.isArray(policy?.approvedProxyUrls) ? policy.approvedProxyUrls : []
-  for (const value of configured) {
-    let proxy
-    try { proxy = normalizeNetworkUrl(value, { proxy: true }) } catch { continue }
-    const hostname = proxy.hostname.replace(/^\[|\]$/g, "")
-    if (!["http:", "https:"].includes(proxy.protocol) || !net.isIP(hostname) || proxy.pathname !== "/" || proxy.search) continue
-    return proxy.href
-  }
-  return null
 }
 export async function resolvePublicUrl(input, { lookup = dns.lookup } = {}) {
   const url = normalizeNetworkUrl(input)
@@ -98,7 +88,7 @@ export async function secureGitTransport(url, options = {}, policy = {}, resolve
     if (!net.isIP(proxy.hostname.replace(/^\[|\]$/g, ""))) throw securityError("获批常规代理必须使用固定 IP 地址")
     if (proxy.pathname !== "/" || proxy.search) throw securityError("常规代理必须是站点根地址")
     const approved = (policy.approvedProxyUrls || []).map(value => normalizeNetworkUrl(value, { proxy: true }).href)
-    if (!approved.includes(proxy.href)) throw securityError("此常规代理未获运维批准，请在受保护的面板配置中添加 approvedProxyUrls")
+    if (!approved.includes(proxy.href)) throw securityError("此常规代理未获批准，请在面板设置中保存下载代理")
     // The exact approved proxy is an explicit trusted egress boundary.
     args.push("-c", `http.proxy=${proxy.href}`, "-c", `http.${endpoint.url.href}.proxy=${proxy.href}`)
   } else if (mode !== "none") throw securityError("代理模式无效")

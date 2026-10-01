@@ -3,7 +3,7 @@ import { execFile as execFileCallback } from "node:child_process"
 import { promisify } from "node:util"
 import fs from "node:fs/promises"
 import path from "node:path"
-import { ProxyAgent } from "undici"
+import { withDownloadProxy } from "./download-proxy.js"
 import { withLock } from "./security.js"
 
 const execFile = promisify(execFileCallback)
@@ -163,15 +163,9 @@ export async function frontendBuildInfo(pluginDir) {
 }
 
 async function installLatestFrontend(pluginDir, options = {}) {
-  const { fetchImpl = globalThis.fetch, proxy, ...buildOptions } = options
+  const { fetchImpl = globalThis.fetch, proxy, proxyMode = proxy ? "standard" : "none", ...buildOptions } = options
   if (typeof fetchImpl !== "function") throw new Error("当前 Node.js 不支持下载前端构建")
-  const dispatcher = proxy ? new ProxyAgent(proxy) : null
-  const requestFetch = dispatcher ? (url, init) => fetchImpl(url, { ...init, dispatcher }) : fetchImpl
-  try {
-    return await installLatestFrontendWithFetch(pluginDir, { ...buildOptions, fetchImpl: requestFetch })
-  } finally {
-    await dispatcher?.close()
-  }
+  return withDownloadProxy({ proxyMode, proxy }, requestFetch => installLatestFrontendWithFetch(pluginDir, { ...buildOptions, fetchImpl: requestFetch }), { fetchImpl })
 }
 
 async function installLatestFrontendWithFetch(pluginDir, { fetchImpl, execute = execFile, rename = fs.rename, backupDir = path.join(pluginDir, ".elia-admin-panel-previous-out") } = {}) {

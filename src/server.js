@@ -13,11 +13,13 @@ import { WebSocketServer } from "ws"
 import YAML from "yaml"
 import { updateYamlPreservingComments } from "./config-yaml.js"
 import { pickNumericGroup, ffmpegPath } from "./bot-capabilities.js"
-import { repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "./plugin-management.js"
+import { repositoryInfo, fetchRepository, updateRepository, validateDependencies } from "./plugin-management.js"
 import { readConfig as readPanelConfig, writeConfig as writePanelConfig, configEvents, configGeneration, deliverCredential } from "./panel-config.js"
 import { contentVersion, credentialVersion, withLock, withBudget, requireVersion, originAllowed, requestIsSecure, devRequestNeedsAuth, redact } from "./security.js"
 import { verifyCapToken } from "./captcha.js"
-import { approvedFrontendProxy, safeDownload, secureGitTransport } from "./network-policy.js"
+import { safeDownload, secureGitTransport } from "./network-policy.js"
+import { downloadProxySettings, downloadProxyPolicy, downloadFile } from "./download-proxy.js"
+import { getPanelSettings } from "./panel-settings.js"
 import { auditEvent } from "./audit.js"
 import { ensureFrontendBuild, frontendBuildInfo, updateFrontendBuild } from "./frontend-build.js"
 import { getCapApiEndpoint } from "../lib/cap-config.js"
@@ -684,7 +686,7 @@ async function initializePassword() {
   const config = await readPanelConfig()
   if (hasPasswordCredential(config)) return
   if (config.passwordHash || config.passwordSalt || config.passwordIterations) {
-    throw new Error("面板配置中的密码哈希无效；请在插件配置页重新设置面板密码")
+    throw new Error("面板配置中的密码哈希无效；请在面板设置中重新设置面板密码")
   }
   const generatedPassword = crypto.randomBytes(24).toString("base64url")
   const credential = await createPasswordCredential(generatedPassword)
@@ -1032,6 +1034,7 @@ async function formatPluginEntry(name, title, directory, support = null, metadat
     directory,
     sourcePath: metadata.sourcePath || "",
     hasSupport: Boolean(support),
+    panelSettings: name.toLowerCase() === "eliaadminpanel",
     hasSupportFile: Boolean(metadata.hasSupportFile),
     hasGit: Boolean(metadata.hasGit),
     hasPackage: Boolean(metadata.hasPackage),
@@ -1829,7 +1832,7 @@ async function refreshSecurity() {
     return
   }
 }
-const panelGitTransport = (url, options) => secureGitTransport(url, options, securityPolicy)
+const panelGitTransport = url => secureGitTransport(url, downloadProxySettings(securityPolicy), downloadProxyPolicy(securityPolicy))
 const installPluginDependencies = id => withLock("workspace-pnpm-install", () => runProcess("pnpm", ["install", "--filter", `./plugins/${id}`, "--ignore-scripts"], 300_000, ROOT, process.platform === "win32"))
 function runProcessUnbounded(command, args, timeoutMs = 120_000, cwd = ROOT, shell = false, stdoutOnly = false) {
   return new Promise((resolve, reject) => {
@@ -1952,7 +1955,7 @@ export async function startAdminPanel() {
   const settings = await readPanelSettings()
   if (settings.devMode && !["127.0.0.1", "::1", "localhost"].includes(settings.host)) throw new Error("开发模式仅允许本地访问，请关闭 devMode 后再继续后续操作")
   if (!settings.devMode) {
-    const releaseTag = await ensureFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR })
+    const releaseTag = await ensureFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR, ...downloadProxySettings(await readPanelConfig()) })
     if (releaseTag) safeLogger("info", `[AdminPanel] 未检测到前端构建产物，已从 GitHub Release ${releaseTag} 初始化`)
   }
   await fs.mkdir(DATA_DIR, { recursive: true })
@@ -2360,6 +2363,13 @@ export async function startAdminPanel() {
   }))
 
   app.get("/api/plugins", asyncRoute(async (req, res) => res.json({ plugins: await listPlugins() })))
+  app.get("/api/panel/settings", asyncRoute(async (req, res) => {
+    const settings = getPanelSettings()
+    res.json({ schemas: settings.schemas, data: await settings.getConfigData() })
+  }))
+  app.put("/api/panel/settings", asyncRoute(async (req, res) => {
+    res.json(await getPanelSettings().setConfigData(req.body || {}, { Result: makeResult() }))
+  }))
   app.get("/api/plugins/:id/git", asyncRoute(async (req, res) => {
     res.json(await repositoryInfo(await managedPluginDirectory(req.params.id), runGitProcess))
   }))
@@ -2399,7 +2409,7 @@ export async function startAdminPanel() {
     await withPluginOperation("example", async () => {
     const name = uploadName(req.query.name || req.body?.name)
     if (!name.toLowerCase().endsWith(".js")) return res.status(400).json({ error: "小插件文件名必须以 .js 结尾" })
-    const buffer = Buffer.isBuffer(req.body) ? req.body : await withBudget("download", 4, () => downloadScript(String(req.body?.url || ""), MAX_TEXT_BYTES))
+    const buffer = Buffer.isBuffer(req.body) ? req.body : await withBudget("download", 4, () => downloadFile(String(req.body?.url || ""), MAX_TEXT_BYTES, downloadProxySettings(securityPolicy)))
     if (!buffer.length || buffer.length > MAX_TEXT_BYTES) return res.status(400).json({ error: "插件文件为空或超过 1.5 MB" })
     await fs.mkdir(DATA_DIR, { recursive: true })
     const checkFile = path.join(DATA_DIR, `script-check-${crypto.randomBytes(8).toString("hex")}.mjs`)
@@ -2691,15 +2701,12 @@ export async function startAdminPanel() {
     res.json({ files, selected, content: log.entries.map(entry => entry.text).join("\n"), entries: log.entries, cursor: log.cursor, identity: log.identity })
   }))
   app.get("/api/frontend/status", asyncRoute(async (req, res) => {
-    res.json({ mode: settings.devMode ? "development" : "release", installed: await frontendBuildInfo(PANEL_DIR), proxyAvailable: Boolean(approvedFrontendProxy(securityPolicy)) })
+    res.json({ mode: settings.devMode ? "development" : "release", installed: await frontendBuildInfo(PANEL_DIR) })
   }))
   app.post("/api/frontend/update", asyncRoute(async (req, res) => {
     if (settings.devMode) return res.status(409).json({ error: "当前正在使用开发源码，请关闭开发模式并重启 Bot 后更新发布版前端" })
-    if (req.body?.useProxy !== undefined && typeof req.body.useProxy !== "boolean") return res.status(400).json({ error: "代理开关参数无效" })
-    const proxy = req.body?.useProxy ? approvedFrontendProxy(securityPolicy) : null
-    if (req.body?.useProxy && !proxy) return res.status(409).json({ error: "未配置获批的 HTTP(S) 固定 IP 代理" })
     try {
-      const result = await updateFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR, ...(proxy ? { proxy } : {}) })
+      const result = await updateFrontendBuild(PANEL_DIR, { backupDir: FRONTEND_BACKUP_DIR, ...downloadProxySettings(securityPolicy) })
       res.json({ ok: true, ...result, message: result.updated ? "前端已更新，刷新页面后使用新版本" : "前端已是最新版本，无需更新" })
     } catch (error) {
       if (error.status === 409) throw error
@@ -2724,7 +2731,7 @@ export async function startAdminPanel() {
     app.use("/_next/static", express.static(path.join(FRONTEND_BACKUP_DIR, "_next/static"), { index: false, maxAge: "1h", fallthrough: true }))
     app.use((req, res, next) => {
       if (req.path.startsWith("/_next/")) return res.status(404).send("静态资源不存在，请刷新页面")
-      const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug|rules)\/?$/)?.[1]
+      const section = req.path.match(/^\/(accounts|config|plugins|files|logs|debug|rules|settings)\/?$/)?.[1]
       const entry = section ? path.join(STATIC_DIR, section, "index.html") : path.join(STATIC_DIR, "index.html")
       fs.access(entry)
         .then(() => res.sendFile(entry))

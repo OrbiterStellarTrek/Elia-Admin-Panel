@@ -40,7 +40,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command as CommandMenu, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Switch } from "@/components/ui/switch"
 import { SchemaOptions } from "@/components/schema-options"
-import { PluginTools, ScriptInstaller, ProxyFields } from "@/components/plugin-tools"
+import { PluginTools, ScriptInstaller, DownloadProxyHint } from "@/components/plugin-tools"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 
 const MonacoCodeEditor = dynamic(
@@ -94,7 +94,7 @@ function ColorPickerField({ value, label, placeholder, onChange }: { value: stri
   </div>
 }
 
-type Section = "overview" | "accounts" | "config" | "plugins" | "files" | "logs" | "debug" | "rules"
+type Section = "overview" | "accounts" | "config" | "plugins" | "files" | "logs" | "debug" | "rules" | "settings"
 type Notice = { kind: "success" | "error" | "info"; message: string; exiting: boolean } | null
 type Api = (url: string, init?: RequestInit) => Promise<any>
 type Confirm = (message: string) => Promise<boolean>
@@ -116,6 +116,7 @@ const navigation: { id: Section; label: string; icon: typeof LayoutDashboard }[]
   { id: "accounts", label: "账号管理", icon: UserRound },
   { id: "config", label: "配置中心", icon: Settings2 },
   { id: "plugins", label: "插件控制", icon: Plug },
+  { id: "settings", label: "面板设置", icon: Monitor },
   { id: "files", label: "文件管理", icon: FileCode2 },
   { id: "logs", label: "运行日志", icon: TerminalSquare },
   { id: "debug", label: "消息调试", icon: MessageSquareText },
@@ -351,7 +352,7 @@ function SecurityEntranceWarningToast({ seconds, exiting, onDismiss, onExited }:
     <CircleHelp className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
     <div className="min-w-0 flex-1">
       <p className="font-semibold">尚未配置安全入口</p>
-      <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-300">请前往“插件控制 → EliaAdminPanel → 登录安全”设置安全入口路径，避免登录页与登录接口直接暴露。</p>
+      <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-300">请前往“面板设置 → 登录安全”设置安全入口路径，避免登录页与登录接口直接暴露。</p>
       <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">{seconds > 0 ? `${seconds} 秒后可关闭` : "现在可以关闭此提醒"}</p>
     </div>
     <Button
@@ -799,11 +800,12 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
       {sidebarPresent && <Button type="button" variant="ghost" data-state={sidebarOpen ? "open" : "closed"} inert={!sidebarOpen} className="admin-mobile-overlay h-auto p-0 fixed inset-0 z-30 bg-neutral-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
       <div className="min-h-screen">
         <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-card/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
-        <main key={section} data-motion-page={section} className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" || section === "rules" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" ? "max-w-none px-0 pb-0 pt-16 md:pt-0" : section === "config" ? "max-w-none px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
+        <main key={section} data-motion-page={section} className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" || section === "rules" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" || section === "config" || section === "settings" ? "max-w-none px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
           {section === "config" && <ConfigCenter api={api} notify={notify} confirm={confirm} />}
           {section === "plugins" && <PluginCenter api={api} notify={notify} confirm={confirm} />}
+          {section === "settings" && <PanelSettings api={api} notify={notify} />}
           {section === "files" && <FileManager api={api} notify={notify} confirm={confirm} initialPath={fileManagerPath} />}
           {section === "logs" && <LogViewer api={api} />}
           {section === "debug" && <MessageDebugger api={api} />}
@@ -989,6 +991,83 @@ function Metric({ icon: Icon, label, value, detail }: { icon: typeof Cpu; label:
   return <Card className="admin-metric"><CardContent className="p-3 sm:p-5"><div className="flex items-center justify-between gap-3"><div className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</div><span className="admin-metric-icon grid size-7 shrink-0 place-items-center rounded-lg"><Icon className="size-3.5" /></span></div><div className="mt-2 text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">{value}</div><div className="mt-2 text-[11px] leading-relaxed text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
 }
 
+function PublicUrlsField({ schema, value, onChange }: { schema: any; value: string; onChange: (value: string) => void }) {
+  const parseEntries = (text: string) => text.split(/[,\r\n]+/).map(entry => entry.trim()).filter(Boolean)
+  const [entries, setEntries] = useState(() => parseEntries(value || ""))
+  const serialized = entries.join("\n")
+  useEffect(() => {
+    if ((value || "") !== serialized) setEntries(parseEntries(value || ""))
+  }, [value, serialized])
+  function update(next: string[]) {
+    setEntries(next)
+    onChange(next.join("\n"))
+  }
+  return <div className="min-w-0 space-y-2.5 rounded-xl border border-border bg-muted/40 px-3.5 py-3">
+    <div className="flex items-center gap-1"><Label className="text-xs">{schema.label}</Label><FieldHelp label={schema.label} message="主人快捷登录链接使用的站点根地址，可添加多个地址。仅支持 HTTP(S)，不要包含子路径。留空则根据监听地址生成。" /></div>
+    {entries.length ? <div role="group" aria-label="公网访问地址列表" className="space-y-2">{entries.map((entry, index) => <div key={index} className="flex min-w-0 items-center gap-2">
+      <Input aria-label={`公网访问地址 ${index + 1}`} className="min-w-0 flex-1" type="url" autoComplete="url" placeholder="https://bot.example.com" value={entry} onChange={event => update(entries.map((current, entryIndex) => entryIndex === index ? event.target.value : current))} />
+      <Button type="button" variant="ghost" size="icon" className="shrink-0" aria-label={`删除公网访问地址 ${index + 1}`} onClick={() => update(entries.filter((_, entryIndex) => entryIndex !== index))}><X className="size-4" /></Button>
+    </div>)}</div> : <p className="text-xs text-muted-foreground">未设置地址，将根据监听地址生成。</p>}
+    <Button type="button" size="sm" variant="outline" onClick={() => update([...entries, ""])}><Plus className="size-3.5" />添加地址</Button>
+  </div>
+}
+
+function PanelSettings({ api, notify }: { api: Api; notify: (kind: "success" | "error" | "info", message: string) => void }) {
+  const [schemas, setSchemas] = useState<any[]>([])
+  const [data, setData] = useState<any>(null)
+  const [groupIndex, setGroupIndex] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState("")
+  const load = useCallback(async () => {
+    setLoading(true); setError("")
+    try {
+      const result = await api("/api/panel/settings")
+      setSchemas(result.schemas); setData(result.data)
+    } catch (reason) { setError((reason as Error).message) }
+    finally { setLoading(false) }
+  }, [api])
+  useEffect(() => { void load() }, [load])
+  const groups = splitPluginSchemaGroups(schemas)
+  const activeGroup = groups[groupIndex] || groups[0]
+  const rows = groupSchemaFields((activeGroup?.schemas || []).filter(schema => schema.field !== "downloadProxyUrl" || data?.downloadProxyMode !== "none"), data || {})
+  async function save() {
+    if (!data || busy || loading || error) return
+    setBusy(true)
+    try {
+      const result = await api("/api/panel/settings", { method: "PUT", body: JSON.stringify(data) })
+      if (result.code !== undefined && result.code !== 0) throw new Error(result.message || "保存失败")
+      notify("success", result.message || "面板设置已保存")
+      if (data.password || data.secret) {
+        window.dispatchEvent(new Event("panel:auth-expired"))
+      } else {
+        const saved = await api("/api/panel/settings")
+        setData(saved.data)
+      }
+    } catch (reason) { notify("error", (reason as Error).message) }
+    finally { setBusy(false) }
+  }
+  return <section className="min-h-[calc(100dvh-4rem)] min-w-0 bg-card md:min-h-dvh">
+    <div className="sticky top-16 z-20 bg-card/95 backdrop-blur-sm md:top-0">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
+        <div className="min-w-0"><h1 className="text-base font-semibold tracking-tight">面板设置</h1><p className="mt-1 text-sm text-muted-foreground">管理面板服务、登录安全和统一下载代理。监听地址、端口及开发模式修改后需重启 Bot。</p></div>
+        <div className="flex shrink-0 gap-2"><Button variant="outline" disabled={loading || busy} onClick={load} aria-label="重新读取面板设置"><RefreshCw />重新读取</Button><Button disabled={!data || loading || busy || Boolean(error)} onClick={save}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存设置</Button></div>
+      </header>
+      <div role="group" aria-label="面板设置分组" className="scrollbar-thin flex gap-0.5 overflow-x-auto border-b border-border px-3">
+        {groups.map((group, index) => <Button key={group.label} variant="ghost" aria-pressed={index === groupIndex} className={cn("h-auto shrink-0 rounded-none px-3.5 py-3 text-xs font-medium", index === groupIndex ? "relative text-primary after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary" : "text-muted-foreground hover:text-foreground")} onClick={() => setGroupIndex(index)}>{group.label}</Button>)}
+      </div>
+    </div>
+      <div className="p-4 sm:p-5">
+        {error ? <ErrorState message={error} /> : loading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : <fieldset disabled={busy} className="min-w-0 space-y-4">
+          {rows.map((row, index) => <div key={index} className={row.kind === "cards" ? "grid min-w-0 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-2" : "min-w-0 space-y-4"}>
+            {row.schemas.map((schema, fieldIndex) => <div key={schema.field} className={row.kind === "cards" ? cn("min-w-0 bg-card px-4 py-2", fieldIndex === row.schemas.length - 1 && row.schemas.length % 2 === 1 && "sm:col-span-full") : "min-w-0"}>{schema.field === "publicUrl" ? <PublicUrlsField schema={schema} value={data.publicUrl || ""} onChange={value => setData((old: any) => ({ ...old, publicUrl: value }))} /> : <SchemaField schema={schema} value={getNested(data, schema.field)} onChange={value => setData((old: any) => setNested(old, schema.field.split("."), value))} validateCron={expression => api("/api/cron/validate", { method: "POST", body: JSON.stringify({ expression }) })} compactCard={row.kind === "cards"} />}</div>)}
+          </div>)}
+        </fieldset>}
+      </div>
+    <FrontendUpdater api={api} notify={notify} />
+  </section>
+}
+
 function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: (section: Section, accountId?: string) => void }) {
   const [status, setStatus] = useState<any>(null)
   const [error, setError] = useState("")
@@ -1034,7 +1113,6 @@ function Overview({ api, notify, navigate }: { api: Api; notify: any; navigate: 
         <div className="mt-5 border-t border-border pt-4"><div className="mb-3 flex items-center justify-between gap-3"><div className="text-xs font-semibold">机器人账号</div><Button variant="ghost" type="button" onClick={() => navigate("accounts")} title="前往账号管理" className={cn("h-auto justify-start whitespace-normal p-0", "inline-flex shrink-0 items-center gap-1 rounded-md px-1 py-1 text-xs font-medium text-foreground transition hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}>管理账号<ChevronRight className="size-3.5" /></Button></div>{status?.accounts?.length ? <div className="space-y-2">{status.accounts.map((account: any) => <Button variant="ghost" key={account.id} type="button" onClick={() => navigate("accounts", String(account.id))} aria-label={`管理账号 ${account.nickname || `账号 ${account.id}`}，QQ ${account.id}`} title="管理此账号" className={cn("h-auto justify-start whitespace-normal p-0", "group flex w-full items-center justify-between rounded-xl bg-muted px-3.5 py-3 text-left transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}><span className="flex min-w-0 items-center gap-3"><span className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full bg-card text-foreground shadow-sm"><Bot className="size-4" /><img src={account.avatar} alt="" referrerPolicy="no-referrer" className="absolute inset-0 size-full object-cover" onError={event => event.currentTarget.remove()} /></span><span className="min-w-0"><span className="block truncate text-sm font-medium">{account.nickname || `账号 ${account.id}`}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">QQ {account.id}</span></span></span><span className="flex shrink-0 items-center gap-2"><Badge className={account.online ? "border-emerald-100 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" : "border-border bg-card text-muted-foreground"}>{account.status}</Badge><ChevronRight className="size-4 text-neutral-300 transition group-hover:text-muted-foreground" /></span></Button>)}</div> : <div className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">当前没有可显示的机器人账号</div>}</div>
       </CardContent></Card>
       <div className="space-y-5">
-        <FrontendUpdater api={api} notify={notify} />
         <Card><CardHeader><CardTitle>快速入口</CardTitle><CardDescription>常用的控制功能</CardDescription></CardHeader><CardContent className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-1">{[
           { icon: FileCog, title: "编辑运行配置", desc: "Bot、群组与系统 YAML 配置", section: "config" as Section },
           { icon: Plug, title: "管理插件设置", desc: "加载插件提供的兼容配置项", section: "plugins" as Section },
@@ -1994,7 +2072,6 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   const [smallSearch, setSmallSearch] = useState("")
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState("")
-  const [installProxy, setInstallProxy] = useState({ proxyMode: "none", proxy: "" })
   const [showUnconfigured, setShowUnconfigured] = useState(false)
   const [installName, setInstallName] = useState("")
   const [installDependencies, setInstallDependencies] = useState(false)
@@ -2197,7 +2274,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     if (!await confirm(`从以下 HTTPS 仓库下载插件？\n${installUrl}\n\n${installOptions.join("\n")}`)) return
     setBusy(true)
     try {
-      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ ...installProxy, url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
+      const result = await api("/api/plugins/install", { method: "POST", body: JSON.stringify({ url: installUrl, name: installName || undefined, installDependencies, restartBot: restartAfterInstall }) })
       setShowInstall(false); setInstallUrl(""); setInstallName(""); setInstallDependencies(false); setRestartAfterInstall(false)
       await refresh()
       notify("success", result.message)
@@ -2308,10 +2385,11 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-0" : "p-5"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{detailLoading ? <div className="grid min-h-0 flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="relative min-h-0 flex-1 overflow-hidden" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
+          : selected.panelSettings ? <div className="space-y-3 rounded-xl border bg-muted/30 p-5"><p className="text-sm">EliaAdminPanel 的运行配置和代理已移至面板设置。</p><a href="/settings/" className="inline-flex items-center gap-2 text-sm underline underline-offset-4"><Monitor className="size-4" />打开面板设置</a></div>
           : selected.hasConfig ? <div key={`${selected.id}-${activeSchemaGroup}`} className="admin-fields-enter space-y-3.5">{detailLoading ? <div className="grid min-h-48 place-items-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div> : schemaLayout.map(item => {
             if (item.kind === "panel") {
               const multi = item.items.length > 1
-              return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border bg-border/60 shadow-xs ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }) => <div key={schema.field} className="min-w-0 bg-card px-4 py-2 transition-colors hover:bg-accent/25">{renderSchemaField(schema, index, true)}</div>)}</div>
+              return <div key={`panel-${item.items[0].schema.field}`} className={`grid min-w-0 gap-px overflow-hidden rounded-xl border border-border bg-border/60 shadow-xs ${multi ? "sm:grid-cols-2" : ""}`}>{item.items.map(({ schema, index }, fieldIndex) => <div key={schema.field} className={cn("min-w-0 bg-card px-4 py-2 transition-colors hover:bg-accent/25", fieldIndex === item.items.length - 1 && item.items.length % 2 === 1 && "sm:col-span-full")}>{renderSchemaField(schema, index, true)}</div>)}</div>
             }
             return <div key={`block-${item.schema.field}`} className="min-w-0">{renderSchemaField(item.schema, item.index)}</div>
           })}</div>
@@ -2333,7 +2411,7 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
         <form onSubmit={installPlugin} className="space-y-3">
           <div className="space-y-1.5"><Label htmlFor="plugin-install-url" className="text-xs">HTTPS 仓库地址</Label><Input id="plugin-install-url" value={installUrl} onChange={event => setInstallUrl(event.target.value)} placeholder="https://github.com/owner/plugin.git" required /></div>
           <div className="space-y-1.5"><Label htmlFor="plugin-install-name" className="text-xs">插件目录名</Label><Input id="plugin-install-name" value={installName} onChange={event => setInstallName(event.target.value)} placeholder="可选，默认使用仓库名" /></div>
-          <ProxyFields value={installProxy} onChange={setInstallProxy} />
+          <DownloadProxyHint />
           <div className="grid grid-cols-1 divide-y divide-border rounded-lg border border-border px-3 sm:grid-cols-2 sm:divide-x sm:divide-y-0">
             <div className="flex items-center justify-between gap-3 py-3 sm:pr-3"><Label htmlFor="plugin-install-dependencies" className="text-xs">安装对应依赖</Label><Switch id="plugin-install-dependencies" checked={installDependencies} onCheckedChange={setInstallDependencies} /></div>
             <div className="flex items-center justify-between gap-3 py-3 sm:pl-3"><Label htmlFor="plugin-restart-after-install" className="text-xs">重启 Bot</Label><Switch id="plugin-restart-after-install" checked={restartAfterInstall} onCheckedChange={setRestartAfterInstall} /></div>
@@ -2432,16 +2510,16 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   const colorInput = component === "ColorPicker" || component === "GColorPicker" || (component === "Input" && String(label).includes("颜色") && (!props.type || props.type === "text"))
   if (compactCard && component === "Switch") return <div className="flex min-h-9 items-center justify-between gap-3">
     <div className="min-w-0"><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
-    <div className="flex shrink-0 items-center gap-2"><span className={`text-[10px] font-medium ${value ? "text-foreground" : "text-muted-foreground"}`}>{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
+    <div className="flex shrink-0 items-center gap-2"><span className={`text-[10px] font-medium ${value ? "text-foreground" : "text-muted-foreground"}`}>{value ? "已启用" : "已关闭"}</span><Switch aria-label={label} checked={Boolean(value)} onCheckedChange={onChange} /></div>
   </div>
   if (compactCard) return <div className="space-y-1">
     <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
-    {component === "InputNumber" ? <Input className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={onChange} /> : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
+    {component === "InputNumber" ? <Input aria-label={label} className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput aria-label={label} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input aria-label={label} className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
   </div>
   return <div className="space-y-1.5 rounded-xl border border-border bg-muted/40 px-3.5 py-3 transition-colors hover:border-border hover:bg-accent/30">
     <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
-    <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border px-3"><span className="text-xs text-muted-foreground">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={onChange} /></div>
-      : component === "InputNumber" ? <Input type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
+    <div>{component === "Switch" ? <div className="flex h-10 items-center justify-between rounded-xl border border-border px-3"><span className="text-xs text-muted-foreground">{value ? "已启用" : "已关闭"}</span><Switch aria-label={label} checked={Boolean(value)} onCheckedChange={onChange} /></div>
+      : component === "InputNumber" ? <Input aria-label={label} type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} />
       : component === "RadioGroup" || component === "Select" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} />
       : component === "EasyCron" ? <CronExpressionField value={textValue} onChange={onChange} validate={validateCron} />
       : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} />
@@ -2449,7 +2527,7 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
       : listWidget ? <ConfigListField name={schema.field} label={label} value={typeof value === "string" ? value.split(/\r?\n/).filter(Boolean) : value} forceItemType="string" forceAvatarKind={forceAvatarKind} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} onChange={onChange} />
       : component === "GSubForm" || isObject(value) ? <StructuredConfigField value={value} label={label} onChange={onChange} />
       : component === "InputTextArea" || (multilineTextField(schema.field, value) && !secretField(schema.field)) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={textValue} rows={props.rows} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />
-      : secretField(schema.field) || props.type === "password" ? <SecretInput autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : <Input type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
+      : secretField(schema.field) || props.type === "password" ? <SecretInput aria-label={label} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : <Input aria-label={label} type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}</div>
   </div>
 }
 

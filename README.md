@@ -24,7 +24,7 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 - **禁用/启用**：禁用后将整个目录保留到面板数据目录，重启 Bot 后停止加载；可从“已禁用插件”重新启用。面板自身不能禁用。
 - **依赖编辑**：含 `package.json` 的插件可编辑 dependencies、devDependencies、peerDependencies 和 optionalDependencies，保存前备份；可选随后安装依赖，跳过生命周期脚本。
-- **手动更新**：有公开 HTTPS origin 的 Git 插件可选择或输入分支、commit；获取远端后展示分支及最多 80 条提交。可使用常规 HTTP/SOCKS 代理或 `https://gh-proxy.com` 形式的链接前缀代理。代理只用于此次 Git 下载，不写入 origin。发现本地修改或未跟踪文件时停止更新。
+- **手动更新**：有公开 HTTPS origin 的 Git 插件可选择或输入分支、commit；获取远端后展示分支及最多 80 条提交。统一使用“面板设置”中的常规 HTTP/SOCKS 代理或 HTTPS 链接前缀代理，代理不写入 origin。发现本地修改或未跟踪文件时停止更新。
 - **历史裁剪**：更新时可将独立 `.git` 裁剪成只含所选最新提交的浅仓库；原 Git 数据保存在 `data/elia-admin-panel/git-backups/`。普通分支更新会通过 Git 备份引用保留原分支提交；指定 commit 后处于游离 HEAD。不支持裁剪 Git worktree 的 `.git` 文件、存在关联 worktree 或已初始化子模块的仓库。
 - **单 JS 安装**：从小插件区上传 `.js` 或指定 HTTPS 文件直链，安装到 `plugins/example/`，最多 1.5 MB；拒绝重定向、HTML 网页和语法错误，不覆盖同名文件。重启后加载。
 
@@ -60,17 +60,17 @@ pnpm install --filter elia-admin-panel --ignore-scripts
 - **面板密码**：在 EliaAdminPanel 插件配置中设置新密码（至少 12 个字符）；密码框默认留空，读取配置时不会回显密码。保存后立即生效，并以独立随机盐和 PBKDF2 哈希写入配置。密码登录按来源 IP 限流，每 15 分钟最多 10 次，并限制密码派生计算的并发数。忘记密码时可先用验证码或主人快捷地址登录，再在插件配置中重设。
 - **浏览器会话**：使用 HttpOnly、SameSite=Strict Cookie，令牌有效 12 小时；未轮换凭据的有效会话可跨重启保留。退出登录立即撤销对应 HTTP/WS；通过 Elia 或 Guoba 修改密码/Secret，立即撤销全部 HTTP、日志 WS、HMR、快捷码和持久会话，阻断旧密码在途登录。首次升级到加固版会要求旧会话重新登录。
 
-密码登录、验证码申请和验证码校验均要求完成 Cap 人机验证，服务端会在执行操作前向 Cap 验证 token。在“插件控制 → EliaAdminPanel → 登录安全”设置 Cap 服务器 HTTPS 根地址、Site Key 和 Secret Key；前两项用于生成公开 widget endpoint，私钥以明文保存在受保护的 `data/elia-admin-panel/config.yaml`，配置页不会回显。服务器地址与 Site Key 也可分别由 `CAP_SERVER_URL` 和 `CAP_SITE_KEY` 环境变量提供，YAML 中的值优先；Secret 可由 `CAP_SECRET_KEY` 环境变量提供回退值。未配置完整站点信息、Secret 或 Cap 服务不可用时，认证接口会拒绝请求，不能绕过验证继续登录。
+密码登录、验证码申请和验证码校验均要求完成 Cap 人机验证，服务端会在执行操作前向 Cap 验证 token。在“面板设置 → 登录安全”设置 Cap 服务器 HTTPS 根地址、Site Key 和 Secret Key；前两项用于生成公开 widget endpoint，私钥以明文保存在受保护的 `data/elia-admin-panel/config.yaml`，配置页不会回显。服务器地址与 Site Key 也可分别由 `CAP_SERVER_URL` 和 `CAP_SITE_KEY` 环境变量提供，YAML 中的值优先；Secret 可由 `CAP_SECRET_KEY` 环境变量提供回退值。未配置完整站点信息、Secret 或 Cap 服务不可用时，认证接口会拒绝请求，不能绕过验证继续登录。
 
 验证码和首次密码仅通过本机受保护文件交付，不通过网页响应、普通日志或 stdout 返回。Windows 的 Node 文件 mode 不能替代 ACL，请从 Yunzai 根目录运行 `plugins/EliaAdminPanel/scripts/secure-local-storage.ps1`，并确认实际 Bot 运行账号拥有权限。请勿转发主人快捷地址。
 
 ## 面板设置
 
-所有运行设置都可在 EliaAdminPanel 插件配置页修改，也可编辑工作区中的 `data/elia-admin-panel/config.yaml`。该文件由插件创建，包含监听地址、端口、公网访问地址、登录随机图 API、开发模式、Secret，以及面板密码的盐和哈希；面板文件管理器会保护整个数据目录。不要将这个文件提交到 Git 或公开分享。
+所有面板运行设置集中在侧边栏的“面板设置”（`/settings/`），包括 Web 服务、登录安全、代理配置及前端更新。也可编辑工作区中的 `data/elia-admin-panel/config.yaml`。该文件由插件创建，包含监听地址、端口、公网访问地址、登录随机图 API、开发模式、Secret，以及面板密码的盐和哈希；面板文件管理器会保护整个数据目录。不要将这个文件提交到 Git 或公开分享。第三方插件的 `elia.support.js` / `guoba.support.js` 配置继续保留在“插件控制”。
 
-登录页左侧加载随机图片；服务端的 `loginImageApi` 缺失或无效时回退到 `https://t.alcy.cc/moe`。可在配置文件中设置 `loginImageApi: "https://example.com/random-image"`，该地址必须直接返回图片或重定向到图片；也可在插件配置页修改，保存后立即生效。
+登录页左侧加载随机图片；服务端的 `loginImageApi` 缺失或无效时回退到 `https://t.alcy.cc/moe`。可在配置文件中设置 `loginImageApi: "https://example.com/random-image"`，该地址必须直接返回图片或重定向到图片；也可在面板设置中修改，保存后立即生效。
 
-`devMode` 默认为 `false`。本机开发时可在插件配置页开启，或在 YAML 中设置 `devMode: true`；重启 Bot 后面板会使用 `next dev` 并通过原面板地址提供实时热更新。开发模式性能较低且包含开发工具，不要对公网开放；生产环境保持关闭。
+`devMode` 默认为 `false`。本机开发时可在面板设置中开启，或在 YAML 中设置 `devMode: true`；重启 Bot 后面板会使用 `next dev` 并通过原面板地址提供实时热更新。开发模式性能较低且包含开发工具，不要对公网开放；生产环境保持关闭。
 
 默认只监听本机回环地址。若需要从其他设备访问，可将 `host` 改为 `0.0.0.0`，在“面板密码”中设置高强度密码，并通过防火墙限制访问来源。不要将默认随机密码或管理端口直接暴露到公网。
 
@@ -82,9 +82,11 @@ pnpm install --filter elia-admin-panel --ignore-scripts
 
 HTTPS 反向代理需要设置 `trustedProxies`（精确 IP/CIDR）和 `publicUrl`；代理应覆盖 `X-Forwarded-Proto`，而不是透传客户端值。公网部署建议同时启用 `cookieSecure: true`。来源检查采用完整 origin；不可信转发头不会改变 Cookie 的传输属性。本机 HTTP 开发可保持 `cookieSecure: false`。
 
-可在面板插件配置页设置并查看安全入口路径；也可通过进程环境变量 `SECURITY_ENTRANCE` 提供回退值。配置页中的非空值优先，路径长度为 1 至 256，且仅允许字母、数字、`-` 和 `_`；留空时使用环境变量，二者都为空时关闭。访问 `/{入口路径}` 后会签发有效期 20 分钟的 HttpOnly 入口 Cookie。入口校验由 Node.js 后端执行，反向代理无需配置对应路由。已登录 Session 不受入口 Cookie 过期影响。
+可在面板设置中设置并查看安全入口路径；也可通过进程环境变量 `SECURITY_ENTRANCE` 提供回退值。面板设置中的非空值优先，路径长度为 1 至 256，且仅允许字母、数字、`-` 和 `_`；留空时使用环境变量，二者都为空时关闭。访问 `/{入口路径}` 后会签发有效期 20 分钟的 HttpOnly 入口 Cookie。入口校验由 Node.js 后端执行，反向代理无需配置对应路由。已登录 Session 不受入口 Cookie 过期影响。
 
-Git 常规代理仅允许使用运维在受保护 YAML 中批准的固定 IP 地址，例如 `approvedProxyUrls: ["http://127.0.0.1:7890"]`；不会继承进程环境的隐式代理。获批代理属于可信出站边界，运维应在代理侧限制目的地址、DNS 和重定向。HTTPS 前缀代理仍须满足公网 DNS 校验；直连和前缀 Git 禁止重定向并固定解析地址。Git 需支持 `http.curloptResolve`。
+“面板设置 → 代理设置”保存唯一的下载代理类型和地址，对插件安装、Git 更新、小插件直链下载，以及前端发布版下载（包括首次初始化）立即生效。`downloadProxyMode` 可设为 `none`、`standard` 或 `prefix`，`downloadProxyUrl` 为对应地址。常规代理支持 HTTP、HTTPS、SOCKS5 和 SOCKS5H，必须使用固定 IP 的根地址，例如 `http://127.0.0.1:7890`；不接受凭据、查询或片段。HTTPS 链接前缀代理还需支持 GitHub API 与目标下载地址。请求参数和环境变量不能覆盖已保存的选择；旧 `approvedProxyUrls` 仅保留原数据，不再决定下载代理。
+
+已保存的常规代理属于可信出站边界，应在代理侧限制目的地址、DNS 和重定向。所有目标及 HTTPS 前缀代理仍须满足公网 DNS 校验；直连和前缀 Git 禁止重定向并固定解析地址。Git 需支持 `http.curloptResolve`。同页的“可信反向代理 IP/CIDR”负责入站 HTTPS 判定，与下载代理独立。
 
 配置、普通文件、插件 support 配置和依赖保存必须携带读取时的版本；旧版本返回 409，缺版本返回 428，前端已经同步适配。具体变更、回归入口及尚未完成的部署事项见 [加固记录](docs/SECURITY/2026-09-28/SECURITY_HARDENING.md)。
 
@@ -94,7 +96,7 @@ Git 常规代理仅允许使用运维在受保护 YAML 中批准的固定 IP 地
 
 ## Guoba 兼容
 
-EliaAdminPanel 自身使用原生配置入口 `elia.support.js`，导出 `supportPanel()`；不再提供独立的 `guoba.support.js` 入口。扫描第三方插件时，优先读取 `elia.support.js`；没有时再读取 `guoba.support.js`。普通 Guoba 插件无需迁移现有配置。
+EliaAdminPanel 自身的运行配置由独立的面板设置接口管理，不再通过 `elia.support.js` 提供配置入口。扫描第三方插件时，优先读取 `elia.support.js`；没有时再读取 `guoba.support.js`。普通 Guoba 插件无需迁移现有配置。
 
 插件列表将含 `index.js`、Git 仓库或 `*.support.js` 的插件目录归为大插件；`example` 目录及未识别为独立插件目录下的 `.js` 文件归为小插件。小插件可直接在插件页编辑源码，保存前自动备份，Ctrl+S 可保存，重启 Bot 后加载新代码。大插件按 `elia.support.js`、`guoba.support.js`、其他 `*.support.js` 的顺序查找配置工厂；没有 support 入口时，面板预览其 `config/` 或 `configs/` 中的 YAML、JSON、TOML、INI、CONF 和 properties 文件，并可跳转文件管理器编辑。
 
@@ -139,7 +141,7 @@ export function supportPanel() {
 }
 ```
 
-`schemas[].field` 支持点分路径；完整控件示例见 [elia.support.example.js](elia.support.example.js)。支持 `SOFT_GROUP_BEGIN` 分组、`Switch`、`InputNumber`、`Input`（包括 `componentProps.type: "password"`）、`ColorPicker`、`GColorPicker`、`InputTextArea`、单选/多选/tags 模式的 `Select`、`RadioGroup`、`CheckboxGroup`、`GTags`、`GSelectFriend`、`GSelectGroup`、`EasyCron` 和 `GSubForm`。`ColorPicker`/`GColorPicker` 保存为颜色字符串；兼容 Guoba 的普通 `Input` 字段若标签包含“颜色”，也会自动显示颜色选择器。多选值保存为数组，tags 可添加自定义值；好友和群组选择从当前机器人账号缓存加载。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。面板自身通过 `elia.support.js` 提供原生配置定义，监听地址或端口修改后需重启 Bot 生效。
+`schemas[].field` 支持点分路径；完整控件示例见 [elia.support.example.js](elia.support.example.js)。支持 `SOFT_GROUP_BEGIN` 分组、`Switch`、`InputNumber`、`Input`（包括 `componentProps.type: "password"`）、`ColorPicker`、`GColorPicker`、`InputTextArea`、单选/多选/tags 模式的 `Select`、`RadioGroup`、`CheckboxGroup`、`GTags`、`GSelectFriend`、`GSelectGroup`、`EasyCron` 和 `GSubForm`。`ColorPicker`/`GColorPicker` 保存为颜色字符串；兼容 Guoba 的普通 `Input` 字段若标签包含“颜色”，也会自动显示颜色选择器。多选值保存为数组，tags 可添加自定义值；好友和群组选择从当前机器人账号缓存加载。`configInfo.actions` 会显示为需确认后执行的操作。保存与操作都可以通过 `Result.ok(result, message)` / `Result.error(message)` 返回结果。
 
 ## 开源许可
 

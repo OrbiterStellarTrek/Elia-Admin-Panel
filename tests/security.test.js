@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import vm from "node:vm"
 import { fakeDownload } from "./download-fixture.js"
-import { approvedFrontendProxy, isPublicAddress, normalizeNetworkUrl, resolvePublicUrl, safeDownload, secureGitTransport } from "../src/network-policy.js"
+import { isPublicAddress, normalizeNetworkUrl, resolvePublicUrl, safeDownload, secureGitTransport } from "../src/network-policy.js"
 import { contentVersion, credentialVersion, requireVersion, trustedProxy, redact, withLock, withBudget, devRequestNeedsAuth, originAllowed, requestIsSecure } from "../src/security.js"
 
 test("内容版本、凭据版本和乐观并发版本校验", () => {
@@ -41,17 +41,6 @@ test("网络 URL 只允许规范 HTTPS 目标，代理协议单独校验", () =>
   assert.throws(() => normalizeNetworkUrl("ftp://proxy.example", { proxy: true }))
 })
 
-test("前端更新只使用获批的固定 IP HTTP(S) 代理", () => {
-  assert.equal(approvedFrontendProxy({ approvedProxyUrls: [
-    "socks5h://127.0.0.1:1080",
-    "http://proxy.example:7890",
-    "http://user:secret@127.0.0.1:7890",
-    "http://127.0.0.1:7890/path",
-    "https://127.0.0.1:8443",
-  ] }), "https://127.0.0.1:8443/")
-  assert.equal(approvedFrontendProxy({ approvedProxyUrls: ["socks5h://127.0.0.1:1080"] }), null)
-  assert.equal(approvedFrontendProxy({ approvedProxyUrls: "http://127.0.0.1:7890" }), null)
-})
 
 test("拒绝替代 IP、内网、保留地址和混合公网/内网 DNS", async () => {
   for (const address of ["127.0.0.1", "0.0.0.0", "10.1.1.1", "100.64.0.1", "172.16.0.1", "192.168.1.1", "169.254.169.254", "224.0.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "fe80::1", "2002:7f00:1::", "2001:db8::1"]) assert.equal(isPublicAddress(address), false, address)
