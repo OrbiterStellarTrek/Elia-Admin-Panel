@@ -16,6 +16,19 @@ EliaAdminPanel 是一个独立的 Yunzai 插件，使用标准插件入口接入
 
 文件管理器将 `.git`、`node_modules`、Next 构建目录及面板内部凭据数据目录排除在浏览和编辑之外；拒绝符号链接、硬链接、Windows 路径别名和工作区外路径。
 
+## 安装与构建
+
+在 Yunzai 根目录克隆插件并安装依赖。Yunzai 会按插件目录的 `index.js` 自动加载：
+
+```bash
+git clone --depth=1 https://github.com/OrbiterStellarTrek/Elia-Admin-Panel.git plugins/EliaAdminPanel
+pnpm install --filter elia-admin-panel --ignore-scripts
+```
+
+首次以生产模式启动时，如果插件目录没有完整的 `out/index.html` 和 `out/_next/static/`，插件会从上述 GitHub 仓库的 Latest Release 下载最新前端构建归档，校验 SHA-256 后解压到 `plugins/EliaAdminPanel/out/`。此过程需要访问 GitHub，并需要系统提供 `tar` 命令；如果环境无法联网，也可以在插件目录安装依赖后运行 `pnpm build` 手动生成。开发模式使用 `next dev`，不会触发自动下载。面板默认地址为 `http://127.0.0.1:50882`。首次随机密码写入受保护的 `data/elia-admin-panel/credentials/bootstrap.txt`；在 Bot 本机读取后登录，首次密码登录成功会删除该交付文件。配置文件只保存随机盐和 PBKDF2 哈希；普通日志和 stdout 不包含首次密码，之后重启不会重新生成密码。
+
+面板栏目可以通过固定地址直接打开：`/config/`（配置中心）、`/plugins/`（插件控制）、`/files/`（文件管理）、`/logs/`（运行日志）、`/debug/`（消息调试）；`/` 为运行概览。选中的配置文件、插件和文件路径分别保存在 `?file=`、`?plugin=`、`?path=` 中，刷新或复制网址后仍能回到对应位置。
+
 ## 设置和插件管理
 
 “其他设置”中的主人 QQ 号支持从好友列表选择；私聊放行正则可以打开插件正则排查，搜索、测试并选择私聊规则，点击“保存更改”后生效。Yunzai 的放行配置只保存正则字符串，不支持 flags，带 flags 的规则需手动调整。QQBot-Plugin 官方账号按 `account.adapter.id === "QQBot"` 识别，面板不会尝试向它查询常规数字群；混合账号优先从普通账号的群缓存查找。
@@ -39,19 +52,6 @@ GitHub Actions 在前端 GitHub Release 发布成功后，会将相同标签、�
 更新期间保留原前端，替换失败会恢复；成功后在 `data/elia-admin-panel/frontend-previous-out/` 保留上一个版本及其静态资源，供尚未刷新的页面继续加载。点击“刷新使用新版本”即可使用更新结果，无需重启 Bot。网络或校验失败不会替换当前前端；并发更新会被拒绝。此功能仅更新发布版静态前端，不更新插件后端。开发模式使用源码热更新，需关闭开发模式并重启 Bot 后使用发布版更新。
 
 插件选项说明显示在字段旁的问号 Tooltip 中，支持悬停、键盘聚焦和点击，按 Escape 关闭。
-
-## 安装与构建
-
-在 Yunzai 根目录克隆插件并安装依赖。Yunzai 会按插件目录的 `index.js` 自动加载：
-
-```powershell
-git clone https://github.com/OrbiterStellarTrek/Elia-Admin-Panel.git plugins/EliaAdminPanel
-pnpm install --filter elia-admin-panel --ignore-scripts
-```
-
-首次以生产模式启动时，如果插件目录没有完整的 `out/index.html` 和 `out/_next/static/`，插件会从上述 GitHub 仓库的 Latest Release 下载最新前端构建归档，校验 SHA-256 后解压到 `plugins/EliaAdminPanel/out/`。此过程需要访问 GitHub，并需要系统提供 `tar` 命令；如果环境无法联网，也可以在插件目录安装依赖后运行 `pnpm build` 手动生成。开发模式使用 `next dev`，不会触发自动下载。面板默认地址为 `http://127.0.0.1:50882`。首次随机密码写入受保护的 `data/elia-admin-panel/credentials/bootstrap.txt`；在 Bot 本机读取后登录，首次密码登录成功会删除该交付文件。配置文件只保存随机盐和 PBKDF2 哈希；普通日志和 stdout 不包含首次密码，之后重启不会重新生成密码。
-
-面板栏目可以通过固定地址直接打开：`/config/`（配置中心）、`/plugins/`（插件控制）、`/files/`（文件管理）、`/logs/`（运行日志）、`/debug/`（消息调试）；`/` 为运行概览。选中的配置文件、插件和文件路径分别保存在 `?file=`、`?plugin=`、`?path=` 中，刷新或复制网址后仍能回到对应位置。
 
 ## 登录方式
 
