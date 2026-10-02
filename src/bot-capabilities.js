@@ -1,4 +1,12 @@
-// QQBot-Plugin passes its engine as account.adapter, with id === "QQBot".
+/**
+ * 判断是否TRSS
+ */
+export function isTRSS(
+  packageJson = JSON.parse(fs.readFileSync('./package.json', 'utf8')),
+) {
+  return packageJson.name.includes('trss')
+}
+
 export function isOfficialBot(account) {
   return String(account?.adapter?.id || account?.adapter || account?.version?.id || "").toLowerCase() === "qqbot"
 }

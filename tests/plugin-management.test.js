@@ -6,7 +6,7 @@ import path from "node:path"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { gitTransport, validateGitRef, repositoryInfo, fetchRepository, updateRepository, validateDependencies, downloadScript } from "../src/plugin-management.js"
-import { isOfficialBot, pickNumericGroup, ffmpegPath } from "../src/bot-capabilities.js"
+import { isOfficialBot, isTRSS, pickNumericGroup, ffmpegPath } from "../src/bot-capabilities.js"
 import { fakeDownload } from "./download-fixture.js"
 
 const exec = promisify(execFile)
@@ -43,6 +43,11 @@ test("官方账号和混合账号不会向 QQBot 查询数字群，普通账号�
   assert.equal(pickNumericGroup(mixed, "456"), undefined)
   assert.equal(pickNumericGroup({ uin: [1], 1: official, pickGroup: official.pickGroup }, "123"), undefined)
   assert.equal(calls, 0)
+})
+
+test('TRSS判断测试', () => {
+  assert.equal(isTRSS({ name: 'trss-yunzai' }), true)
+  assert.equal(isTRSS({ name: 'miao-yunzai' }), false)
 })
 
 test("FFmpeg 每次读取 Yunzai 当前配置", () => {

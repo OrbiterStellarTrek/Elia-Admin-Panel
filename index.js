@@ -1,4 +1,5 @@
 import plugin from "../../lib/plugins/plugin.js"
+import { isTRSS } from "./src/bot-capabilities.js"
 import { createQuickLoginLinks, startAdminPanel } from "./src/server.js"
 
 export class EliaAdminPanel extends plugin {
@@ -13,6 +14,10 @@ export class EliaAdminPanel extends plugin {
   }
 
   async init() {
+    if (isTRSS()) {
+      logger.warn("暂不支持TRSS-Yunzai，请使用Miao-Yunzai或Elia-Yunzai")
+      return
+    }
     await startAdminPanel()
   }
 
