@@ -1,3 +1,5 @@
+import fs from 'fs'
+
 /**
  * 判断是否TRSS
  */
