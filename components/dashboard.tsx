@@ -60,7 +60,7 @@ function SecretInput({ className, ...props }: SecretInputProps) {
       type="button"
       variant="ghost"
       size="icon"
-      className="absolute right-0 top-0 h-10 w-10 rounded-xl text-muted-foreground hover:text-foreground"
+      className="absolute inset-y-0 right-0 h-full w-10 rounded-md text-muted-foreground hover:text-foreground"
       aria-label={visible ? "隐藏内容" : "显示内容"}
       aria-pressed={visible}
       title={visible ? "隐藏内容" : "显示内容"}
@@ -69,7 +69,7 @@ function SecretInput({ className, ...props }: SecretInputProps) {
   </div>
 }
 
-function ColorPickerField({ value, label, placeholder, onChange }: { value: string; label: string; placeholder?: string; onChange: (value: string) => void }) {
+function ColorPickerField({ value, label, placeholder, onChange, compact = false }: { value: string; label: string; placeholder?: string; onChange: (value: string) => void; compact?: boolean }) {
   const isHexColor = /^#[\da-f]{3}(?:[\da-f]{3})?$/i.test(value)
   const pickerValue = isHexColor && value.length === 4
     ? `#${[...value.slice(1)].map(channel => channel + channel).join("")}`
@@ -78,7 +78,7 @@ function ColorPickerField({ value, label, placeholder, onChange }: { value: stri
     <Input
       type="color"
       aria-label={`${label}颜色选择器`}
-      className="h-10 w-12 shrink-0 cursor-pointer p-1"
+      className={cn("w-12 shrink-0 cursor-pointer p-1", compact ? "h-9" : "h-10")}
       value={pickerValue}
       disabled={Boolean(value) && !isHexColor}
       onChange={event => onChange(event.target.value)}
@@ -86,7 +86,7 @@ function ColorPickerField({ value, label, placeholder, onChange }: { value: stri
     <Input
       type="text"
       aria-label={`${label}颜色值`}
-      className="w-36 shrink-0 font-mono"
+      className={cn("w-36 min-w-0 font-mono", compact && "h-9")}
       value={value}
       placeholder={placeholder || "#RRGGBB"}
       onChange={event => onChange(event.target.value)}
@@ -569,6 +569,8 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   const noticeTimer = useRef<number | null>(null)
   const confirmationResolver = useRef<((confirmed: boolean) => void) | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const sidebarPresent = useExitPresence(sidebarOpen)
   const [sidebarCollapsed, setSidebarCollapsed] = useBrowserBooleanPreference("mainSidebarCollapsed")
   const [restartAvailable, setRestartAvailable] = useState(false)
@@ -656,6 +658,38 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
   }, [authenticated, api])
 
   useEffect(() => { setRestartAnchor(null) }, [section, sidebarCollapsed, sidebarOpen, authenticated])
+
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }) }, [section])
+  useEffect(() => { if (!authenticated) setSidebarOpen(false) }, [authenticated])
+
+  useEffect(() => {
+    if (!authenticated || !sidebarOpen) return
+    const desktop = window.matchMedia("(min-width: 768px)")
+    const closeOnDesktop = () => { if (desktop.matches) setSidebarOpen(false) }
+    closeOnDesktop()
+    desktop.addEventListener("change", closeOnDesktop)
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const frame = requestAnimationFrame(() => sidebarRef.current?.querySelector<HTMLButtonElement>('[aria-label="关闭菜单"]')?.focus())
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
+      if (event.key === "Escape") { event.preventDefault(); setSidebarOpen(false); return }
+      if (event.key !== "Tab" || !sidebarRef.current?.contains(document.activeElement)) return
+      const controls = Array.from(sidebarRef.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]'))
+        .filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden")
+      const first = controls[0], last = controls.at(-1)
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      cancelAnimationFrame(frame)
+      desktop.removeEventListener("change", closeOnDesktop)
+      document.removeEventListener("keydown", onKeyDown)
+      document.body.style.overflow = previousOverflow
+      if (!desktop.matches && menuTriggerRef.current?.isConnected) menuTriggerRef.current.focus()
+    }
+  }, [authenticated, sidebarOpen])
 
   useEffect(() => {
     let active = true
@@ -753,14 +787,14 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
 
   return (
       <div className="admin-panel-shell min-h-screen" style={{ "--admin-sidebar-size": sidebarCollapsed ? "56px" : "220px", "--admin-sidebar-half-size": sidebarCollapsed ? "28px" : "110px" } as React.CSSProperties}>
-      <aside data-open={sidebarOpen} data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside ref={sidebarRef} id="panel-navigation" role={sidebarOpen ? "dialog" : undefined} aria-modal={sidebarOpen || undefined} aria-label="面板导航" data-open={sidebarOpen} data-collapsed={sidebarCollapsed} className={`admin-panel-sidebar fixed inset-y-0 left-0 z-40 overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="admin-sidebar-expanded scrollbar-thin absolute inset-y-0 left-0 flex flex-col overflow-y-auto px-3 pt-5 pb-0">
           <div className="flex items-center gap-3 px-2 pb-7">
             <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-sidebar-border bg-background p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
             <div className="min-w-0"><div className="truncate text-sm font-semibold tracking-tight">Elia Panel</div><div className="mt-0.5 truncate text-[10px] text-muted-foreground">机器人管理控制台</div></div>
-            <Button type="button" variant="ghost" className={cn("h-auto justify-start whitespace-normal p-0", "ml-auto text-muted-foreground md:hidden")} onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></Button>
+            <Button type="button" variant="ghost" size="icon" className="ml-auto size-9 shrink-0 text-muted-foreground md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单"><X className="size-5" /></Button>
           </div>
-          <div className="px-2 pb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">控制台</div>
+          <div className="h-6 shrink-0 px-2 pb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">控制台</div>
           <nav aria-label="主导航" className="admin-nav shrink-0 space-y-1" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
             {navigation.map(item => {
               const Icon = item.icon
@@ -781,6 +815,7 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         </div>
         <div className="admin-sidebar-compact scrollbar-thin absolute inset-y-0 left-0 flex flex-col overflow-y-auto items-center px-1.5 pt-5 pb-3">
           <div title="EliaAdminPanel" className="mb-7 grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-sidebar-border bg-background p-1"><img src="/elia.png" alt="EliaAdminPanel" className="size-full object-contain" /></div>
+          <div aria-hidden="true" className="h-6 shrink-0" />
           <nav className="admin-nav w-full shrink-0 space-y-1" aria-label="主导航" style={{ "--nav-index": navigation.findIndex(item => item.id === section) } as React.CSSProperties}>
             {navigation.map(item => {
               const Icon = item.icon
@@ -797,9 +832,9 @@ export default function Dashboard({ initialSection = "overview" }: { initialSect
         </div>
       </aside>
 
-      {sidebarPresent && <Button type="button" variant="ghost" data-state={sidebarOpen ? "open" : "closed"} inert={!sidebarOpen} className="admin-mobile-overlay h-auto p-0 fixed inset-0 z-30 bg-neutral-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
-      <div className="min-h-screen">
-        <Button variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-card/95 shadow-md md:hidden" aria-label="打开菜单" onClick={() => setSidebarOpen(true)}><Menu /></Button>
+      {sidebarPresent && <Button type="button" variant="ghost" tabIndex={-1} data-state={sidebarOpen ? "open" : "closed"} inert={!sidebarOpen} className="admin-mobile-overlay h-auto p-0 fixed inset-0 z-30 rounded-none bg-neutral-900/30 hover:bg-neutral-900/30 md:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭菜单背景" />}
+      <div className="min-h-screen" inert={sidebarOpen}>
+        <Button ref={menuTriggerRef} variant="outline" size="icon" className="fixed left-4 top-4 z-30 bg-card/95 shadow-sm md:hidden" aria-label="打开菜单" aria-controls="panel-navigation" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Menu /></Button>
         <main key={section} data-motion-page={section} className={section === "files" ? "file-manager-fullscreen h-dvh min-h-0 max-w-none overflow-hidden p-0" : section === "debug" ? "h-dvh min-h-0 max-w-none overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "logs" || section === "rules" ? "logs-fullscreen flex h-dvh min-h-0 max-w-none flex-col overflow-hidden px-0 pb-0 pt-16 md:pt-0" : section === "plugins" || section === "config" || section === "settings" ? "max-w-none px-0 pb-0 pt-16 md:pt-0" : "mx-auto max-w-[1600px] px-4 pb-28 pt-16 sm:px-6 md:pt-8 lg:px-9 lg:pb-32"}>
           {section === "overview" && <Overview api={api} notify={notify} navigate={navigateTo} />}
           {section === "accounts" && <AccountManager api={api} notify={notify} confirm={confirm} />}
@@ -939,14 +974,14 @@ function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = 
             <div>{page ? <><h1 className="text-2xl font-semibold tracking-tight">正则查询</h1><p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">{description}</p></> : <><Dialog.Title className="text-lg font-semibold">插件正则排查</Dialog.Title><Dialog.Description className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">{description}</Dialog.Description></>}</div>
             <div className="flex shrink-0 items-center gap-1"><Button type="button" size="icon" variant="ghost" aria-label="刷新插件规则" title="刷新插件规则" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button>{!page && <Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭插件正则排查"><X className="size-4" /></Button></Dialog.Close>}</div>
           </div>
-          <div className="grid shrink-0 gap-4 border-b border-border bg-muted/60 px-6 py-4 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(180px,1fr)_minmax(210px,1.2fr)_auto]">
+          <div className="grid shrink-0 grid-cols-2 items-end gap-3 border-b border-border bg-muted/60 px-4 py-4 sm:px-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
             <div className="min-w-0 space-y-2"><Label className="text-xs">{onSelect ? "规则范围" : "屏蔽作用范围"}</Label><Select value={groupId} onValueChange={setGroupId}><SelectTrigger aria-label="屏蔽作用群组" className="h-10 bg-card text-sm"><SelectValue placeholder="选择群组" /></SelectTrigger><SelectContent className="z-[70]">{groups.map(group => <SelectItem key={group.id} value={group.id}>{group.id === "default" ? "全局" : `${group.name} · ${group.id}`}</SelectItem>)}</SelectContent></Select></div>
             <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-search" className="text-xs">搜索插件、子插件或正则</Label><div className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground" /><Input id="plugin-rule-search" className="h-10 pl-9 text-sm" placeholder="名称、处理方法、正则内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
             <div className="min-w-0 space-y-2"><Label htmlFor="plugin-rule-message" className="text-xs">测试消息（可选）</Label><Input id="plugin-rule-message" className="h-10 text-sm" maxLength={512} placeholder="粘贴触发的原始消息（最多 512 字）" value={testMessage} onChange={event => setTestMessage(event.target.value)} /></div>
             <div className="space-y-2"><Label className="text-xs">消息类型</Label><ToggleGroup type="single" value={messageType} onValueChange={value => { if (value) setMessageType(value as "group" | "private") }} aria-label="消息类型" className="flex h-10 items-center rounded-md border border-border bg-card p-0.5">{([["group", "群聊"], ["private", "私聊"]] as const).map(([type, label]) => <ToggleGroupItem value={type} key={type} disabled={Boolean(onSelect && type === "group")} className={`flex-1 rounded px-2.5 py-1 text-xs transition ${messageType === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</ToggleGroupItem>)}</ToggleGroup></div>
           </div>
           <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border bg-card px-6 py-2 text-[11px] text-muted-foreground"><span className="font-medium text-foreground">{hasTestMessage ? `正则命中 ${filteredRules.length} 条 · 仅检测规则与事件类型，不执行插件代码` : `当前群组共 ${rules.length} 条规则`}</span><span>{onSelect ? "加入后点击保存更改，写入私聊放行名单" : "禁用按 Yunzai 实际匹配的插件名称写入 group.yaml"}</span></div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 sm:px-6">
             {error && <p role="alert" className="rounded-lg bg-rose-50 dark:bg-rose-950/40 p-3 text-xs text-rose-700 dark:text-rose-300">{error}</p>}
             {loading ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground"><LoaderCircle className="mb-2 size-5 animate-spin" />正在读取当前已加载插件</div>
               : !error && !filteredRules.length ? <div className="grid min-h-40 place-items-center text-xs text-muted-foreground">{hasTestMessage ? "没有规则匹配这条消息" : "没有找到匹配规则"}</div>
@@ -988,7 +1023,7 @@ function PluginMatchHelper({ api, notify, confirm, onSelect, selectedPatterns = 
 }
 
 function Metric({ icon: Icon, label, value, detail }: { icon: typeof Cpu; label: string; value: string; detail: string }) {
-  return <Card className="admin-metric"><CardContent className="p-3 sm:p-5"><div className="flex items-center justify-between gap-3"><div className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</div><span className="admin-metric-icon grid size-7 shrink-0 place-items-center rounded-lg"><Icon className="size-3.5" /></span></div><div className="mt-2 text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">{value}</div><div className="mt-2 text-[11px] leading-relaxed text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
+  return <Card className="admin-metric"><CardContent className="flex h-full flex-col p-3 sm:p-5"><div className="flex min-h-7 items-center justify-between gap-2"><div className="text-xs font-medium text-muted-foreground sm:text-sm">{label}</div><span className="admin-metric-icon grid size-7 shrink-0 place-items-center rounded-lg"><Icon className="size-3.5" /></span></div><div className="my-2 break-words text-xl font-semibold tabular-nums tracking-tight sm:text-2xl">{value}</div><div className="mt-auto break-words text-[11px] leading-relaxed text-muted-foreground sm:text-xs">{detail}</div></CardContent></Card>
 }
 
 function PublicUrlsField({ schema, value, onChange }: { schema: any; value: string; onChange: (value: string) => void }) {
@@ -1050,8 +1085,8 @@ function PanelSettings({ api, notify }: { api: Api; notify: (kind: "success" | "
   return <section className="min-h-[calc(100dvh-4rem)] min-w-0 bg-card md:min-h-dvh">
     <div className="sticky top-16 z-20 bg-card/95 backdrop-blur-sm md:top-0">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:p-5">
-        <div className="min-w-0"><h1 className="text-base font-semibold tracking-tight">面板设置</h1><p className="mt-1 text-sm text-muted-foreground">管理面板服务、登录安全和统一下载代理。监听地址、端口及开发模式修改后需重启 Bot。</p></div>
-        <div className="flex shrink-0 gap-2"><Button variant="outline" disabled={loading || busy} onClick={load} aria-label="重新读取面板设置"><RefreshCw />重新读取</Button><Button disabled={!data || loading || busy || Boolean(error)} onClick={save}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存设置</Button></div>
+        <div className="min-w-0 flex-1 basis-72"><h1 className="text-base font-semibold tracking-tight">面板设置</h1><p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">管理面板服务、登录安全和统一下载代理。监听地址、端口及开发模式修改后需重启 Bot。</p></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={loading || busy} onClick={load} aria-label="重新读取面板设置"><RefreshCw />重新读取</Button><Button disabled={!data || loading || busy || Boolean(error)} onClick={save}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存设置</Button></div>
       </header>
       <div role="group" aria-label="面板设置分组" className="scrollbar-thin flex gap-0.5 overflow-x-auto border-b border-border px-3">
         {groups.map((group, index) => <Button key={group.label} variant="ghost" aria-pressed={index === groupIndex} className={cn("h-auto shrink-0 rounded-none px-3.5 py-3 text-xs font-medium", index === groupIndex ? "relative text-primary after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary" : "text-muted-foreground hover:text-foreground")} onClick={() => setGroupIndex(index)}>{group.label}</Button>)}
@@ -1385,7 +1420,7 @@ function AccountManager({ api, notify, confirm }: { api: Api; notify: any; confi
 }
 
 function InfoTile({ icon: Icon, label, value }: { icon: typeof Server; label: string; value: string }) {
-  return <div className="flex items-center gap-3 rounded-xl border border-border p-3"><span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground"><Icon className="size-4" /></span><div className="min-w-0"><div className="text-[10px] text-muted-foreground">{label}</div><div className="mt-1 truncate text-xs font-medium">{value}</div></div></div>
+  return <div className="flex items-center gap-3 rounded-xl border border-border p-3"><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"><Icon className="size-4" /></span><div className="min-w-0"><div className="text-[10px] text-muted-foreground">{label}</div><div className="mt-1 truncate text-xs font-medium">{value}</div></div></div>
 }
 
 function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm: Confirm }) {
@@ -1565,13 +1600,13 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
   return <>
     <PageIntro actions={[{ label: "保存更改", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存更改" title="保存更改" onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存更改"}</Button> }]} />
     <div
-      className={`config-center-grid grid min-h-dvh gap-5 xl:gap-0 ${fileSidebarCollapsed ? "is-collapsed" : ""}`}
+      className={`config-center-grid grid min-h-dvh gap-4 p-4 sm:p-5 xl:gap-0 xl:p-0 ${fileSidebarCollapsed ? "is-collapsed" : ""}`}
       style={{ "--config-sidebar-width": fileSidebarCollapsed ? "72px" : "245px" } as React.CSSProperties}
     >
       <div className="relative h-fit min-w-0 xl:h-dvh">
       <div className="config-center-sidebar-fixed relative h-full min-w-0">
       <Card className="relative h-fit overflow-visible xl:h-full xl:overflow-hidden xl:rounded-none">
-        <div className={`absolute inset-0 z-10 hidden flex-col gap-1 overflow-y-auto p-2 scrollbar-thin transition-opacity duration-200 xl:flex ${fileSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div inert={!fileSidebarCollapsed} className={`absolute inset-0 z-10 hidden flex-col gap-1 overflow-y-auto p-2 scrollbar-thin transition-opacity duration-200 xl:flex ${fileSidebarCollapsed ? "visible opacity-100" : "invisible pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           {files.map(file => <TooltipProvider key={file} delayDuration={200}><Tooltip><TooltipTrigger asChild><Button variant="ghost" type="button" aria-label={`${configFileLabel(file)}，${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => chooseFile(file)} className={cn("h-auto justify-start whitespace-normal p-0", `relative flex h-[52px] w-full flex-col items-center justify-center gap-0.5 rounded-lg transition ${selected === file ? "bg-sidebar-accent text-sidebar-foreground" : "text-muted-foreground hover:bg-muted"}`)}>
             <ConfigFileIcon file={file} className="size-4" />
@@ -1580,21 +1615,25 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           </div>
           <div className="flex shrink-0 justify-start border-t border-border pt-2"><Button size="icon" variant="ghost" className="size-8" aria-label="展开配置文件侧栏" title="展开配置文件侧栏" onClick={() => setFileSidebarCollapsed(false)}><ChevronRight className="size-4" /></Button></div>
         </div>
-        <div className={`transition-opacity duration-150 xl:flex xl:h-full xl:min-h-0 xl:flex-col ${fileSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+        <div className={`transition-opacity duration-150 xl:flex xl:h-full xl:min-h-0 xl:flex-col ${fileSidebarCollapsed ? "xl:invisible xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
           <div className="p-4 pb-3">
             <div className="mb-3 flex items-center justify-between gap-2 text-xs font-semibold"><span>配置文件 <Badge className="ml-1 border-0 bg-muted text-foreground">{files.length}</Badge></span></div>
-            <div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="h-9 pl-9 text-xs" placeholder="筛选配置…" value={search} onChange={event => setSearch(event.target.value)} /></div>
+            <div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="筛选配置文件" className="h-9 pl-9 text-xs" placeholder="筛选配置…" value={search} onChange={event => setSearch(event.target.value)} /></div>
           </div>
-          <div className="max-h-[min(560px,calc(100dvh-12rem))] space-y-1 overflow-y-auto px-2 pb-3 xl:min-h-0 xl:max-h-none xl:flex-1">{visible.map(file => <Button variant="ghost" key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => chooseFile(file)} className={cn("h-auto justify-start whitespace-normal p-0", `flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected === file ? "bg-accent font-medium text-foreground" : "text-foreground hover:bg-muted"}`)}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span></Button>)}</div>
+          <div className="max-h-52 space-y-1 overflow-y-auto px-2 pb-3 sm:max-h-64 xl:min-h-0 xl:max-h-none xl:flex-1">{visible.map(file => <Button variant="ghost" key={file} type="button" title={`${configFileLabel(file)} · ${file}`} aria-current={selected === file ? "page" : undefined} onClick={() => chooseFile(file)} className={cn("h-auto justify-start whitespace-normal p-0", `flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selected === file ? "bg-accent font-medium text-foreground" : "text-foreground hover:bg-muted"}`)}><ConfigFileIcon file={file} className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{configFileLabel(file)}</span></Button>)}{!visible.length && <p className="px-3 py-6 text-center text-xs text-muted-foreground">没有匹配的配置文件</p>}</div>
           <div className="hidden shrink-0 justify-start border-t border-border px-2 py-2 xl:flex"><Button size="icon" variant="ghost" className="size-8" aria-label="收起配置文件侧栏" title="收起配置文件侧栏" onClick={() => setFileSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
         </div>
       </Card>
       </div>
       </div>
-      <Card className={`min-w-0 ${editorFullscreen ? "fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden rounded-none border-0" : rawMode ? "flex h-full min-h-0 flex-col overflow-hidden" : ""}`}>
-        <CardHeader className="shrink-0 flex-col items-start gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><CardTitle className="text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle><CardDescription className="mt-1">config/config/{selected}</CardDescription></div>
-          <div className="flex items-center gap-2">
+      <Card className={`min-w-0 ${editorFullscreen ? "fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden rounded-none border-0" : rawMode ? "flex h-[calc(100dvh-4rem)] min-h-0 flex-col overflow-hidden xl:h-dvh xl:rounded-none xl:border-l-0" : "xl:rounded-none xl:border-l-0"}`}>
+        {editorFullscreen && <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm"><FileCog className="size-4 shrink-0 text-muted-foreground" /><span className="truncate font-medium" title={`config/config/${selected}`}>{selected || "YAML 配置"}</span>{dirty && <span aria-label="有未保存修改" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</div>
+          <div className="flex shrink-0 items-center gap-2"><Button type="button" size="sm" onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button><Button type="button" size="icon" variant="ghost" className="size-8" aria-label="退出全屏编辑" title="退出全屏编辑 (Esc)" onClick={() => setEditorFullscreen(false)}><Minimize2 className="size-4" /></Button></div>
+        </div>}
+        <CardHeader className={editorFullscreen ? "hidden" : "shrink-0 flex-row flex-wrap items-center justify-between gap-3 border-b border-border p-4 sm:p-5"}>
+          <div className="min-w-0 flex-1 basis-48"><div className="flex min-w-0 items-center gap-2"><CardTitle className="truncate text-base">{selected ? selectedLabel : "选择配置文件"}</CardTitle>{dirty && <span aria-label="有未保存修改" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</div><CardDescription className="mt-1 break-all text-xs">config/config/{selected}</CardDescription></div>
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <Button size="sm" variant={rawMode ? "secondary" : "outline"} onClick={async () => {
               if (!rawMode) {
                 if (dirty && !await confirm("切换源码模式会放弃尚未保存的图形化修改，继续吗？")) return
@@ -1613,8 +1652,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
               } catch (reason) { notify("error", `YAML 无法解析：${(reason as Error).message}`) }
             }}><Braces />{rawMode ? "图形化编辑" : "YAML 源码"}</Button>
             {rawMode && <Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} aria-pressed={editorFullscreen} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setEditorFullscreen(current => !current)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button>}
-            {editorFullscreen && <Button size="sm" onClick={save} disabled={!selected || saving || (!dirty && !rawMode)}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存更改</Button>}
-            <Button size="icon" variant="ghost" aria-label="重新加载" onClick={() => selected && load(selected)}><RefreshCw className="size-4" /></Button>
+            <Button size="icon" variant="ghost" className="size-8" aria-label="重新加载" disabled={!selected || loading || saving} onClick={() => selected && load(selected)}><RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /></Button>
           </div>
         </CardHeader>
         {!rawMode && groupSectionKeys.length > 0 && <div role="group" aria-label="群组设置分组" className="flex shrink-0 items-center border-b border-border bg-card px-3 sm:px-5">
@@ -1635,7 +1673,7 @@ function ConfigCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           </div>
           <Button type="button" size="icon" variant="ghost" className="ml-1 size-8 shrink-0" aria-label="新增群配置" title="新增群配置" onClick={() => { setNewGroupId(""); setNewGroupSearch(""); setNewGroupPickerOpen(false); setGroupActionError(""); setAddGroupOpen(true) }}><Plus className="size-4" /></Button>
         </div>}
-        <CardContent className={rawMode || editorFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : "p-5"}>
+        <CardContent className={rawMode || editorFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : "p-4 pb-24 sm:p-5 sm:pb-24"}>
         {error && <div className="mb-4"><ErrorState message={error} /></div>}
         {loading && <div className="grid min-h-64 place-items-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div>}
         {!loading && rawMode && <MonacoCodeEditor key={selected} path={selected || "config.yaml"} value={raw} className="min-h-0 flex-1 overflow-hidden border-t border-border" onChange={value => { setRaw(value); setDirty(true) }} />}
@@ -1996,18 +2034,18 @@ function ConfigField({ name, value, defaultValue, path, onChange, depth = 0, plu
   const selectOptions = configSelectOptions[name]
   const selectValue = value === null || value === undefined ? "" : String(value)
   const hasValidSelection = selectOptions?.some(option => option.value === selectValue)
-  return <div className={`grid gap-3 ${depth ? "md:grid-cols-[minmax(150px,240px)_minmax(240px,1fr)]" : "md:grid-cols-[minmax(170px,245px)_minmax(240px,1fr)]"}`}>
-    <div className="pt-1"><div className="text-xs font-medium capitalize">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-[10px] leading-4 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}</div>
+  return <div className="admin-config-field"><div className="admin-config-field-row">
+    <div className="admin-config-field-label"><div className="text-sm font-medium">{label}</div>{configFieldDescriptions[name] && <div className="mt-1 text-xs leading-5 text-muted-foreground">{configFieldDescriptions[name]}</div>}{hint && <div className="mt-1 text-xs leading-5 text-muted-foreground">{hint}</div>}</div>
     <div className="min-w-0">{selectOptions ? <Select value={selectValue} onValueChange={selected => onChange(path, numericConfigSelectFields.has(name) ? Number(selected) : selected)}><SelectTrigger aria-label={label} className={` ${hasValidSelection ? "border-border" : "border-amber-400 text-amber-800 dark:text-amber-300"}`}><SelectValue placeholder="未设置，请选择" /></SelectTrigger><SelectContent>{!hasValidSelection && selectValue && <SelectItem value={selectValue} disabled>无效值：{selectValue}，请选择</SelectItem>}{selectOptions.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select>
-      : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-xl border border-border px-3"><span className="text-xs text-muted-foreground">{value ? "已启用" : "已关闭"}</span><Switch checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
+      : typeof value === "boolean" || numericToggle ? <div className="flex h-10 items-center justify-between rounded-md border border-border px-3"><span className="text-xs text-muted-foreground">{value ? "已启用" : "已关闭"}</span><Switch aria-label={label} checked={Boolean(value)} onCheckedChange={next => onChange(path, numericToggle ? (next ? 1 : 0) : next)} /></div>
       : name === "masterQQ" ? <ConfigListField name={name} label={label} value={Array.isArray(value) ? value : value == null ? [] : [value]} forceItemType="number" forceAvatarKind="qq" friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} onChange={next => onChange(path, next)} />
-      : typeof value === "number" ? <Input type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
+      : typeof value === "number" ? <Input aria-label={label} type="number" value={value} onChange={event => onChange(path, event.target.value === "" ? "" : Number(event.target.value))} />
       : Array.isArray(value) || nullableList ? <ConfigListField name={name} label={label} value={value} defaultValue={defaultValue} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
       : listField(name) && typeof value === "string" ? <StringListField name={name} label={label} value={value} pluginNames={pluginNames} pluginNameGroup={pluginNameGroup} pluginNamesLoading={pluginNamesLoading} pluginNamesError={pluginNamesError} friendOptions={friendOptions} friendsLoading={friendsLoading} friendsError={friendsError} groupOptions={groupOptions} groupsLoading={groupsLoading} groupsError={groupsError} mutuallyExclusiveValues={mutuallyExclusiveValues} mutuallyExclusiveLabel={mutuallyExclusiveLabel} onChange={next => onChange(path, next)} />
-      : value === null || value === undefined ? secretField(name) ? <SecretInput value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} /> : <Input value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
+      : value === null || value === undefined ? secretField(name) ? <SecretInput aria-label={label} value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} /> : <Input aria-label={label} value="" placeholder="未设置" onChange={event => onChange(path, event.target.value || null)} />
       : multilineText && !secretField(name) ? <Textarea aria-label={`${label}，多行编辑`} className="min-h-24 resize-y text-sm leading-6" value={String(value)} onChange={event => onChange(path, event.target.value)} />
-      : secretField(name) ? <SecretInput value={String(value)} onChange={event => onChange(path, event.target.value)} /> : <Input type="text" value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
-  </div>
+      : secretField(name) ? <SecretInput aria-label={label} value={String(value)} onChange={event => onChange(path, event.target.value)} /> : <Input aria-label={label} type="text" value={String(value)} onChange={event => onChange(path, event.target.value)} />}</div>
+  </div></div>
 }
 
 function splitPluginSchemaGroups(schemas: any[]) {
@@ -2334,17 +2372,17 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
     <div className={`plugin-center-grid grid min-h-0 gap-5 xl:gap-0 xl:items-start ${pluginSidebarCollapsed ? "is-collapsed" : ""}`} style={{ "--plugin-sidebar-width": pluginSidebarCollapsed ? "56px" : "280px" } as React.CSSProperties}>
       <div className="relative h-[55dvh] min-h-[280px] max-h-[420px] min-w-0 xl:h-auto xl:min-h-0">
         <div className="plugin-center-sidebar-fixed relative flex h-full min-w-0 flex-col gap-3">
-        <div className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-card p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "opacity-100" : "pointer-events-none opacity-0"}`}>
+        <div inert={!pluginSidebarCollapsed} className={`absolute inset-0 z-20 hidden flex-col rounded-tl-none rounded-tr-2xl rounded-br-2xl rounded-bl-none border border-border bg-card p-1 shadow-sm transition-opacity duration-200 xl:flex ${pluginSidebarCollapsed ? "visible opacity-100" : "invisible pointer-events-none opacity-0"}`}>
           <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
             <div aria-label="大插件" className="space-y-1">{largePlugins.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length || showUnconfigured || plugin.id === selected?.id).map(renderCompactPlugin)}{hasUnconfiguredLargePlugins && <Button size="icon" variant="ghost" aria-label={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} title={showUnconfigured ? "收起无配置插件" : "展开无配置插件"} onClick={() => setShowUnconfigured(value => !value)}><ChevronDown className={`transition-transform duration-200 ${showUnconfigured ? "rotate-180" : ""}`} /></Button>}</div>
             <div aria-label="小插件" className="mt-2 space-y-1 border-t border-border pt-2">{smallPlugins.map(renderCompactPlugin)}</div>
           </div>
           <div className="mt-2 flex shrink-0 justify-start border-t border-border px-1 pt-2"><Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label="展开插件侧栏" title="展开插件侧栏" onClick={() => setPluginSidebarCollapsed(false)}><ChevronRight className="size-4" /></Button></div>
         </div>
-        <div className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
+        <div className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${pluginSidebarCollapsed ? "xl:invisible xl:pointer-events-none xl:opacity-0" : "opacity-100"}`}>
           <Card className="flex max-h-[50%] min-h-0 flex-[0_1_auto] flex-col overflow-hidden rounded-tl-none rounded-tr-2xl rounded-br-none rounded-bl-none">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>大插件<Badge className="ml-1 border-0 bg-muted text-foreground">{largePlugins.length}</Badge></span></div>
-            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
+            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="搜索大插件" className="h-9 pl-9 text-xs" placeholder="搜索大插件…" value={largeSearch} onChange={event => setLargeSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {shownLarge.filter(plugin => plugin.hasSupportFile || plugin.configFiles?.length).map(renderPlugin)}{shownLarge.some(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length) && <div><Button type="button" size="sm" variant="ghost" className="w-full justify-between" onClick={() => setShowUnconfigured(value => !value)}>无配置插件（{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).length}）<ChevronDown className={`transition-transform duration-200 ${showUnconfigured ? "rotate-180" : ""}`} /></Button><Collapse open={showUnconfigured || Boolean(largeSearch.trim())}>{shownLarge.filter(plugin => !plugin.hasSupportFile && !plugin.configFiles?.length).map(renderPlugin)}</Collapse></div>}
               {!loading && !shownLarge.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
@@ -2352,37 +2390,40 @@ function PluginCenter({ api, notify, confirm }: { api: Api; notify: any; confirm
           </Card>
           <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-tl-none rounded-tr-none rounded-br-2xl rounded-bl-none border-t-0">
             <div className="flex items-center justify-between px-3.5 pb-2 pt-3 text-xs font-semibold"><span>小插件<Badge className="ml-1 border-0 bg-muted text-foreground">{smallPlugins.length}</Badge></span><ScriptInstaller api={api} notify={notify} onInstalled={refresh} /></div>
-            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
+            <div className="px-3 pb-2"><div className="relative"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="搜索小插件" className="h-9 pl-9 text-xs" placeholder="搜索小插件…" value={smallSearch} onChange={event => setSmallSearch(event.target.value)} /></div></div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
               {shownSmall.map(renderPlugin)}
               {!loading && !shownSmall.length && <div className="p-5 text-center text-xs text-muted-foreground">没有找到插件</div>}
             </div>
             {archives.length > 0 && <div className="max-h-28 shrink-0 overflow-y-auto border-t border-border px-3 py-2"><div className="mb-1.5 text-[10px] font-semibold text-muted-foreground">已禁用插件 · {archives.length}</div>{archives.map(archive => <div key={archive.id} className="flex items-center gap-2 rounded-lg px-2 py-1"><span className="min-w-0 flex-1 truncate text-[10px] text-foreground">{archive.name}</span><Button size="sm" variant="ghost" className="h-7 px-2 text-[10px]" disabled={busy} onClick={() => restorePlugin(archive)}>启用</Button></div>)}</div>}
-            <div className="flex shrink-0 justify-start border-t border-border px-2 py-2"><Button size="icon" variant="ghost" className="size-8" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
+            <div className="hidden shrink-0 justify-start border-t border-border px-2 py-2 xl:flex"><Button size="icon" variant="ghost" className="size-8" aria-label="收起插件侧栏" title="收起插件侧栏" onClick={() => setPluginSidebarCollapsed(true)}><ChevronLeft className="size-4" /></Button></div>
           </Card>
         </div>
         </div>
       </div>
       <Card className={sourceFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-none border-0" : selected?.kind === "small" ? "flex h-[calc(100dvh-4rem)] min-h-0 min-w-0 flex-col overflow-hidden rounded-none border-l-0 md:h-dvh" : "min-w-0"}>
-        {sourceFullscreen && <Button type="button" size="icon" variant="outline" className="fixed right-4 top-4 z-[51] size-8 bg-card/90 shadow-sm" aria-label="退出全屏编辑" title="退出全屏编辑 (Esc)" onClick={() => setSourceFullscreen(false)}><Minimize2 className="size-4" /></Button>}
-        <div className={sourceFullscreen ? "hidden" : "shrink-0 sticky top-px z-20 bg-card/95 backdrop-blur-sm"}>
-        <CardHeader className="flex-row items-start justify-between border-b border-border pb-4">
-          <div className="min-w-0">
+        {sourceFullscreen && <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm"><FileCode2 className="size-4 shrink-0 text-muted-foreground" /><span className="truncate font-medium" title={selected?.sourcePath}>{selected?.title || selected?.sourcePath || "插件源码"}</span>{sourceDirty && <span aria-label="有未保存修改" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</div>
+          <div className="flex shrink-0 items-center gap-2"><Button type="button" size="sm" title="Ctrl+S 保存 · 重启后加载" onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button><Button type="button" size="icon" variant="ghost" className="size-8" aria-label="退出全屏编辑" title="退出全屏编辑 (Esc)" onClick={() => setSourceFullscreen(false)}><Minimize2 className="size-4" /></Button></div>
+        </div>}
+        <div className={sourceFullscreen ? "hidden" : "shrink-0 sticky top-0 z-20 bg-card/95 backdrop-blur-sm"}>
+        <CardHeader className="flex-row flex-wrap items-start justify-between gap-4 border-b border-border p-4 sm:p-5">
+          <div className="min-w-0 flex-1 basis-56">
             <div className="flex min-w-0 items-center gap-2">
               <CardTitle className="truncate text-base">{selected?.title || "选择插件"}</CardTitle>{selected?.kind === "small" && sourceDirty && <span aria-label="有未保存修改" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}
               {safePluginLink(selected?.link) && <a href={safePluginLink(selected.link)} target="_blank" rel="noreferrer" aria-label={`${selected.title} 插件仓库`} title="打开插件仓库" className="shrink-0 rounded text-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><Github className="size-4" /></a>}
             </div>
             {selected?.kind === "small" && <CardDescription className="mt-1 break-all text-xs">{selected.sourcePath}</CardDescription>}
-            {!sourceFullscreen && selected?.author && <div className="mt-1 text-[11px] text-muted-foreground">作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</div>}
-            {(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 truncate">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}
+            {!sourceFullscreen && selected?.author && <div className="mt-1 break-words text-xs text-muted-foreground">作者：{Array.isArray(selected.author) ? selected.author.join("、") : selected.author}</div>}
+            {(selected?.description || (!selected && "选择左侧插件查看其配置或源码") || (selected?.kind !== "small" && selected?.sourcePath)) && <CardDescription className="mt-1 break-words text-xs leading-5">{selected?.description || (!selected ? "选择左侧插件查看其配置或源码" : selected?.sourcePath)}</CardDescription>}
           </div>
-          <div className="flex flex-wrap justify-end gap-2">{selected?.kind === "large" && <PluginTools key={selected.id} plugin={selected} api={api} notify={notify} confirm={confirm} onUpdated={refresh} />}{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button type="button" size="icon" variant="ghost" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button>}{selected?.kind === "small" && <Button title="Ctrl+S 保存 · 重启后加载" onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 dark:text-rose-300 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />禁用插件</Button>}</div>
+          <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{selected?.kind === "large" && <PluginTools key={selected.id} plugin={selected} api={api} notify={notify} confirm={confirm} onUpdated={refresh} />}{selected?.hasConfig && <Button onClick={save} disabled={busy}><Check />保存配置</Button>}{selected?.kind === "small" && <Button type="button" size="icon" variant="ghost" aria-label={sourceFullscreen ? "退出全屏编辑" : "全屏编辑"} title={sourceFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} onClick={() => setSourceFullscreen(value => !value)}>{sourceFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button>}{selected?.kind === "small" && <Button title="Ctrl+S 保存 · 重启后加载" onClick={saveSource} disabled={busy || detailLoading || !sourceDirty}>{busy ? <LoaderCircle className="animate-spin" /> : <Check />}保存源码</Button>}{selected?.kind === "large" && !selected.hasConfig && selected.configFiles?.length > 0 && <Button variant="outline" onClick={() => activeConfigFile && openFileManager(activeConfigFile.path)}><FileCode2 />在文件管理中编辑</Button>}{selected && selected.kind === "large" && selected.directory && selected.id.toLowerCase() !== "eliaadminpanel" && <Button variant="outline" className="text-rose-700 dark:text-rose-300 hover:bg-rose-50" onClick={archivePlugin} disabled={busy}><ArrowDownToLine />禁用插件</Button>}</div>
         </CardHeader>
         {hasSchemaGroupTabs && <div role="group" aria-label="插件配置分组" className="scrollbar-thin flex gap-0.5 overflow-x-auto border-b border-border px-3">
           {schemaGroups.map((group, index) => <Button variant="ghost" key={`${group.label}-${index}`} type="button" aria-pressed={index === activeSchemaGroup} onClick={() => setActiveSchemaGroup(index)} className={cn("h-auto justify-start whitespace-normal p-0", `relative shrink-0 px-3.5 py-3 text-xs font-medium transition-colors ${index === activeSchemaGroup ? "text-primary after:absolute after:inset-x-2.5 after:bottom-0 after:h-0.5 after:rounded-full after:bg-primary" : "text-muted-foreground hover:text-foreground"}`)}>{group.label}</Button>)}
         </div>}
         </div>
-        <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-0" : "p-5"}>
+        <CardContent className={sourceFullscreen ? "flex min-h-0 flex-1 flex-col p-0" : selected?.kind === "small" ? "flex min-h-0 flex-1 flex-col p-0" : "p-4 pb-28 sm:p-5 sm:pb-28"}>
         {!selected ? <div className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "正在扫描插件目录…" : "选择左侧插件"}</div>
           : selected.kind === "small" ? <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{detailLoading ? <div className="grid min-h-0 flex-1 place-items-center"><LoaderCircle className="size-6 animate-spin text-muted-foreground" /></div> : <MonacoCodeEditor key={selected.sourcePath} path={selected.sourcePath} value={sourceContent} readOnly={busy} className="relative min-h-0 flex-1 overflow-hidden" onChange={value => { setSourceContent(value); setSourceDirty(true) }} />}</div>
           : selected.panelSettings ? <div className="space-y-3 rounded-xl border bg-muted/30 p-5"><p className="text-sm">EliaAdminPanel 的运行配置和代理已移至面板设置。</p><a href="/settings/" className="inline-flex items-center gap-2 text-sm underline underline-offset-4"><Monitor className="size-4" />打开面板设置</a></div>
@@ -2514,7 +2555,7 @@ function SchemaField({ schema, value, onChange, validateCron, friendOptions, fri
   </div>
   if (compactCard) return <div className="space-y-1">
     <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
-    {component === "InputNumber" ? <Input aria-label={label} className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput aria-label={label} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : colorInput ? <ColorPickerField value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input aria-label={label} className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
+    {component === "InputNumber" ? <Input aria-label={label} className="h-9" type="number" min={props.min} max={props.max} step={props.step || "any"} value={value ?? ""} placeholder={props.placeholder} onChange={event => onChange(event.target.value === "" ? "" : Number(event.target.value))} /> : component === "Select" || component === "RadioGroup" || component === "CheckboxGroup" ? <SchemaOptions component={component} props={props} value={value} label={label} onChange={onChange} compact /> : secretField(schema.field) || props.type === "password" ? <SecretInput className="h-9" aria-label={label} autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} /> : colorInput ? <ColorPickerField compact value={textValue} label={label} placeholder={props.placeholder} onChange={onChange} /> : <Input aria-label={label} className="h-9" type="text" autoComplete={props.autocomplete} value={textValue} placeholder={props.placeholder} onChange={event => onChange(event.target.value)} />}
   </div>
   return <div className="space-y-1.5 rounded-xl border border-border bg-muted/40 px-3.5 py-3 transition-colors hover:border-border hover:bg-accent/30">
     <div><div className="flex items-center gap-1"><Label className="text-xs">{label}{schema.required && <span className="ml-1 text-rose-500">*</span>}</Label>{help && <FieldHelp label={label} message={help} />}</div></div>
@@ -2633,11 +2674,14 @@ function FileManager({ api, notify, confirm, initialPath = "." }: { api: Api; no
     <Input ref={uploadInput} type="file" multiple className="hidden" aria-label="选择上传文件" onChange={event => void uploadFiles(event.target.files)} />
     <PageIntro actions={[{ label: "上传文件", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="上传文件" title="上传到当前目录（每个文件最多 20 MB）" disabled={uploading} onClick={() => uploadInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{!iconOnly && "上传文件"}</Button> }, { label: "保存文件", render: iconOnly => <Button size={iconOnly ? "icon" : "default"} aria-label="保存文件" title="保存文件" onClick={save} disabled={!current || !dirty || saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}{!iconOnly && "保存文件"}</Button> }]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-1.5"><div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs"><Button type="button" variant="ghost" onClick={() => jumpDirectory(".")} className={cn("h-auto justify-start whitespace-normal p-0", `rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-foreground" : "text-muted-foreground hover:bg-muted"}`)}>工作区</Button><form className="flex min-w-0 flex-1 items-center gap-1 sm:max-w-sm" onSubmit={event => { event.preventDefault(); void jumpDirectory(directoryDraft) }}><Input aria-label="目录路径" value={directoryDraft} onChange={event => setDirectoryDraft(event.target.value)} placeholder="输入目录路径，如 plugins/EliaAdminPanel" className="h-8 min-w-0 font-mono text-xs" /><Button type="submit" variant="ghost" size="icon" className="size-8 shrink-0" aria-label="跳转目录" title="跳转目录" disabled={loading}><ArrowRight /></Button></form></div></div>
+    <Card className="file-manager-surface overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-1.5"><div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs"><Button type="button" variant="ghost" onClick={() => jumpDirectory(".")} className={cn("h-auto justify-start whitespace-normal p-0", `rounded-md px-2 py-1 ${directory === "." ? "font-semibold text-foreground" : "text-muted-foreground hover:bg-muted"}`)}>工作区</Button><form className="flex min-w-0 flex-1 items-center gap-1 sm:max-w-sm" onSubmit={event => { event.preventDefault(); void jumpDirectory(directoryDraft) }}><Input aria-label="目录路径" value={directoryDraft} onChange={event => setDirectoryDraft(event.target.value)} placeholder="输入目录路径，如 plugins/EliaAdminPanel" className="h-8 min-w-0 font-mono text-xs" /><Button type="submit" variant="ghost" size="icon" className="size-8 shrink-0" aria-label="跳转目录" title="跳转目录" disabled={loading}><ArrowRight /></Button></form></div></div>
 
-      <div ref={fileGridRef} style={{ "--file-list-width": `${listWidth}px` } as React.CSSProperties} className="file-browser-grid grid min-h-0 flex-1"><div className="min-h-0 border-b border-border md:border-b-0"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground"><span className="flex items-center gap-1.5">文件浏览器{loading && <LoaderCircle role="status" aria-label="正在加载" className="size-3.5 animate-spin text-muted-foreground" />}</span><span>{entries.length} 项</span></div><div className={`max-h-[550px] overflow-y-auto px-2 pb-3 scrollbar-thin`}>{directory !== "." && <Button type="button" variant="ghost" onClick={() => jumpDirectory(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className={cn("h-auto justify-start whitespace-normal p-0", "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-muted-foreground hover:bg-muted")}><ArrowLeft className="size-3.5" />上级目录</Button>}{entries.map(entry => <Button type="button" variant="ghost" key={entry.path} onClick={() => entry.type === "directory" ? jumpDirectory(entry.path) : openFile(entry)} className={cn("h-auto justify-start whitespace-normal p-0", `flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-accent text-foreground" : "text-foreground hover:bg-muted"}`)}><span className={`${entry.type === "directory" ? "text-amber-500" : entry.type === "image" ? "text-sky-500" : "text-muted-foreground"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : entry.type === "image" ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type !== "directory" && <span className="text-[9px] text-muted-foreground">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-neutral-300" />}</Button>)}{!loading && !entries.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
+      <div ref={fileGridRef} style={{ "--file-list-width": `${listWidth}px` } as React.CSSProperties} className="file-browser-grid grid min-h-0 flex-1"><div className="min-h-0 border-b border-border md:border-b-0"><div className="flex h-11 items-center justify-between px-4 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground"><span className="flex items-center gap-1.5">文件浏览器{loading && <LoaderCircle role="status" aria-label="正在加载" className="size-3.5 animate-spin text-muted-foreground" />}</span><span>{entries.length} 项</span></div><div className="file-browser-list min-h-0 overflow-y-auto overscroll-contain px-2 pb-3 scrollbar-thin">{directory !== "." && <Button type="button" variant="ghost" onClick={() => jumpDirectory(crumbs.length > 1 ? crumbs.slice(0, -1).join("/") : ".")} className={cn("h-auto justify-start whitespace-normal p-0", "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-muted-foreground hover:bg-muted")}><ArrowLeft className="size-3.5" />上级目录</Button>}{entries.map(entry => <Button type="button" variant="ghost" key={entry.path} onClick={() => entry.type === "directory" ? jumpDirectory(entry.path) : openFile(entry)} className={cn("h-auto justify-start whitespace-normal p-0", `flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${current?.path === entry.path ? "bg-accent text-foreground" : "text-foreground hover:bg-muted"}`)}><span className={`${entry.type === "directory" ? "text-amber-500" : entry.type === "image" ? "text-sky-500" : "text-muted-foreground"}`}>{entry.type === "directory" ? <Folder className="size-4" /> : entry.type === "image" ? <ImageIcon className="size-4" /> : <FileText className="size-4" />}</span><span className="min-w-0 flex-1 truncate text-xs">{entry.name}</span>{entry.type !== "directory" && <span className="text-[9px] text-muted-foreground">{formatBytes(entry.size)}</span>}{entry.type === "directory" && <ChevronRight className="size-3 text-neutral-300" />}</Button>)}{!loading && !entries.length && <div className="p-5 text-center text-xs text-muted-foreground">当前目录没有可显示的内容</div>}</div></div>
         <div role="separator" tabIndex={0} aria-label="调整文件列表宽度" aria-orientation="vertical" aria-valuemin={220} aria-valuemax={650} aria-valuenow={Math.round(listWidth)} title="拖动调整宽度，也可使用左右方向键" onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId) }} onPointerMove={event => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; const bounds = fileGridRef.current?.getBoundingClientRect(); if (bounds) setListWidth(Math.max(220, Math.min(650, bounds.width - 320, event.clientX - bounds.left))) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }} onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setListWidth(width => Math.max(220, Math.min(650, width + (event.key === "ArrowLeft" ? -20 : 20)))) } if (event.key === "Home") { event.preventDefault(); setListWidth(220) } if (event.key === "End") { event.preventDefault(); setListWidth(650) } }} className="group relative hidden cursor-col-resize touch-none items-center justify-center outline-none focus-visible:bg-accent/70 md:flex"><span className="pointer-events-none absolute inset-y-0 w-px bg-border group-hover:bg-primary group-focus-visible:bg-primary" /><span className="pointer-events-none z-10 h-10 w-1 rounded-full bg-neutral-300 group-hover:bg-primary group-focus-visible:bg-primary" /></div>
-        <div className={editorFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background" : "flex min-h-0 min-w-0 flex-col"}>{editorFullscreen && <Button type="button" size="icon" variant="outline" className="fixed right-4 top-4 z-[51] size-8 bg-card/90 shadow-sm" aria-label="退出全屏编辑" title="退出全屏编辑 (Esc)" onClick={() => setEditorFullscreen(false)}><Minimize2 className="size-4" /></Button>}<div className={editorFullscreen ? "hidden" : "flex h-11 shrink-0 items-center justify-between border-b border-border px-4"}><div className="flex min-w-0 items-center gap-2 text-xs">{current?.type === "image" ? <ImageIcon className="size-4 text-sky-500" /> : <FileCode2 className="size-4 text-muted-foreground" />}<span className="truncate font-medium">{current?.path || "选择一个文本文件或图片"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{current.type === "image" ? `${formatBytes(current.size)} · 图片预览` : `${formatBytes(new Blob([content]).size)} · UTF-8`}</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} disabled={!current} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current?.type === "image" ? <div className={`grid flex-1 place-items-center overflow-auto bg-muted p-5 ${editorFullscreen ? "min-h-0" : "min-h-[420px]"}`}><Button variant="ghost" type="button" aria-label={`放大查看 ${current.path}`} title="点击查看大图" className={cn("h-auto justify-center whitespace-normal p-0", "grid max-h-full max-w-full cursor-zoom-in place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")} onClick={() => setImageLightbox(true)}><img src={selectedImageUrl} alt={current.path} className={`max-w-full object-contain ${editorFullscreen ? "max-h-[calc(100dvh-10rem)]" : "max-h-[min(70vh,720px)]"}`} /></Button></div> : current ? <div className="flex min-h-0 flex-1 flex-col"><MonacoCodeEditor key={current.path} path={current.path} value={content} className="relative min-h-0 flex-1 overflow-hidden" onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-accent text-foreground"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
+        <div className={editorFullscreen ? "fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background" : "flex min-h-0 min-w-0 flex-col"}>{editorFullscreen && <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-card px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2"><FileCode2 className="size-4 shrink-0 text-muted-foreground" /><span className="truncate text-sm font-medium" title={current?.path}>{current?.path}</span>{dirty && <span aria-label="有未保存修改" className="size-1.5 shrink-0 rounded-full bg-amber-500" />}</div>
+          <div className="flex shrink-0 items-center gap-2">{current?.type !== "image" && <Button size="sm" disabled={!dirty || saving} onClick={save}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}保存文件</Button>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label="退出全屏编辑" title="退出全屏编辑 (Esc)" onClick={() => setEditorFullscreen(false)}><Minimize2 className="size-4" /></Button></div>
+        </div>}<div className={editorFullscreen ? "hidden" : "flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border px-4"}><div className="flex min-w-0 items-center gap-2 text-xs">{current?.type === "image" ? <ImageIcon className="size-4 text-sky-500" /> : <FileCode2 className="size-4 text-muted-foreground" />}<span className="truncate font-medium">{current?.path || "选择一个文本文件或图片"}</span>{dirty && <span className="size-1.5 rounded-full bg-amber-500" />}</div><div className="flex shrink-0 items-center gap-2">{current && <span className="hidden text-[10px] text-muted-foreground sm:block">{current.type === "image" ? `${formatBytes(current.size)} · 图片预览` : `${formatBytes(new Blob([content]).size)} · UTF-8`}</span>}<Button type="button" size="icon" variant="ghost" className="size-8" aria-label={editorFullscreen ? "退出全屏编辑" : "全屏编辑"} title={editorFullscreen ? "退出全屏编辑 (Esc)" : "全屏编辑"} disabled={!current} onClick={() => setEditorFullscreen(value => !value)}>{editorFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}</Button></div></div>{current?.type === "image" ? <div className={`grid flex-1 place-items-center overflow-auto bg-muted p-5 ${editorFullscreen ? "min-h-0" : "min-h-[420px]"}`}><Button variant="ghost" type="button" aria-label={`放大查看 ${current.path}`} title="点击查看大图" className={cn("h-auto justify-center whitespace-normal p-0", "grid max-h-full max-w-full cursor-zoom-in place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")} onClick={() => setImageLightbox(true)}><img src={selectedImageUrl} alt={current.path} className={`max-w-full object-contain ${editorFullscreen ? "max-h-[calc(100dvh-10rem)]" : "max-h-[min(70vh,720px)]"}`} /></Button></div> : current ? <div className="flex min-h-0 flex-1 flex-col"><MonacoCodeEditor key={current.path} path={current.path} value={content} className="relative min-h-0 flex-1 overflow-hidden" onChange={value => { setContent(value); setDirty(true) }} /></div> : <div className="grid flex-1 place-items-center p-8 text-center"><div><div className="mx-auto grid size-12 place-items-center rounded-2xl bg-accent text-foreground"><FileCode2 className="size-5" /></div><div className="mt-3 text-sm font-medium">选择文件以开始编辑</div><p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">支持 YAML、JSON、JavaScript、TypeScript、Markdown、CSS、HTML 等文本文件；单文件上限 1.5 MB。</p></div></div>}</div>
       </div></Card>
     <Dialog.Root open={imageLightbox && current?.type === "image"} onOpenChange={setImageLightbox}>
       <Dialog.Portal>
@@ -3005,6 +3049,19 @@ function LogViewer({ api }: { api: Api }) {
       { label: "刷新日志", render: iconOnly => <Button variant="outline" size={iconOnly ? "icon" : "default"} aria-label="刷新日志" title="刷新日志" onClick={() => refresh(selected, true)} disabled={loading}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{!iconOnly && "刷新日志"}</Button> },
     ]} />
     {error && <div className="mb-4"><ErrorState message={error} /></div>}
-    <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3"><div className="flex flex-wrap items-center gap-2"><TerminalSquare className="size-4 text-muted-foreground" /><Label htmlFor="log-file-select" className="text-xs font-medium">日期与类型</Label><Select value={selected} onValueChange={file => void refresh(file, true)} disabled={!files.length}><SelectTrigger id="log-file-select" aria-label="日期与类型" className="h-9 w-auto min-w-56 bg-card text-xs"><SelectValue placeholder="没有可用日志" /></SelectTrigger><SelectContent>{files.map(file => <SelectItem key={file} value={file}>{logFileLabel(file)}</SelectItem>)}</SelectContent></Select></div><div className="relative w-full sm:w-64"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input className="h-9 pl-9 text-xs" placeholder="搜索日志内容…" value={search} onChange={event => setSearch(event.target.value)} /></div></div><div className="flex items-center justify-between px-4 py-2 text-[10px] text-muted-foreground"><span>{selected ? `${logFileLabel(selected)} · ${selected}` : "没有可用日志"}</span><span className="flex items-center gap-3"><span>{visibleEntries.length} 行 · 保留末尾最多 600 行</span><span className="inline-flex items-center gap-1.5"><span className={`size-1.5 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : "bg-amber-400"}`} />{liveStatus === "connected" ? "实时连接" : liveStatus === "connecting" ? "正在连接" : "正在重连"}</span></span></div><pre ref={logViewRef} onScroll={event => { const element = event.currentTarget; setFollowLatest(element.scrollHeight - element.scrollTop - element.clientHeight <= 48) }} className={`scrollbar-thin min-h-[560px] max-h-[calc(100vh-300px)] overflow-auto bg-neutral-950 p-4 font-mono text-[11px] leading-[1.75] text-neutral-200 ${wrapLines ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>{loading && !entries.length ? "正在读取…" : visibleEntries.length ? visibleEntries.map((entry, index) => <span key={`${selected}-${entry.id}-${index}`} className="block min-h-[1.75em]">{colorizeLogLine(entry.text).map((segment, segmentIndex) => <span key={segmentIndex} style={segment.color ? { color: segment.color } : undefined}>{segment.text}</span>)}</span>) : "暂无日志内容"}</pre></Card>
+    <Card className="overflow-hidden">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 flex-1 basis-72 flex-wrap items-center gap-2">
+          <TerminalSquare className="size-4 shrink-0 text-muted-foreground" /><Label htmlFor="log-file-select" className="shrink-0 text-xs font-medium">日期与类型</Label>
+          <Select value={selected} onValueChange={file => void refresh(file, true)} disabled={!files.length}><SelectTrigger id="log-file-select" aria-label="日期与类型" className="h-9 min-w-0 flex-1 bg-card text-xs sm:max-w-72"><SelectValue placeholder="没有可用日志" /></SelectTrigger><SelectContent>{files.map(file => <SelectItem key={file} value={file}>{logFileLabel(file)}</SelectItem>)}</SelectContent></Select>
+        </div>
+        <div className="relative w-full sm:w-64"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="搜索日志内容" className="h-9 pl-9 text-xs" placeholder="搜索日志内容…" value={search} onChange={event => setSearch(event.target.value)} /></div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 px-4 py-2 text-[11px] text-muted-foreground">
+        <span className="min-w-0 break-all">{selected ? `${logFileLabel(selected)} · ${selected}` : "没有可用日志"}</span>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="tabular-nums">{visibleEntries.length} 行 · 最多保留 600 行</span><span className="inline-flex shrink-0 items-center gap-1.5"><span className={`size-1.5 rounded-full ${liveStatus === "connected" ? "bg-emerald-500" : "bg-amber-400"}`} />{liveStatus === "connected" ? "实时连接" : liveStatus === "connecting" ? "正在连接" : "正在重连"}</span></span>
+      </div>
+      <pre ref={logViewRef} onScroll={event => { const element = event.currentTarget; setFollowLatest(element.scrollHeight - element.scrollTop - element.clientHeight <= 48) }} className={`scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain bg-neutral-950 p-4 pb-28 font-mono text-xs leading-6 text-neutral-200 ${wrapLines ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}>{loading && !entries.length ? "正在读取…" : visibleEntries.length ? visibleEntries.map((entry, index) => <span key={`${selected}-${entry.id}-${index}`} className="block min-h-6">{colorizeLogLine(entry.text).map((segment, segmentIndex) => <span key={segmentIndex} style={segment.color ? { color: segment.color } : undefined}>{segment.text}</span>)}</span>) : "暂无日志内容"}</pre>
+    </Card>
   </>
 }

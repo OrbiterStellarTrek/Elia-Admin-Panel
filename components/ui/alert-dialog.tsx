@@ -30,7 +30,7 @@ export const AlertDialogContent = React.forwardRef<
     <AlertDialogOverlay />
     <AlertDialogPrimitive.Content
       ref={ref}
-      className={cn("admin-dialog-content fixed left-1/2 top-1/2 z-[81] grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border border-border bg-background p-6 shadow-2xl focus:outline-none", className)}
+      className={cn("admin-dialog-content fixed left-1/2 top-1/2 z-[81] grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-border bg-background p-5 shadow-2xl focus:outline-none sm:p-6", className)}
       {...props}
     />
   </AlertDialogPortal>
@@ -38,7 +38,7 @@ export const AlertDialogContent = React.forwardRef<
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName
 
 export function AlertDialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-2 text-left", className)} {...props} />
+  return <div className={cn("flex min-w-0 flex-col gap-2 text-left [overflow-wrap:anywhere]", className)} {...props} />
 }
 
 export function AlertDialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

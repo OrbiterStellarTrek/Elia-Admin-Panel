@@ -121,7 +121,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
-button, input, textarea { font: inherit; }
+/* Tailwind's preflight supplies font inheritance in its base layer. An unlayered
+   font shorthand here would override every control's size, weight and leading. */
 ::selection { background: oklch(0.205 0 0 / .14); }
 button, [role="button"], a, select { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -130,8 +131,8 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 :root {
   --motion-fast: 140ms;
   --motion-exit: 160ms;
-  --motion-normal: 220ms;
-  --motion-layout: 300ms;
+  --motion-normal: 180ms;
+  --motion-layout: 240ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-layout: cubic-bezier(.2, .8, .2, 1);
 }
@@ -334,8 +335,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 }
 .admin-nav > button { height: 40px; }
 .admin-nav > button[aria-current="page"] { background: transparent; box-shadow: none; }
-.admin-nav > button > svg { transition: color var(--motion-fast), scale var(--motion-normal) var(--ease-out); }
-.admin-nav > button[aria-current="page"] > svg { scale: 1.06; }
+.admin-nav > button > svg { transition: color var(--motion-fast); }
 .admin-nav > button > span[aria-hidden] { animation: admin-fade-in var(--motion-normal) ease-out; }
 
 .admin-button {
@@ -353,10 +353,6 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .admin-collapse { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--motion-layout) var(--ease-layout), opacity var(--motion-normal), visibility 0s var(--motion-layout); }
 .admin-collapse[data-open="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
 .admin-collapse-inner { min-height: 0; overflow: hidden; }
-
-@media (hover: hover) and (pointer: fine) {
-  .admin-nav > button:hover > svg { scale: 1.1; }
-}
 
 @media (min-width: 1280px) {
   .debug-workbench-grid {
@@ -397,6 +393,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 }
 
 .admin-panel-sidebar { width: 264px; transition: transform var(--motion-layout) var(--ease-layout), translate var(--motion-layout) var(--ease-layout); }
+.admin-panel-sidebar { overscroll-behavior: contain; }
 .admin-sidebar-expanded { width: 264px; }
  .admin-sidebar-compact { display: none; }
 
@@ -487,7 +484,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   max-height: none;
 }
 
-.file-manager-fullscreen > .rounded-2xl {
+.file-manager-fullscreen > .file-manager-surface {
   display: flex;
   height: 100%;
   min-height: 0;
@@ -497,31 +494,28 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   box-shadow: none;
 }
 
-.file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 4rem; }
-.file-manager-fullscreen > .rounded-2xl > .grid {
+.file-manager-fullscreen > .file-manager-surface > div:first-child { padding-left: 4rem; min-height: 64px; flex-shrink: 0; }
+.file-manager-fullscreen > .file-manager-surface > .grid {
   min-height: 0;
   flex: 1 1 0%;
   grid-template-rows: minmax(150px, 32vh) minmax(0, 1fr);
 }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:first-child {
+.file-manager-fullscreen > .file-manager-surface > .grid > div:first-child {
   display: flex;
   flex-direction: column;
 }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:first-child > div[class~="max-h-[550px]"] {
+.file-manager-fullscreen .file-browser-list {
   height: auto;
   max-height: none;
   min-height: 0;
   flex: 1 1 0%;
 }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(3) { min-height: 0; }
-.file-manager-fullscreen > .rounded-2xl > .grid > div:nth-child(3) > div.flex-1 { min-height: 0; }
-
-@media (min-width: 640px) {
-  .file-manager-fullscreen > .rounded-2xl > div:first-child { padding-left: 1rem; }
-}
+.file-manager-fullscreen .file-browser-grid > div:nth-child(3) { min-height: 0; }
+.file-manager-fullscreen .file-browser-grid > div:nth-child(3) > div.flex-1 { min-height: 0; }
 
 @media (min-width: 768px) {
-  .file-manager-fullscreen > .rounded-2xl > .grid {
+  .file-manager-fullscreen > .file-manager-surface > div:first-child { padding-left: 1rem; min-height: 48px; }
+  .file-manager-fullscreen > .file-manager-surface > .grid {
     grid-template-rows: minmax(0, 1fr);
     grid-template-columns: minmax(220px, min(var(--file-list-width, 320px), calc(100% - 328px))) 8px minmax(0, 1fr);
   }
@@ -568,7 +562,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .admin-page-actions > button[data-variant="ghost"] { border-color: transparent; background: transparent; box-shadow: none; }
 .admin-page-actions > button[data-variant="outline"]:hover,
 .admin-page-actions > button[data-variant="ghost"]:hover { background: var(--accent); color: var(--accent-foreground); }
-.admin-metric { transition: border-color var(--motion-normal), box-shadow var(--motion-normal); }
+.admin-metric { min-width: 0; transition: border-color var(--motion-normal), box-shadow var(--motion-normal); }
 .admin-metric-icon { color: var(--primary); background: color-mix(in oklch, var(--primary) 8%, var(--card)); }
 .admin-section-heading::after { content: ""; height: 1px; flex: 1; margin-left: 6px; background: var(--border); }
 .admin-quick-entry > span:first-child { transition: background-color var(--motion-fast), color var(--motion-fast); }
@@ -593,6 +587,20 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .admin-dialog-overlay, .admin-mobile-overlay { backdrop-filter: blur(3px); }
 .admin-dialog-content, .admin-popover-content, .admin-select-content { box-shadow: var(--shadow-floating); }
 .admin-field-tooltip { box-shadow: var(--shadow-floating); }
+.admin-tooltip-content { transform-origin: var(--radix-tooltip-content-transform-origin); }
+.admin-tooltip-content[data-state="delayed-open"],
+.admin-tooltip-content[data-state="instant-open"] { animation: admin-fade-in var(--motion-fast) ease-out; }
+.admin-tooltip-content[data-state="closed"] { animation: admin-fade-out var(--motion-fast) ease-in; }
+
+/* Row labels share the control's first baseline without moving multi-line help
+   into the middle of tall editors. Narrow panels stack instead of squeezing. */
+.admin-config-field { container-type: inline-size; }
+.admin-config-field-row { display: grid; min-width: 0; gap: 10px 20px; }
+.admin-config-field-label { min-width: 0; overflow-wrap: anywhere; }
+@container (min-width: 640px) {
+  .admin-config-field-row { grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr); }
+  .admin-config-field-label { padding-top: 10px; }
+}
 
 /* Cover utility animations and every nested/portal control as well as custom motion. */
 @media (prefers-reduced-motion: reduce) {

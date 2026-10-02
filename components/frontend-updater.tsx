@@ -37,16 +37,16 @@ export function FrontendUpdater({ api, notify }: {
   const development = status?.mode === "development"
   return <section aria-label="面板前端" className="space-y-4 border-t border-border p-4 sm:p-5"><header>
     <h2 className="text-base font-semibold tracking-tight">面板前端</h2>
-    <p className="mt-1 text-sm text-muted-foreground">{development ? "当前使用开发源码，关闭开发模式并重启 Bot 后可更新发布版本。" : "检查最新发布版本，有变化时自动下载并更新。"}</p>
+    <p className="mt-1 text-sm leading-6 text-muted-foreground">{development ? "当前使用开发源码，关闭开发模式并重启 Bot 后可更新发布版本。" : "检查最新发布版本，有变化时自动下载并更新。"}</p>
   </header><div className="space-y-3">
-    <div className="text-xs text-muted-foreground">当前版本：<span className="break-all font-mono text-foreground">{development ? "开发模式" : status?.installed?.release || (status ? "本地构建" : error ? "读取失败" : "读取中…")}</span></div>
+    <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-1 text-xs leading-5 text-muted-foreground"><span className="shrink-0">当前版本：</span><span className="min-w-0 break-all font-mono text-foreground">{development ? "开发模式" : status?.installed?.release || (status ? "本地构建" : error ? "读取失败" : "读取中…")}</span></div>
     <div className="flex flex-wrap items-center gap-2">
       <Button type="button" size="sm" variant="outline" disabled={busy || development || !status} onClick={update}>
         {busy ? <LoaderCircle className="animate-spin" /> : <ArrowDownToLine />}{busy ? "正在检查并更新…" : "检查并更新前端"}
       </Button>
-      <span className="text-xs text-muted-foreground">使用面板设置中已保存的下载代理。</span>
       {updated && <Button type="button" size="sm" onClick={() => window.location.reload()}><RefreshCw />刷新使用新版本</Button>}
     </div>
-    {error && <p role="alert" className="break-words text-xs leading-5 text-rose-600 dark:text-rose-300">{error}</p>}
+    <p className="text-xs leading-5 text-muted-foreground">使用面板设置中已保存的下载代理。</p>
+    {error && <p role="alert" className="break-words text-xs leading-5 text-destructive">{error}</p>}
   </div></section>
 }

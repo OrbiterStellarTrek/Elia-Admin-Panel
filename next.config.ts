@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: process.cwd(),
   trailingSlash: true,
   agentRules: false,
+  // The floating development badge covers the panel's top-right editor controls.
+  devIndicators: false,
   images: { unoptimized: true },
   webpack(config, { isServer }) {
     config.resolve.alias = {
